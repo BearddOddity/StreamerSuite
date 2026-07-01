@@ -1,14 +1,15 @@
 import type { ChatMessage as ChatMessageType } from "@/types";
+import { PlatformIcon } from "./common/PlatformIcon";
 
 interface Props {
   message: ChatMessageType;
   isMultiChat?: boolean;
 }
 
-const platformConfig: Record<string, { icon: string; badge: string }> = {
-  twitch: { icon: "🟣", badge: "badge-purple" },
-  kick: { icon: "🟢", badge: "badge-green" },
-  joystick: { icon: "🟠", badge: "badge-amber" },
+const platformConfig: Record<string, { badge: string }> = {
+  twitch: { badge: "badge-purple" },
+  kick: { badge: "badge-green" },
+  joystick: { badge: "badge-amber" },
 };
 
 export default function ChatMessage({ message, isMultiChat }: Props) {
@@ -17,7 +18,11 @@ export default function ChatMessage({ message, isMultiChat }: Props) {
   if (message.user.id === "system") {
     return (
       <div className="px-4 py-1.5 text-[11px] text-white/25 italic flex items-center gap-2">
-        {cfg && <span className="text-[10px] opacity-40">{cfg.icon}</span>}
+        {cfg && (
+          <span className="opacity-40 w-4 h-4 inline-flex">
+            <PlatformIcon platform={message.platform} size="xs" variant="light" />
+          </span>
+        )}
         <span>— {message.content}</span>
       </div>
     );
@@ -37,7 +42,9 @@ export default function ChatMessage({ message, isMultiChat }: Props) {
 
       <div className="min-w-0 flex-1">
         {!isMultiChat && (
-          <span className="mr-1.5 text-[10px] opacity-30">{cfg?.icon ?? "⚪"}</span>
+          <span className="mr-1.5 opacity-30 inline-flex w-4 h-4 align-text-bottom">
+            <PlatformIcon platform={message.platform} size="xs" variant="light" />
+          </span>
         )}
 
         {message.user.badges.length > 0 && (

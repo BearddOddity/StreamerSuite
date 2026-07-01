@@ -16,6 +16,9 @@ export interface ApiKeys {
   kickChannelId: string;
   kickToken: string;
   kickRefreshToken: string;
+  joystickApplicationId: string;
+  joystickClientId: string;
+  joystickClientSecret: string;
   joystickApiKey: string;
   // Metadata / game APIs
   steamgridApiKey: string;
@@ -177,6 +180,9 @@ export const defaultSharedSettings: SharedSettings = {
     kickChannelId: "",
     kickToken: "",
     kickRefreshToken: "",
+    joystickApplicationId: "",
+    joystickClientId: "",
+    joystickClientSecret: "",
     joystickApiKey: "",
     steamgridApiKey: "",
     rawgApiKey: "",

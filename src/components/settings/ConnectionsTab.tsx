@@ -1,14 +1,15 @@
 import type { ChatChannel, Platform, ConnectionMode } from "@/types";
+import { PlatformIcon, ConnectionIcon } from "../common/PlatformIcon";
 
 interface Props {
   channels: ChatChannel[];
   onSetConnectionMode: (platform: Platform, channelId: string, mode: ConnectionMode) => void;
 }
 
-const platformMeta: Record<string, { label: string; icon: string; color: string }> = {
-  twitch: { label: "Twitch", icon: "🟣", color: "text-[#9146ff]" },
-  kick: { label: "Kick", icon: "🟢", color: "text-[#53fc18]" },
-  joystick: { label: "JoystickTV", icon: "🟠", color: "text-[#ff6b35]" },
+const platformMeta: Record<string, { label: string; iconVariant: "color" | "light" | "dark"; color: string }> = {
+  twitch: { label: "Twitch", iconVariant: "color", color: "text-[#9146ff]" },
+  kick: { label: "Kick", iconVariant: "color", color: "text-[#53fc18]" },
+  joystick: { label: "JoystickTV", iconVariant: "dark", color: "text-[#76e1f0]" },
 };
 
 const modeInfo: Record<ConnectionMode, { label: string; desc: string }> = {
@@ -32,7 +33,7 @@ export default function ConnectionsTab({ channels, onSetConnectionMode }: Props)
           <div className="space-y-3">
             {Object.entries(platformMeta).map(([id, meta]) => (
               <div key={id} className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <span className="text-lg">{meta.icon}</span>
+                <PlatformIcon platform={id as "twitch" | "kick" | "joystick"} size="md" variant={meta.iconVariant} />
                 <div className="flex-1">
                   <div className={`text-[12px] font-medium ${meta.color}`}>{meta.label}</div>
                   <div className="text-[10px] text-white/30">
@@ -60,22 +61,16 @@ export default function ConnectionsTab({ channels, onSetConnectionMode }: Props)
   return (
     <div className="space-y-2">
       {channels.map((ch) => {
-        const meta = platformMeta[ch.platform] ?? { label: ch.platform, icon: "⚪", color: "text-white/30" };
+        const meta = platformMeta[ch.platform] ?? { label: ch.platform, iconVariant: "light" as const, color: "text-white/30" };
         return (
           <div key={`${ch.platform}:${ch.channelId}`} className="surface-card rounded-2xl p-4">
             <div className="flex items-center gap-3 mb-3">
-              <span className="text-sm">{meta.icon}</span>
+              <PlatformIcon platform={ch.platform} size="md" variant={meta.iconVariant} />
               <div className="flex-1 min-w-0">
                 <div className="text-[13px] font-medium text-white/80">{ch.channelName}</div>
                 <div className="text-[10px] text-white/25">{meta.label}</div>
               </div>
-              <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${
-                ch.connectionMode === "api"
-                  ? "bg-[var(--accent-system)]/10 text-[var(--accent-system)]/70"
-                  : "bg-white/[0.04] text-white/25"
-              }`}>
-                {ch.connectionMode === "api" ? "API" : "WS"}
-              </span>
+              <ConnectionIcon mode={ch.connectionMode} size="sm" />
             </div>
 
             <p className="text-[10px] text-white/25 mb-2">{modeInfo[ch.connectionMode].desc}</p>
@@ -109,7 +104,7 @@ export default function ConnectionsTab({ channels, onSetConnectionMode }: Props)
               </p>
             )}
             {ch.platform === "joystick" && (
-              <p className="text-[10px] text-[#ff6b35]/40 italic mt-2">
+              <p className="text-[10px] text-[#76e1f0]/40 italic mt-2">
                 ℹ️ JoystickTV has no public API — falls back to WebSocket automatically.
               </p>
             )}

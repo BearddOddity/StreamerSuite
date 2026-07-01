@@ -38,7 +38,7 @@ export function CollapsibleSection({
   defaultOpen = false,
 }: {
   title: string;
-  icon?: string;
+  icon?: ReactNode;
   badge?: ReactNode;
   children: ReactNode;
   defaultOpen?: boolean;

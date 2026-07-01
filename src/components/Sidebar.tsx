@@ -1,4 +1,6 @@
 import type { ChatChannel, Platform } from "@/types";
+import { PlatformIcon } from "./common/PlatformIcon";
+import { ConnectionIcon } from "./common/PlatformIcon";
 
 interface Props {
   channels: ChatChannel[];
@@ -12,10 +14,10 @@ interface Props {
   onToggleSidebar: () => void;
 }
 
-const platformMeta: Record<string, { label: string; badge: string }> = {
-  twitch: { label: "Twitch", badge: "badge-purple" },
-  kick: { label: "Kick", badge: "badge-green" },
-  joystick: { label: "JoystickTV", badge: "badge-amber" },
+const platformMeta: Record<string, { label: string; badge: string; iconVariant: "color" | "light" | "dark" }> = {
+  twitch: { label: "Twitch", badge: "badge-purple", iconVariant: "color" },
+  kick: { label: "Kick", badge: "badge-green", iconVariant: "color" },
+  joystick: { label: "JoystickTV", badge: "badge-amber", iconVariant: "dark" },
 };
 
 export default function Sidebar({
@@ -92,7 +94,7 @@ export default function Sidebar({
             {channels.map((ch) => {
               const key = `${ch.platform}:${ch.channelId}`;
               const isActive = isMultiChat || activeChannel === key;
-              const meta = platformMeta[ch.platform] ?? { label: ch.platform, badge: "badge-ghost" };
+              const meta = platformMeta[ch.platform] ?? { label: ch.platform, badge: "badge-ghost", iconVariant: "light" as const };
               return (
                 <div
                   key={key}
@@ -106,16 +108,15 @@ export default function Sidebar({
                   <span
                     className={`status-dot ${ch.isConnected ? "on" : "off"}`}
                   />
+                  <PlatformIcon platform={ch.platform} size="xs" variant={meta.iconVariant} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-[13px] font-medium text-white/80 truncate leading-tight">
                         {ch.channelName}
                       </span>
-                      <span className="badge badge-ghost text-[8px]">
-                        {ch.connectionMode === "api" ? "API" : "WS"}
-                      </span>
+                      <ConnectionIcon mode={ch.connectionMode} size="xs" />
                     </div>
-                    <span className={`inline-block badge ${meta.text} mt-1`}>
+                    <span className={`inline-block badge ${meta.badge} mt-1`}>
                       {meta.label}
                     </span>
                   </div>

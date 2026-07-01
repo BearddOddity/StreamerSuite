@@ -1,5 +1,11 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+﻿import { useState, useCallback, useRef, useEffect } from "react";
 import type { ChatMessage, ChatChannel, Platform, ChatUser, ConnectionMode } from "@/types";
+import type { KickChatMessage, KickChannel } from "../../../Beards Researcher/shared/kick-mcp/types.js";
+
+// Kick's v2 API returns chatroom but it's not in the shared type yet
+type KickChannelWithChatroom = KickChannel & {
+  chatroom?: { id: number; [key: string]: unknown };
+};
 
 const MAX_MESSAGES = 500;
 
@@ -232,7 +238,7 @@ async function connectKickApi(
       `https://kick.com/api/v2/channels/${encodeURIComponent(channelId.toLowerCase())}`
     );
     if (!chanRes.ok) return false;
-    const chanData = await chanRes.json();
+    const chanData = (await chanRes.json()) as KickChannelWithChatroom;
     const chatroomId = chanData?.chatroom?.id;
     if (!chatroomId) return false;
 
@@ -250,21 +256,23 @@ async function connectKickApi(
             { signal: abort.signal, headers: { Accept: "application/json" } }
           );
           if (res.ok) {
-            const data = await res.json();
-            const msgs = data?.data?.messages ?? data?.messages ?? [];
+            const data = (await res.json()) as { messages?: KickChatMessage[] };
+            const msgs = data?.messages ?? [];
             if (msgs.length > 0 && !lastMessageId) {
               lastMessageId = msgs[0]?.id ?? "";
             }
             for (const msg of msgs) {
               if (msg.id === lastMessageId) break;
+              const sender = msg.sender;
               const user: ChatUser = {
-                id: String(msg.sender?.id ?? "unknown"),
-                username: msg.sender?.username ?? "unknown",
-                displayName: msg.sender?.username ?? "unknown",
-                color: msg.sender?.identity?.color ?? randomColor(),
-                badges: (msg.sender?.identity?.badges ?? []).map((b: { text: string; type: string }) => ({
+                id: String(sender?.id ?? "unknown"),
+                username: sender?.username ?? "unknown",
+                displayName: sender?.username ?? "unknown",
+                color: sender?.color ?? randomColor(),
+                badges: (sender?.badges ?? []).map((b) => ({
                   text: b.text,
                   type: b.type,
+                  count: b.count,
                 })),
               };
               addMessage({
@@ -414,7 +422,8 @@ function connectKickWs(
     fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(channelId.toLowerCase())}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
-        const chatroomId = data?.chatroom?.id;
+        const chan = data as KickChannelWithChatroom;
+        const chatroomId = chan?.chatroom?.id;
         if (chatroomId && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             event: "pusher:subscribe",
@@ -438,23 +447,25 @@ function connectKickWs(
   ws.onmessage = (event) => {
     try {
       const frame = JSON.parse(event.data);
-      if (frame.event === "App\\Events\\ChatMessageEvent") {
-        const data = JSON.parse(frame.data);
+      if (frame.event === "App\Events\ChatMessageEvent") {
+        const msg = JSON.parse(frame.data) as KickChatMessage;
+        const sender = msg.sender;
         const user: ChatUser = {
-          id: String(data.sender?.id ?? "unknown"),
-          username: data.sender?.username ?? "unknown",
-          displayName: data.sender?.username ?? "unknown",
-          color: data.sender?.identity?.color ?? randomColor(),
-          badges: (data.sender?.identity?.badges ?? []).map((b: { text: string; type: string }) => ({
+          id: String(sender?.id ?? "unknown"),
+          username: sender?.username ?? "unknown",
+          displayName: sender?.username ?? "unknown",
+          color: sender?.color ?? randomColor(),
+          badges: (sender?.badges ?? []).map((b) => ({
             text: b.text,
             type: b.type,
+            count: b.count,
           })),
         };
         addMessage({
           id: generateId(),
           platform: "kick",
           user,
-          content: data.content ?? "",
+          content: msg.content ?? "",
           timestamp: Date.now(),
           isDeleted: false,
         });
@@ -462,19 +473,6 @@ function connectKickWs(
     } catch {
       // skip
     }
-  };
-
-  ws.onerror = () => {
-    addMessage(createSystemMessage("kick", channelId, "Connection error"));
-    setChannelConnected(wsKey, false);
-  };
-
-  ws.onclose = () => {
-    if (connected) {
-      addMessage(createSystemMessage("kick", channelId, "Disconnected"));
-      setChannelConnected(wsKey, false);
-    }
-    connRefs.current?.delete(wsKey);
   };
 
   connRefs.current?.set(wsKey, ws);

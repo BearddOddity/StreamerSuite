@@ -7,6 +7,7 @@ import {
   SettingsInput,
   GlassSelect,
 } from "./SettingsComponents";
+import { PlatformIcon } from "../common/PlatformIcon";
 
 const routingModeOptions = [
   { value: "streamer_bot", label: "Streamer.bot" },
@@ -18,7 +19,7 @@ const routingModeOptions = [
 type Key =
   | "twitchClientId" | "twitchClientSecret" | "twitchAccessToken" | "twitchRefreshToken" | "twitchBroadcasterId"
   | "kickClientId" | "kickClientSecret" | "kickChannelId" | "kickToken" | "kickRefreshToken"
-  | "joystickApiKey"
+  | "joystickApplicationId" | "joystickClientId" | "joystickClientSecret" | "joystickApiKey"
   | "steamgridApiKey" | "rawgApiKey"
   | "igdbClientId" | "igdbClientSecret" | "igdbAccessToken";
 
@@ -32,7 +33,7 @@ interface KeyField {
 interface PlatformDef {
   id: string;
   label: string;
-  icon: string;
+  iconVariant: "color" | "light" | "dark";
   color: string;
   colorRgb: string;
   fields: KeyField[];
@@ -45,7 +46,7 @@ const allPlatforms: PlatformDef[] = [
   {
     id: "twitch",
     label: "Twitch",
-    icon: "🟣",
+    iconVariant: "color",
     color: "#9146ff",
     colorRgb: "145, 70, 255",
     connectionModes: [
@@ -65,7 +66,7 @@ const allPlatforms: PlatformDef[] = [
   {
     id: "kick",
     label: "Kick",
-    icon: "🟢",
+    iconVariant: "color",
     color: "#53fc18",
     colorRgb: "83, 252, 24",
     connectionModes: [
@@ -85,22 +86,25 @@ const allPlatforms: PlatformDef[] = [
   {
     id: "joystick",
     label: "JoystickTV",
-    icon: "🟠",
-    color: "#ff6b35",
-    colorRgb: "255, 107, 53",
+    iconVariant: "dark",
+    color: "#76e1f0",
+    colorRgb: "118, 225, 240",
     connectionModes: [
       { mode: "api", label: "API Mode", description: "REST API calls" },
       { mode: "ws", label: "WebSocket", description: "Direct WebSocket" },
     ],
     routingKey: "preferredJoystickMode",
     fields: [
+      { key: "joystickApplicationId" as Key, label: "Application ID", placeholder: "Enter JoystickTV Application ID", secret: false },
+      { key: "joystickClientId" as Key, label: "Client ID", placeholder: "Enter JoystickTV Client ID", secret: false },
+      { key: "joystickClientSecret" as Key, label: "Client Secret", placeholder: "Enter JoystickTV Client Secret", secret: true },
       { key: "joystickApiKey" as Key, label: "API Key", placeholder: "Enter JoystickTV API Key", secret: true },
     ],
   },
   {
     id: "steamgrid",
     label: "SteamGridDB",
-    icon: "🎮",
+    iconVariant: "light",
     color: "#e74c3c",
     colorRgb: "231, 76, 60",
     fields: [
@@ -110,7 +114,7 @@ const allPlatforms: PlatformDef[] = [
   {
     id: "rawg",
     label: "RAWG",
-    icon: "🕹️",
+    iconVariant: "light",
     color: "#f5a623",
     colorRgb: "245, 166, 35",
     fields: [
@@ -120,7 +124,7 @@ const allPlatforms: PlatformDef[] = [
   {
     id: "igdb",
     label: "IGDB",
-    icon: "💾",
+    iconVariant: "light",
     color: "#6b5ce7",
     colorRgb: "107, 92, 231",
     fields: [
@@ -179,10 +183,10 @@ function AddPlatformCard({
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/[0.04] transition-all text-left group border-none bg-transparent cursor-pointer"
           >
             <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0"
+              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
               style={{ backgroundColor: `rgba(${p.colorRgb}, 0.12)`, border: `1px solid rgba(${p.colorRgb}, 0.2)` }}
             >
-              {p.icon}
+              <PlatformIconImport p={p} />
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-[12px] font-medium text-white/70 group-hover:text-white/90 transition-colors">{p.label}</div>
@@ -201,6 +205,11 @@ function AddPlatformCard({
       </div>
     </div>
   );
+}
+
+// Helper to avoid import issues at runtime
+function PlatformIconImport({ p }: { p: PlatformDef }) {
+  return <PlatformIcon platform={p.id as "twitch" | "kick" | "joystick"} size="sm" variant={p.iconVariant} />;
 }
 
 // ── Platform Card ───────────────────────────────────────────────────────────
@@ -248,7 +257,7 @@ function PlatformCard({
   return (
     <CollapsibleSection
       title={platform.label}
-      icon={platform.icon}
+      icon={<PlatformIconWrapper platform={platform} />}
       badge={
         <div className="flex items-center gap-2">
           <span className={`status-dot ${isConfigured ? "on" : isPartial ? "warn" : "off"}`} />
@@ -363,6 +372,10 @@ function PlatformCard({
       </div>
     </CollapsibleSection>
   );
+}
+
+function PlatformIconWrapper({ platform }: { platform: PlatformDef }) {
+  return <PlatformIcon platform={platform.id as "twitch" | "kick" | "joystick"} size="sm" variant={platform.iconVariant} />;
 }
 
 // ── Main Tab: Connections & Keys (merged routing + api keys) ────────────────
