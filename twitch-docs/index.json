@@ -1,0 +1,212 @@
+[
+  {
+    "title": "Twitch Developer Documentation",
+    "slug": "docs-home",
+    "section": "Overview",
+    "url": "https://dev.twitch.tv/docs",
+    "file": "docs-home.md"
+  },
+  {
+    "title": "Register Your App",
+    "slug": "register-app",
+    "section": "Getting Started",
+    "url": "https://dev.twitch.tv/docs/authentication/register-app",
+    "file": "register-app.md"
+  },
+  {
+    "title": "Get Started",
+    "slug": "api-get-started",
+    "section": "Getting Started",
+    "url": "https://dev.twitch.tv/docs/api/get-started",
+    "file": "api-get-started.md"
+  },
+  {
+    "title": "Authentication",
+    "slug": "authentication",
+    "section": "Authentication",
+    "url": "https://dev.twitch.tv/docs/authentication",
+    "file": "authentication.md"
+  },
+  {
+    "title": "Getting OAuth Access Tokens",
+    "slug": "getting-tokens-oauth",
+    "section": "Authentication",
+    "url": "https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/",
+    "file": "getting-tokens-oauth.md"
+  },
+  {
+    "title": "Using OIDC to get OAuth Access Tokens",
+    "slug": "getting-tokens-oidc",
+    "section": "Authentication",
+    "url": "https://dev.twitch.tv/docs/authentication/getting-tokens-oidc/",
+    "file": "getting-tokens-oidc.md"
+  },
+  {
+    "title": "Validating Tokens",
+    "slug": "validate-tokens",
+    "section": "Authentication",
+    "url": "https://dev.twitch.tv/docs/authentication/validate-tokens",
+    "file": "validate-tokens.md"
+  },
+  {
+    "title": "Twitch Access Token Scopes",
+    "slug": "scopes",
+    "section": "Authentication",
+    "url": "https://dev.twitch.tv/docs/authentication/scopes/",
+    "file": "scopes.md"
+  },
+  {
+    "title": "Twitch API",
+    "slug": "api-overview",
+    "section": "API",
+    "url": "https://dev.twitch.tv/docs/api/",
+    "file": "api-overview.md"
+  },
+  {
+    "title": "Twitch API Concepts",
+    "slug": "api-guide",
+    "section": "API",
+    "url": "https://dev.twitch.tv/docs/api/guide",
+    "file": "api-guide.md"
+  },
+  {
+    "title": "Reference",
+    "slug": "api-reference",
+    "section": "API",
+    "url": "https://dev.twitch.tv/docs/api/reference",
+    "file": "api-reference.md"
+  },
+  {
+    "title": "Webhooks Reference (legacy)",
+    "slug": "webhooks-reference",
+    "section": "API",
+    "url": "https://dev.twitch.tv/docs/api/webhooks-reference",
+    "file": "webhooks-reference.md"
+  },
+  {
+    "title": "EventSub",
+    "slug": "eventsub-overview",
+    "section": "EventSub",
+    "url": "https://dev.twitch.tv/docs/eventsub/",
+    "file": "eventsub-overview.md"
+  },
+  {
+    "title": "EventSub Reference",
+    "slug": "eventsub-reference",
+    "section": "EventSub",
+    "url": "https://dev.twitch.tv/docs/eventsub/eventsub-reference/",
+    "file": "eventsub-reference.md"
+  },
+  {
+    "title": "EventSub Subscription Types",
+    "slug": "eventsub-subscription-types",
+    "section": "EventSub",
+    "url": "https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/",
+    "file": "eventsub-subscription-types.md"
+  },
+  {
+    "title": "Managing Subscriptions",
+    "slug": "eventsub-manage-subscriptions",
+    "section": "EventSub",
+    "url": "https://dev.twitch.tv/docs/eventsub/manage-subscriptions/",
+    "file": "eventsub-manage-subscriptions.md"
+  },
+  {
+    "title": "Helix Endpoints",
+    "slug": "eventsub-helix-endpoints",
+    "section": "EventSub",
+    "url": "https://dev.twitch.tv/docs/eventsub/helix-endpoints",
+    "file": "eventsub-helix-endpoints.md"
+  },
+  {
+    "title": "Authenticating and Setting up EventSub",
+    "slug": "chat-authenticating",
+    "section": "EventSub",
+    "url": "https://dev.twitch.tv/docs/chat/authenticating/",
+    "file": "chat-authenticating.md"
+  },
+  {
+    "title": "Chat & Chatbots",
+    "slug": "chat-overview",
+    "section": "Chat & Chatbots",
+    "url": "https://dev.twitch.tv/docs/chat/",
+    "file": "chat-overview.md"
+  },
+  {
+    "title": "IRC Concepts",
+    "slug": "chat-irc",
+    "section": "Chat & Chatbots",
+    "url": "https://dev.twitch.tv/docs/chat/irc/",
+    "file": "chat-irc.md"
+  },
+  {
+    "title": "Getting Started with Chat & Chatbots",
+    "slug": "irc-get-started",
+    "section": "Chat & Chatbots",
+    "url": "https://dev.twitch.tv/docs/irc/get-started/",
+    "file": "irc-get-started.md"
+  },
+  {
+    "title": "Authenticating with the Twitch IRC Server",
+    "slug": "irc-authenticate-bot",
+    "section": "Chat & Chatbots",
+    "url": "https://dev.twitch.tv/docs/irc/authenticate-bot/",
+    "file": "irc-authenticate-bot.md"
+  },
+  {
+    "title": "Requesting Twitch IRC Capabilities",
+    "slug": "irc-capabilities",
+    "section": "Chat & Chatbots",
+    "url": "https://dev.twitch.tv/docs/irc/capabilities/",
+    "file": "irc-capabilities.md"
+  },
+  {
+    "title": "Migrating from Twitch IRC",
+    "slug": "chat-irc-migration",
+    "section": "Chat & Chatbots",
+    "url": "https://dev.twitch.tv/docs/chat/irc-migration/",
+    "file": "chat-irc-migration.md"
+  },
+  {
+    "title": "Example Chatbot Guide",
+    "slug": "chat-chatbot-guide",
+    "section": "Chat & Chatbots",
+    "url": "https://dev.twitch.tv/docs/chat/chatbot-guide/",
+    "file": "chat-chatbot-guide.md"
+  },
+  {
+    "title": "Extensions",
+    "slug": "extensions-overview",
+    "section": "Extensions",
+    "url": "https://dev.twitch.tv/docs/extensions/",
+    "file": "extensions-overview.md"
+  },
+  {
+    "title": "Extensions Reference",
+    "slug": "extensions-reference",
+    "section": "Extensions",
+    "url": "https://dev.twitch.tv/docs/extensions/reference/",
+    "file": "extensions-reference.md"
+  },
+  {
+    "title": "Designing Extensions",
+    "slug": "extensions-designing",
+    "section": "Extensions",
+    "url": "https://dev.twitch.tv/docs/extensions/designing/",
+    "file": "extensions-designing.md"
+  },
+  {
+    "title": "Building Extensions",
+    "slug": "extensions-building",
+    "section": "Extensions",
+    "url": "https://dev.twitch.tv/docs/extensions/building/",
+    "file": "extensions-building.md"
+  },
+  {
+    "title": "Call API endpoints",
+    "slug": "cli-api-command",
+    "section": "CLI",
+    "url": "https://dev.twitch.tv/docs/cli/api-command/",
+    "file": "cli-api-command.md"
+  }
+]
