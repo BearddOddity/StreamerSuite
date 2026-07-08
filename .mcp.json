@@ -7,6 +7,14 @@
     "streamersuite-kick-mcp": {
       "command": "node",
       "args": ["kick-mcp/dist/index.js"]
+    },
+    "streamersuite-twitch-mcp": {
+      "command": "node",
+      "args": ["twitch-mcp/dist/index.js"]
+    },
+    "streamersuite-joystick-mcp": {
+      "command": "node",
+      "args": ["joystick-mcp/dist/index.js"]
     }
   }
 }

@@ -9,7 +9,13 @@
     "tauri": "tauri",
     "docs:kick": "npm --prefix kick-mcp run fetch-docs",
     "docs:kick:list": "npm --prefix kick-mcp run cli -- list",
-    "docs:kick:search": "npm --prefix kick-mcp run cli -- search"
+    "docs:kick:search": "npm --prefix kick-mcp run cli -- search",
+    "docs:twitch": "npm --prefix twitch-mcp run fetch-docs",
+    "docs:twitch:list": "npm --prefix twitch-mcp run cli -- list",
+    "docs:twitch:search": "npm --prefix twitch-mcp run cli -- search",
+    "docs:joystick": "npm --prefix joystick-mcp run fetch-docs",
+    "docs:joystick:list": "npm --prefix joystick-mcp run cli -- list",
+    "docs:joystick:search": "npm --prefix joystick-mcp run cli -- search"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",

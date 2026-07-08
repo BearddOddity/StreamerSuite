@@ -1,0 +1,128 @@
+[
+  {
+    "title": "Overview",
+    "slug": "overview",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#overview",
+    "file": "overview.md"
+  },
+  {
+    "title": "Creating a bot application",
+    "slug": "creating-a-bot-application",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#creating-a-bot-application",
+    "file": "creating-a-bot-application.md"
+  },
+  {
+    "title": "Installing the bot application",
+    "slug": "installing-the-bot-application",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#installing-the-bot-application",
+    "file": "installing-the-bot-application.md"
+  },
+  {
+    "title": "Public vs Private bots",
+    "slug": "public-vs-private-bots",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#public-vs-private-bots",
+    "file": "public-vs-private-bots.md"
+  },
+  {
+    "title": "Permissions",
+    "slug": "permissions",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#permissions",
+    "file": "permissions.md"
+  },
+  {
+    "title": "Installing bot API",
+    "slug": "installing-bot-api",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#installing-bot-api",
+    "file": "installing-bot-api.md"
+  },
+  {
+    "title": "Fetching access_token API",
+    "slug": "fetching-access-token-api",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#fetching-access_token-api",
+    "file": "fetching-access-token-api.md"
+  },
+  {
+    "title": "Fetching refresh_token API",
+    "slug": "fetching-refresh-token-api",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#fetching-refresh_token-api",
+    "file": "fetching-refresh-token-api.md"
+  },
+  {
+    "title": "Connecting the bot",
+    "slug": "connecting-the-bot",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#connecting-the-bot",
+    "file": "connecting-the-bot.md"
+  },
+  {
+    "title": "Subscribing",
+    "slug": "subscribing",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#subscribing",
+    "file": "subscribing.md"
+  },
+  {
+    "title": "Receiving messages",
+    "slug": "receiving-messages",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#receiving-messages",
+    "file": "receiving-messages.md"
+  },
+  {
+    "title": "Sending messages",
+    "slug": "sending-messages",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#sending-messages",
+    "file": "sending-messages.md"
+  },
+  {
+    "title": "REST API endpoints",
+    "slug": "rest-api-endpoints",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#rest-api-endpoints",
+    "file": "rest-api-endpoints.md"
+  },
+  {
+    "title": "ManageStreamerSettings",
+    "slug": "managestreamersettings",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#managestreamersettings",
+    "file": "managestreamersettings.md"
+  },
+  {
+    "title": "ViewSubscriptions",
+    "slug": "viewsubscriptions",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#viewsubscriptions",
+    "file": "viewsubscriptions.md"
+  },
+  {
+    "title": "Testing Your Bot",
+    "slug": "testing-your-bot",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#testing-your-bot",
+    "file": "testing-your-bot.md"
+  },
+  {
+    "title": "Example Bots",
+    "slug": "example-bots",
+    "section": "Developer Support",
+    "url": "https://support.joystick.tv/developer_support#example-bots",
+    "file": "example-bots.md"
+  },
+  {
+    "title": "Changelog",
+    "slug": "changelog",
+    "section": "Overview",
+    "url": "https://support.joystick.tv/changelog",
+    "file": "changelog.md"
+  }
+]

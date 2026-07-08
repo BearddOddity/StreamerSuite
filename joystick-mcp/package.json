@@ -1,0 +1,26 @@
+{
+  "name": "streamersuite-joystick-mcp",
+  "version": "0.1.0",
+  "description": "MCP server and CLI for browsing and searching Joystick.tv's developer/chatbot documentation (support.joystick.tv).",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "streamersuite-joystick-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "fetch-docs": "tsx src/fetch-joystick-docs.ts",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
