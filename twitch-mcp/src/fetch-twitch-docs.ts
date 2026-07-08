@@ -10,10 +10,22 @@ function parseArgs(argv: string[]): { out: string } {
   return { out };
 }
 
-/** Twitch's docs are a rendered React app, not markdown source — do a best-effort HTML-to-text strip. */
+/**
+ * Twitch's docs are a rendered React app, not markdown source — do a best-effort
+ * HTML-to-text strip. Every page shares the same sidebar/header/footer chrome
+ * (it lists every doc section), so if we don't cut that out first, full-text
+ * search matches almost every page on almost every query. Prefer the <main>
+ * content region if present; always drop nav/header/footer/aside regardless.
+ */
 function htmlToText(html: string): string {
-  const withoutScripts = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, "");
-  const withoutTags = withoutScripts.replace(/<[^>]+>/g, "\n");
+  const withoutScripts = html.replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, "");
+  const withoutChrome = withoutScripts.replace(/<(nav|header|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, "");
+
+  const mainMatch = withoutChrome.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  const articleMatch = withoutChrome.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+  const content = mainMatch?.[1] ?? articleMatch?.[1] ?? withoutChrome;
+
+  const withoutTags = content.replace(/<[^>]+>/g, "\n");
   return withoutTags
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
