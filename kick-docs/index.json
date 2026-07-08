@@ -1,0 +1,202 @@
+[
+  {
+    "title": "Welcome",
+    "slug": "readme",
+    "section": "Overview",
+    "url": "https://docs.kick.com/",
+    "file": "readme.md",
+    "source": "README.md"
+  },
+  {
+    "title": "Changelog",
+    "slug": "changelog",
+    "section": "Overview",
+    "url": "https://docs.kick.com/changelog",
+    "file": "changelog.md",
+    "source": "changelog.md"
+  },
+  {
+    "title": "App Setup",
+    "slug": "app-setup",
+    "section": "Getting Started",
+    "url": "https://docs.kick.com/getting-started/kick-apps-setup",
+    "file": "app-setup.md",
+    "source": "getting-started/kick-apps-setup.md"
+  },
+  {
+    "title": "OAuth 2.1",
+    "slug": "oauth2-1",
+    "section": "Getting Started",
+    "url": "https://docs.kick.com/getting-started/generating-tokens-oauth2-flow",
+    "file": "oauth2-1.md",
+    "source": "getting-started/generating-tokens-oauth2-flow.md"
+  },
+  {
+    "title": "Scopes",
+    "slug": "scopes",
+    "section": "Getting Started",
+    "url": "https://docs.kick.com/getting-started/scopes",
+    "file": "scopes.md",
+    "source": "scopes/scopes.md"
+  },
+  {
+    "title": "Categories",
+    "slug": "categories",
+    "section": "APIs",
+    "url": "https://docs.kick.com/apis/categories",
+    "file": "categories.md",
+    "source": "apis/categories.md"
+  },
+  {
+    "title": "Users",
+    "slug": "users",
+    "section": "APIs",
+    "url": "https://docs.kick.com/apis/users",
+    "file": "users.md",
+    "source": "apis/users.md"
+  },
+  {
+    "title": "Channels",
+    "slug": "channels",
+    "section": "APIs",
+    "url": "https://docs.kick.com/apis/channels",
+    "file": "channels.md",
+    "source": "apis/channels.md"
+  },
+  {
+    "title": "Channel Rewards",
+    "slug": "channel-rewards",
+    "section": "APIs",
+    "url": "https://docs.kick.com/apis/channel-rewards",
+    "file": "channel-rewards.md",
+    "source": "apis/channel-rewards.md"
+  },
+  {
+    "title": "Chat",
+    "slug": "chat",
+    "section": "APIs",
+    "url": "https://docs.kick.com/apis/chat",
+    "file": "chat.md",
+    "source": "apis/chat.md"
+  },
+  {
+    "title": "Moderation",
+    "slug": "moderation",
+    "section": "APIs",
+    "url": "https://docs.kick.com/apis/moderation",
+    "file": "moderation.md",
+    "source": "apis/moderation.md"
+  },
+  {
+    "title": "Livestreams",
+    "slug": "livestreams",
+    "section": "APIs",
+    "url": "https://docs.kick.com/apis/livestreams",
+    "file": "livestreams.md",
+    "source": "apis/livestreams.md"
+  },
+  {
+    "title": "Public Key",
+    "slug": "public-key",
+    "section": "APIs",
+    "url": "https://docs.kick.com/apis/public-key",
+    "file": "public-key.md",
+    "source": "apis/public-key.md"
+  },
+  {
+    "title": "KICKs",
+    "slug": "kicks",
+    "section": "APIs",
+    "url": "https://docs.kick.com/apis/kicks",
+    "file": "kicks.md",
+    "source": "apis/kicks.md"
+  },
+  {
+    "title": "FAQs",
+    "slug": "api-faqs",
+    "section": "APIs",
+    "url": "https://docs.kick.com/apis/faqs",
+    "file": "api-faqs.md",
+    "source": "apis/faqs.md"
+  },
+  {
+    "title": "Introduction",
+    "slug": "events-introduction",
+    "section": "Events",
+    "url": "https://docs.kick.com/events/introduction",
+    "file": "events-introduction.md",
+    "source": "events/introduction.md"
+  },
+  {
+    "title": "Webhooks",
+    "slug": "webhook-security",
+    "section": "Events",
+    "url": "https://docs.kick.com/events/webhook-security",
+    "file": "webhook-security.md",
+    "source": "events/webhook-security.md"
+  },
+  {
+    "title": "Subscribe to Events",
+    "slug": "subscribe-to-events",
+    "section": "Events",
+    "url": "https://docs.kick.com/events/subscribe-to-events",
+    "file": "subscribe-to-events.md",
+    "source": "events/subscribe-to-events.md"
+  },
+  {
+    "title": "Webhook Payloads",
+    "slug": "event-types",
+    "section": "Events",
+    "url": "https://docs.kick.com/events/webhook-payloads",
+    "file": "event-types.md",
+    "source": "events/event-types.md"
+  },
+  {
+    "title": "Organization Management",
+    "slug": "organization-management",
+    "section": "Organizations",
+    "url": "https://docs.kick.com/organizations/organization-management",
+    "file": "organization-management.md",
+    "source": "organizations/organization-management.md"
+  },
+  {
+    "title": "Guide",
+    "slug": "drops-guide",
+    "section": "Drops",
+    "url": "https://docs.kick.com/drops/guide",
+    "file": "drops-guide.md",
+    "source": "drops/drops-guide.md"
+  },
+  {
+    "title": "FAQs",
+    "slug": "drops-faqs",
+    "section": "Drops",
+    "url": "https://docs.kick.com/drops/faqs",
+    "file": "drops-faqs.md",
+    "source": "drops/drops-faqs.md"
+  },
+  {
+    "title": "Public API",
+    "slug": "drops-public-api",
+    "section": "Drops",
+    "url": "https://docs.kick.com/drops/public-api",
+    "file": "drops-public-api.md",
+    "source": "drops/public-api.md"
+  },
+  {
+    "title": "Contributing",
+    "slug": "contributing",
+    "section": "How do I contribute?",
+    "url": "https://docs.kick.com/how-do-i-contribute/contributing",
+    "file": "contributing.md",
+    "source": "CONTRIBUTING.md"
+  },
+  {
+    "title": "Community Driven Projects",
+    "slug": "community-projects",
+    "section": "How do I contribute?",
+    "url": "https://docs.kick.com/how-do-i-contribute/community-driven-projects",
+    "file": "community-projects.md",
+    "source": "community/community-projects.md"
+  }
+]

@@ -1,12 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { KICK_DOC_PAGES } from "./pages.js";
+import { DEFAULT_DOCS_DIR } from "./paths.js";
 
 const RAW_BASE = "https://raw.githubusercontent.com/KickEngineering/KickDevDocs/main/";
 
 function parseArgs(argv: string[]): { out: string } {
   const outIdx = argv.indexOf("--out");
-  const out = outIdx !== -1 ? argv[outIdx + 1] : "./kick-docs";
+  const out = outIdx !== -1 ? argv[outIdx + 1] : DEFAULT_DOCS_DIR;
   if (!out) throw new Error("--out requires a directory path");
   return { out };
 }

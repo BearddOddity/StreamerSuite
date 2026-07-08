@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { KICK_DOC_PAGES } from "./pages.js";
+import { DEFAULT_DOCS_DIR } from "./paths.js";
 
 function printPage(p: (typeof KICK_DOC_PAGES)[number]) {
   console.log(`${p.section.padEnd(22)} ${p.title.padEnd(28)} ${p.url}`);
@@ -18,9 +19,9 @@ async function list() {
   }
 }
 
-async function search(term: string, docsDir = "./kick-docs") {
+async function search(term: string, docsDir = DEFAULT_DOCS_DIR) {
   if (!term) {
-    console.error("Usage: cli.ts search <term> [--dir ./kick-docs]");
+    console.error("Usage: cli.ts search <term> [--dir <path>]");
     process.exitCode = 1;
     return;
   }
@@ -59,7 +60,7 @@ async function search(term: string, docsDir = "./kick-docs") {
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const dirIdx = rest.indexOf("--dir");
-  const dir = dirIdx !== -1 ? rest[dirIdx + 1] : "./kick-docs";
+  const dir = dirIdx !== -1 ? rest[dirIdx + 1] : DEFAULT_DOCS_DIR;
   const term = dirIdx !== -1 ? rest.filter((_, i) => i !== dirIdx && i !== dirIdx + 1).join(" ") : rest.join(" ");
 
   switch (cmd) {
@@ -70,7 +71,7 @@ async function main() {
       await search(term, dir);
       break;
     default:
-      console.log("Usage: cli.ts <list|search> [term] [--dir ./kick-docs]");
+      console.log("Usage: cli.ts <list|search> [term] [--dir <path>]");
       process.exitCode = cmd ? 1 : 0;
   }
 }

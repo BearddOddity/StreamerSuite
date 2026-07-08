@@ -7,7 +7,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "docs:kick": "npm --prefix kick-mcp run fetch-docs -- --out ../kick-docs",
+    "docs:kick": "npm --prefix kick-mcp run fetch-docs",
     "docs:kick:list": "npm --prefix kick-mcp run cli -- list",
     "docs:kick:search": "npm --prefix kick-mcp run cli -- search"
   },

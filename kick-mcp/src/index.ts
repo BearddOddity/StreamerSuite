@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { KICK_DOC_PAGES } from "./pages.js";
+import { DEFAULT_DOCS_DIR } from "./paths.js";
 
 const server = new McpServer({
   name: "streamersuite-kick-mcp",
@@ -40,12 +41,12 @@ server.registerTool(
       "Search Kick's developer documentation by title/section, and by page body if pages have been fetched locally via the fetch-docs script.",
     inputSchema: {
       query: z.string().describe("Search term, e.g. 'webhook', 'chat', 'oauth'"),
-      docsDir: z.string().optional().describe("Directory of fetched doc bodies (default ./kick-docs)"),
+      docsDir: z.string().optional().describe("Directory of fetched doc bodies (defaults to the repo's kick-docs/ folder)"),
     },
   },
   async ({ query, docsDir }) => {
     const needle = query.toLowerCase();
-    const dir = docsDir ?? "./kick-docs";
+    const dir = docsDir ?? DEFAULT_DOCS_DIR;
     const titleMatches = KICK_DOC_PAGES.filter(
       (p) => p.title.toLowerCase().includes(needle) || p.section.toLowerCase().includes(needle)
     );
@@ -84,7 +85,7 @@ server.registerTool(
     description: "Fetch a single Kick developer docs page's title, section, URL, and (if fetched locally) its markdown body.",
     inputSchema: {
       slug: z.string().describe("Page slug from list_kick_docs_pages, e.g. 'chat', 'webhook-security'"),
-      docsDir: z.string().optional().describe("Directory of fetched doc bodies (default ./kick-docs)"),
+      docsDir: z.string().optional().describe("Directory of fetched doc bodies (defaults to the repo's kick-docs/ folder)"),
     },
   },
   async ({ slug, docsDir }) => {
@@ -92,7 +93,7 @@ server.registerTool(
     if (!page) {
       return { content: [{ type: "text", text: `No Kick docs page with slug "${slug}".` }], isError: true };
     }
-    const dir = docsDir ?? "./kick-docs";
+    const dir = docsDir ?? DEFAULT_DOCS_DIR;
     let body: string | undefined;
     try {
       body = await readFile(path.join(dir, `${page.slug}.md`), "utf8");
