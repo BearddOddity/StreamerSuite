@@ -7,9 +7,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "docs:kick": "npx tsx ../Beards Researcher/shared/kick-mcp/fetch-kick-docs.ts --out ./kick-docs",
-    "docs:kick:list": "npx tsx ../Beards Researcher/shared/kick-mcp/cli.ts list",
-    "docs:kick:search": "npx tsx ../Beards Researcher/shared/kick-mcp/cli.ts search"
+    "docs:kick": "npm --prefix kick-mcp run fetch-docs -- --out ../kick-docs",
+    "docs:kick:list": "npm --prefix kick-mcp run cli -- list",
+    "docs:kick:search": "npm --prefix kick-mcp run cli -- search"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",

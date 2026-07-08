@@ -1,6 +1,6 @@
 ﻿import { useState, useCallback, useRef, useEffect } from "react";
 import type { ChatMessage, ChatChannel, Platform, ChatUser, ConnectionMode } from "@/types";
-import type { KickChatMessage, KickChannel } from "../../../Beards Researcher/shared/kick-mcp/types.js";
+import type { KickChatMessage, KickChannel } from "../../kick-mcp/src/types.js";
 
 // Kick's v2 API returns chatroom but it's not in the shared type yet
 type KickChannelWithChatroom = KickChannel & {
