@@ -6,6 +6,15 @@ import { DOCS_DIR, README_PATH } from "./paths.js";
 const NUM_PREFIX = /^(\d{2})-(.+)$/;
 const TABLE_ROW = /^\|\s*(\d{2})\s*\|\s*\[`([^`]+)`\]\([^)]+\)\s*\|\s*(.+?)\s*\|$/;
 
+/** Windows checkouts (and Windows-authored edits) use \r\n; normalize so ^/$-anchored regexes below always see \n. */
+function normalizeNewlines(text: string): string {
+  return text.replace(/\r\n/g, "\n");
+}
+
+async function readFileNormalized(filePath: string): Promise<string> {
+  return normalizeNewlines(await readFile(filePath, "utf8"));
+}
+
 function slugify(title: string): string {
   return title
     .toLowerCase()
@@ -21,7 +30,7 @@ function extractTitle(markdown: string): string {
 async function readReadmeTopics(): Promise<Map<string, string>> {
   const topics = new Map<string, string>();
   try {
-    const readme = await readFile(README_PATH, "utf8");
+    const readme = await readFileNormalized(README_PATH);
     for (const line of readme.split("\n")) {
       const m = line.match(TABLE_ROW);
       if (m) topics.set(m[2]!, m[3]!);
@@ -39,7 +48,7 @@ export async function listDocs(): Promise<StreamerSuiteDocPage[]> {
   for (const file of files.sort()) {
     const slug = file.replace(/\.md$/, "");
     const numMatch = slug.match(NUM_PREFIX);
-    const content = await readFile(path.join(DOCS_DIR, file), "utf8");
+    const content = await readFileNormalized(path.join(DOCS_DIR, file));
     pages.push({
       num: numMatch?.[1] ?? "",
       slug,
@@ -52,7 +61,7 @@ export async function listDocs(): Promise<StreamerSuiteDocPage[]> {
 }
 
 export async function getDocBody(file: string): Promise<string> {
-  return readFile(path.join(DOCS_DIR, file), "utf8");
+  return readFileNormalized(path.join(DOCS_DIR, file));
 }
 
 export async function searchDocs(query: string): Promise<StreamerSuiteDocPage[]> {
@@ -81,7 +90,7 @@ async function nextDocNumber(): Promise<string> {
 async function appendReadmeRow(file: string, topic: string): Promise<void> {
   let readme: string;
   try {
-    readme = await readFile(README_PATH, "utf8");
+    readme = await readFileNormalized(README_PATH);
   } catch {
     return; // no README to update — not fatal
   }
