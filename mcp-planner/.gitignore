@@ -1,0 +1,4 @@
+node_modules/
+dist/
+planning.db-wal
+planning.db-shm
