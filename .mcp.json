@@ -4,6 +4,10 @@
       "command": "node",
       "args": ["mcp-planner/dist/index.js"]
     },
+    "streamersuite-mcp": {
+      "command": "node",
+      "args": ["streamersuite-mcp/dist/index.js"]
+    },
     "streamersuite-kick-mcp": {
       "command": "node",
       "args": ["kick-mcp/dist/index.js"]
