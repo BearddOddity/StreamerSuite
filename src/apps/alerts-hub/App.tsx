@@ -26,7 +26,7 @@ export default function AlertsHubApp() {
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const spawnAlert = useCallback(() => {
-    const template = alertPool[Math.floor(Math.random() * alertPool.length)];
+    const template = alertPool[Math.floor(Math.random() * alertPool.length)]!;
     const alert: Alert = {
       ...template,
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -39,7 +39,7 @@ export default function AlertsHubApp() {
     if (!enabled) return;
     // Seed some initial alerts
     const seed = Array.from({ length: 5 }, (_, i) => {
-      const template = alertPool[Math.floor(Math.random() * alertPool.length)];
+      const template = alertPool[Math.floor(Math.random() * alertPool.length)]!;
       return { ...template, id: `seed-${i}`, timestamp: Date.now() - (5 - i) * 60000 };
     });
     setAlerts(seed);
