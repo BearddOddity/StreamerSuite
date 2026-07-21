@@ -1,20 +1,13 @@
-// ─── StatusForge internal types ───────────────────────────────────────────────
-// Self-contained: no external Tauri deps, all types live here for modularity.
+// ─── Shared TypeScript interfaces for StatusForge.io ───
 
-export interface EngineStatus {
-  running: boolean;
-  game_title: string;
-  process_name: string;
-  is_playing: boolean;
-  genre: string;
-  developer: string;
-  publisher: string;
-  release_date: string;
-  cover_url: string;
-  widgetToken: string;
+export interface GameInfo {
+  title: string;
+  process: string;
+  platform: string;
 }
 
 export interface EngineStatusData {
+  running: boolean;
   is_playing: boolean;
   game_title: string;
   process_name: string;
@@ -29,10 +22,17 @@ export interface EngineStatusData {
   bundle_options: GameInfo[];
 }
 
-export interface GameInfo {
-  title: string;
-  process: string;
-  platform: string;
+export interface EngineStatus {
+  running: boolean;
+  game_title: string;
+  process_name: string;
+  is_playing: boolean;
+  genre: string;
+  developer: string;
+  publisher: string;
+  release_date: string;
+  cover_url: string;
+  overlayToken: string;
 }
 
 export interface ApiKeys {
@@ -41,16 +41,7 @@ export interface ApiKeys {
   igdb_client: string;
   igdb_secret: string;
   igdb_token: string;
-}
-
-export type DetectionMode = "python" | "native" | "spark";
-
-export interface DetectionConfig {
-  mode: DetectionMode;
-  python_fallback: boolean;
-  scan_interval_secs: number;
-  dev_tools_enabled: boolean;
-  closed_beta_channel: boolean;
+  thegamesdb: string;
 }
 
 export interface EngineSettings {
@@ -58,22 +49,29 @@ export interface EngineSettings {
   sb_port: number;
   scan_interval: number;
   grace_period: number;
-  widget_poll_rate: number;
+  overlay_poll_rate: number;
   safe_mode: boolean;
   auto_push: boolean;
-  widget_fade_timer: number;
+  platform_push_enabled: boolean;
+  overlay_fade_timer: number;
   strict_forge_mode: boolean;
   sb_action_name: string;
-  widget_token: string;
-  spark_pin: string;
+  overlay_token: string;
+  // Blipy / dual-PC
+  blipy_pin: string;
+  blipy_pairing_key: string;
+  blipy_link_active: boolean;
+  // Detection pipeline
   emulator_detection: boolean;
   ram_threshold: number;
   process_filter_bypass: boolean;
   confidence_threshold: number;
+  // Behavior Trap toggles
   trap_chromium: boolean;
   trap_cmdline: boolean;
   trap_ui_framework: boolean;
   trap_geometry: boolean;
+  // Confidence scoring toggles (each adds 0.1–0.4 to score)
   score_engine_dna: boolean;
   score_fullscreen: boolean;
   score_window_title: boolean;
@@ -100,7 +98,17 @@ export interface AppConfig {
   api_keys: ApiKeys;
   engine_settings: EngineSettings;
   broadcaster: BroadcasterConfig;
-  detection: DetectionConfig;
+}
+
+// A user-created alternative name that detection resolves to the entry's
+// canonical title (Stage 0). Metadata beyond `name` is managed backend-side;
+// the editor round-trips names as a comma-separated string.
+export interface GameAlias {
+  name: string;
+  priority: number;
+  language: string;
+  added_at: string;
+  preferred: boolean;
 }
 
 export interface ForgeLibraryEntry {
@@ -110,6 +118,7 @@ export interface ForgeLibraryEntry {
   developer: string;
   publisher: string;
   cover_url: string;
+  logo_url: string;
   twitch_id: string;
   kick_id: string;
   igdb_id: string;
@@ -121,7 +130,12 @@ export interface ForgeLibraryEntry {
   sgdb_id: string;
   xbox_title_id: string;
   epic_id: string;
-  executables?: string;
+  thegamesdb_id: string;
+  executables: string;
+  // Absent on entries with no aliases (backend skips serializing empty).
+  aliases?: GameAlias[];
+  // Absent on entries with no sync history (backend skips serializing empty).
+  sync_history?: { timestamp: string; action: string; changes: string }[];
 }
 
 export interface ForgeDatabase {
@@ -131,7 +145,9 @@ export interface ForgeDatabase {
 }
 
 export type ViewId = "dashboard" | "library" | "settings" | "dev";
-export type SettingsSubTab = "engine" | "routing" | "api" | "system" | "theme" | "about";
+
+export type SettingsSubTab = "engine" | "api-routing" | "system" | "theme" | "about";
+
 export type ToastType = "success" | "error" | "info";
 
 export interface Toast {
@@ -143,6 +159,11 @@ export interface Toast {
 export interface KeychainStatus {
   stored: string[];
   count: number;
+}
+
+export interface SystemStats {
+  cpu_percent: number;
+  memory_mb: number;
 }
 
 export interface ExiledApp {

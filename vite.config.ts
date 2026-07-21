@@ -8,6 +8,7 @@ export default defineConfig(async () => ({
 
   resolve: {
     alias: {
+      "@statusforge": path.resolve(__dirname, "src/apps/statusforge"),
       "@": path.resolve(__dirname, "src"),
     },
   },

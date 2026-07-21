@@ -1,42 +1,38 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import type {
-  EngineStatus,
-  AppConfig,
-  SettingsSubTab,
-  ToastType,
-  ApiKeys,
-} from "./types";
-import type { KeychainStatus } from "./types";
-import {
-  fetchWidgetToken,
-  getKeychainStatus,
-  saveConfig,
-  tauriApi,
-} from "./hooks/useTauriApi";
+import { getVersion } from "@tauri-apps/api/app";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
+import type { EngineStatus, AppConfig, SettingsSubTab, ToastType, ApiKeys } from "@statusforge/types";
+import type { KeychainStatus } from "@statusforge/types";
+import { fetchOverlayToken, getKeychainStatus, saveConfig, tauriApi } from "@statusforge/hooks/useTauriApi";
 import {
   SubTabBtn,
   CollapsibleSection,
   Toggle,
-  SettingsRow,
-  SettingsInput,
+  GlassSelect,
   SettingsPanel,
   EditRemoveButtons,
-} from "./components/SettingsComponents";
-import { GlassSelect } from "@/components/settings/SettingsComponents";
+} from "@statusforge/components/SettingsComponents";
+import OAuthConnectModal from "@statusforge/components/OAuthConnectModal";
+import { type ThemePrefs, loadThemePrefs, saveThemePrefs, applyThemePrefs } from "@statusforge/theme";
+import {
+  type SystemPrefs,
+  loadSystemPrefs,
+  saveSystemPrefs,
+  SYSTEM_PREFS_EVENT,
+} from "@statusforge/systemPrefs";
+
+import { clampInt } from "@statusforge/utils/number";
 
 // ─── Engine Sub-tab ─────────────────────────────────────────────────────────
 function EngineSubTab({
   engineStatus,
-  onRefresh,
   toast,
-  devUnlocked,
 }: {
   engineStatus: EngineStatus;
   onRefresh: () => void;
   toast: (msg: string, type?: ToastType) => void;
-  devUnlocked: boolean;
 }) {
-  const [widgetToken, setWidgetToken] = useState("Loading...");
+  const [overlayToken, setOverlayToken] = useState("Loading...");
   const [keychainInfo, setKeychainInfo] = useState<KeychainStatus | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [platform, setPlatform] = useState<string>("windows");
@@ -45,29 +41,46 @@ function EngineSubTab({
   const loadConfig = useCallback(async () => {
     skipSave.current = true;
     const res = await tauriApi("export_config");
-    if (res && typeof res === "object" && !("error" in res)) {
+    // A fresh install (no Config.json yet) returns {} — fall back to defaults
+    // so section accesses (engine_settings, api_keys, …) never crash.
+    if (res && typeof res === "object" && !("error" in res) && "engine_settings" in res) {
       setConfig(res as AppConfig);
     } else {
       setConfig(defaultConfig);
     }
-    setTimeout(() => { skipSave.current = false; }, 500);
+    setTimeout(() => {
+      skipSave.current = false;
+    }, 500);
   }, []);
 
   useEffect(() => {
-    fetchWidgetToken()
-      .then((t) => setWidgetToken(t))
-      .catch(() => setWidgetToken(defaultConfig.engine_settings.widget_token));
+    fetchOverlayToken()
+      .then((t) => setOverlayToken(t))
+      .catch(() => setOverlayToken(defaultConfig.engine_settings.overlay_token));
     getKeychainStatus()
       .then((s) => setKeychainInfo(s))
-      .catch(() =>
-        setKeychainInfo({ stored: ["twitch_token", "kick_token"], count: 2 })
-      );
+      .catch(() => setKeychainInfo({ stored: ["twitch_token", "kick_token"], count: 2 }));
     loadConfig();
     // Detect platform to grey out incompatible options
     tauriApi("get_platform")
       .then((p) => setPlatform(typeof p === "string" ? p : "windows"))
       .catch(() => setPlatform("windows"));
+    tauriApi("get_autostart")
+      .then((v) => setAutostart(v === true))
+      .catch(() => setAutostart(false));
   }, [loadConfig]);
+
+  const [autostart, setAutostart] = useState(false);
+  const toggleAutostart = async () => {
+    const next = !autostart;
+    try {
+      await tauriApi("set_autostart", { enabled: next });
+      setAutostart(next);
+      toast(next ? "StatusForge will start on login" : "Autostart disabled", "success");
+    } catch (e) {
+      toast(`Autostart failed: ${e}`, "error");
+    }
+  };
 
   useEffect(() => {
     if (!config || skipSave.current) return;
@@ -96,15 +109,18 @@ function EngineSubTab({
   const [scoreOpen, setScoreOpen] = useState(false);
   const [showPipelineAdvanced, setShowPipelineAdvanced] = useState(false);
 
-  const regenerateWidgetToken = () => {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    const token = Array.from(
-      { length: 22 },
-      () => chars[Math.floor(Math.random() * chars.length)]
-    ).join("");
-    setEngine("widget_token", token);
-    setWidgetToken(token);
-    toast("Widget token regenerated — save to apply", "info");
+  const regenerateOverlayToken = async () => {
+    // Delegates to the backend (cryptographically-random bytes, saved
+    // immediately) rather than generating one client-side — a token that
+    // gates every overlay URL shouldn't be picked with Math.random().
+    const result = await tauriApi("rotate_overlay_token");
+    if (typeof result !== "string") {
+      toast("Failed to regenerate overlay token", "error");
+      return;
+    }
+    setOverlayToken(result);
+    setEngine("overlay_token", result);
+    toast("Overlay token regenerated", "success");
   };
 
   return (
@@ -112,7 +128,7 @@ function EngineSubTab({
       {/* Control Panel */}
       <CollapsibleSection
         title="Control Panel"
-        description="View engine status and manage the widget token."
+        description="View engine status and manage the overlay token."
         icon="⚡"
         defaultOpen={true}
         badge={
@@ -133,687 +149,665 @@ function EngineSubTab({
         }
       >
         <p className="text-xs text-white/50 mb-5 leading-relaxed">
-          The detection engine runs on port 53735. Mode: <strong className="text-white/70">
-          {config?.detection?.mode === "native" ? "Native (Rust)" : config?.detection?.mode === "spark" ? "Spark (Dual-PC)" : "Python (Legacy)"}
-          </strong>. Platform: <strong className="text-white/70">{platform}</strong>.
-          {platform === "macos" && config?.detection?.mode !== "python" && (
-            <span className="text-yellow-400/70"> macOS requires Python (Legacy) or Spark.</span>
+          The detection engine runs on port 53735. Platform:{" "}
+          <strong className="text-white/70">{platform}</strong>.
+          {platform === "macos" && (
+            <span className="text-yellow-400/70">
+              {" "}
+              macOS requires the Screen Recording permission to read window titles.
+            </span>
           )}
         </p>
         <div className="flex items-center gap-3 p-3 bg-white/[0.02] border border-white/5 rounded-xl">
           <p className="text-white/60 text-xs flex-1">
-            Widget Token:{" "}
+            Overlay Token:{" "}
             <code className="bg-black/40 px-1.5 py-0.5 rounded font-mono text-white/90">
-              {widgetToken}
+              {overlayToken === "Loading..." ? overlayToken : "•".repeat(overlayToken.length)}
             </code>
           </p>
           <button
-            onClick={regenerateWidgetToken}
+            onClick={() => {
+              navigator.clipboard?.writeText(overlayToken);
+              toast("Overlay token copied to clipboard", "success");
+            }}
+            title="Copy overlay token"
+            className="p-1.5 rounded bg-white/[0.04] border border-white/10 text-white/60 hover:text-white/90 hover:bg-white/[0.08] transition-all cursor-pointer"
+          >
+            <svg
+              className="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          </button>
+          <button
+            onClick={regenerateOverlayToken}
             className="text-[10px] px-2.5 py-1.5 rounded bg-white/[0.04] border border-white/10 text-white/60 hover:text-white/90 hover:bg-white/[0.08] transition-all cursor-pointer"
           >
             ↻ Regenerate
           </button>
         </div>
+        <div className="flex items-center justify-between p-3 mt-3 bg-white/[0.02] border border-white/5 rounded-xl">
+          <div>
+            <p className="text-xs text-white/70">Start on login</p>
+            <p className="text-[10px] text-white/30 mt-0.5">
+              Launch StatusForge automatically when you sign in. Off by default.
+            </p>
+          </div>
+          <Toggle on={autostart} onToggle={toggleAutostart} />
+        </div>
       </CollapsibleSection>
 
-      {/* Detection Mode & Pipeline */}
-      {config && (() => {
-        const isMacOS = platform === "macos";
-        const isNativeDisabled = isMacOS;
-        return (
-        <CollapsibleSection
-          title="Detection Mode & Pipeline"
-          description="Choose backend engine and configure the ForgeWaterfall process pipeline."
-          icon="🔄"
-          badge={
-            <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1.5 border transition-all duration-300 ${
-              config.detection?.mode === "native"
-                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                : config.detection?.mode === "spark"
-                ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
-                : "bg-purple-500/10 border-purple-500/20 text-purple-400"
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${
-                config.detection?.mode === "native"
-                  ? "bg-emerald-400"
-                  : config.detection?.mode === "spark"
-                  ? "bg-blue-400"
-                  : "bg-purple-400"
-              }`} />
-              {config.detection?.mode === "native" ? "NATIVE" : config.detection?.mode === "spark" ? "SPARK" : "PYTHON"}
-            </span>
-          }
-        >
-          <p className="text-xs text-white/40 mb-4 leading-relaxed">
-            {isMacOS ? (
-              <>Native engine is <strong className="text-yellow-300/80">not available on macOS</strong>. Python (Legacy) is the recommended and fully supported option.</>
-            ) : (
-              <>Select the detection backend. <strong className="text-emerald-300/80">Native</strong> runs the engine in pure Rust — no Python required.
-              <strong className="text-purple-300/80"> Python</strong> is the legacy Flask sidecar (still fully supported).</>
-            )}
-          </p>
-
-          <div className="flex flex-col gap-2">
-            {/* Python — Legacy on Win/Linux, Recommended on macOS */}
-            <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${
-              config.detection?.mode === "python"
-                ? "bg-purple-500/8 border-purple-500/25"
-                : "bg-white/[0.02] border-white/5 hover:border-white/10 hover:bg-white/[0.04]"
-            }`}>
-              <input
-                type="radio"
-                name="detection_mode"
-                checked={config.detection?.mode === "python"}
-                onChange={() => setConfig((prev) => ({ ...prev!, detection: { ...prev!.detection!, mode: "python" } }))}
-                className="accent-purple-500"
-              />
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-white/80 font-medium">Python</span>
-                  {isMacOS ? (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 border border-green-500/20 text-green-400 font-semibold">RECOMMENDED</span>
-                  ) : (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-400 font-semibold">LEGACY</span>
-                  )}
-                </div>
-                <p className="text-[10px] text-white/30 mt-0.5">Flask sidecar on port 53735. Battle-tested, full feature parity. {isMacOS && "Fully supported on macOS."}</p>
-              </div>
-            </label>
-
-            {/* Native (Experimental) — locked behind Dev Tools + Closed Beta Channel */}
-            {(() => {
-              const nativeLocked = !devUnlocked || !config.detection?.closed_beta_channel;
-              const nativeDisabled = isMacOS || nativeLocked;
-              return (
-                <div className="relative">
-                  {/* Lock overlay when gated */}
-                  {nativeLocked && !isMacOS && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-end pr-4 pointer-events-none">
-                      <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg border border-white/[0.06]">
-                        <svg className="w-3 h-3 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                        </svg>
-                        <span className="text-[9px] text-white/40 font-medium">
-                          {!devUnlocked ? "Dev Tools required" : "Closed Beta required"}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  <label
-                    className={`flex items-center gap-3 p-3 rounded-xl border transition-all duration-200 ${
-                      nativeDisabled
-                        ? "bg-white/[0.01] border-white/[0.03] opacity-50 cursor-not-allowed"
-                        : config.detection?.mode === "native"
-                          ? "bg-emerald-500/8 border-emerald-500/25 cursor-pointer"
-                          : "bg-white/[0.02] border-white/5 hover:border-white/10 hover:bg-white/[0.04] cursor-pointer"
-                    }`}
-                    title={isMacOS ? "Native engine is not available on macOS. Use Python (Legacy) or Spark." : nativeLocked ? "Enable Dev Tools and Closed Beta Channel to unlock Native engine" : ""}
-                  >
-                    <input
-                      type="radio"
-                      name="detection_mode"
-                      checked={config.detection?.mode === "native"}
-                      disabled={nativeDisabled}
-                      onChange={() => {
-                        if (!nativeDisabled) setConfig((prev) => ({ ...prev!, detection: { ...prev!.detection!, mode: "native" } }))
-                      }}
-                      className="accent-emerald-500"
-                    />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs font-medium ${nativeDisabled ? "text-white/30" : "text-white/80"}`}>Native (Experimental)</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 font-semibold">EXPERIMENTAL</span>
-                        {nativeLocked && !isMacOS && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/10 text-white/40 font-semibold flex items-center gap-1">
-                            <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                            </svg>
-                            LOCKED
-                          </span>
-                        )}
-                        {isMacOS && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 font-semibold">macOS UNSUPPORTED</span>
-                        )}
-                      </div>
-                      <p className={`text-[10px] mt-0.5 ${nativeDisabled ? "text-white/20" : "text-white/30"}`}>
-                        {isMacOS
-                          ? "Native engine is not compiled for macOS. Use Python (Legacy) for full support."
-                          : nativeLocked
-                            ? "Enable Dev Tools mode and Closed Beta release track to unlock."
-                            : "Pure Rust engine loop. No Python dependency. Faster, smaller, Windows + Linux only."
-                        }
-                      </p>
-                    </div>
-                  </label>
-                </div>
-              );
-            })()}
-
-            {/* Spark (Dual-PC) */}
-            <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${
-              config.detection?.mode === "spark"
-                ? "bg-blue-500/8 border-blue-500/25"
-                : "bg-white/[0.02] border-white/5 hover:border-white/10 hover:bg-white/[0.04]"
-            }`}>
-              <input
-                type="radio"
-                name="detection_mode"
-                checked={config.detection?.mode === "spark"}
-                onChange={() => setConfig((prev) => ({ ...prev!, detection: { ...prev!.detection!, mode: "spark" } }))}
-                className="accent-blue-500"
-              />
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-white/80 font-medium">Spark (Dual-PC)</span>
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 font-semibold">REMOTE</span>
-                </div>
-                <p className="text-[10px] text-white/30 mt-0.5">Stream gameplay metadata from a second PC via UDP. Requires Spark host agent on remote machine.</p>
-              </div>
-            </label>
-
-          </div>
-
-          {/* Auto-fallback toggle — only when native is selected and available */}
-          {config.detection?.mode === "native" && !isMacOS && (
-            <div className="mt-4 p-3 bg-yellow-500/[0.04] border border-yellow-500/15 rounded-xl">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-xs text-yellow-300/80 font-medium">Auto-fallback to Python</span>
-                  <p className="text-[10px] text-white/30 mt-0.5">
-                    If the native engine fails to start, automatically fall back to the Python sidecar.
-                  </p>
-                </div>
-                <Toggle
-                  on={config.detection?.python_fallback ?? true}
-                  onToggle={() => setConfig((prev) => ({
-                    ...prev!,
-                    detection: { ...prev!.detection!, python_fallback: !prev!.detection!.python_fallback },
-                  }))}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Spark PIN — only when Spark is selected */}
-          {config.detection?.mode === "spark" && (
-            <div className="mt-4 p-3 bg-blue-500/[0.04] border border-blue-500/15 rounded-xl">
-              <label className="block text-[11px] uppercase tracking-wider text-white/50 mb-1.5">
-                Spark Receiver PIN
-              </label>
-              <input
-                type="text"
-                maxLength={4}
-                value={config.engine_settings.spark_pin}
-                onChange={(e) =>
-                  setEngine("spark_pin", e.target.value.replace(/\D/g, "").slice(0, 4))
-                }
-                placeholder="0000"
-                className="input-glass !w-24 tracking-[0.5em] text-center placeholder:tracking-normal font-mono"
-              />
-              <p className="text-[10px] text-white/25 mt-1.5">
-                Secure 4-digit PIN — must match the passcode on your Spark host.
+      {/* Detection Engine & Pipeline */}
+      {config &&
+        (() => {
+          const isMacOS = platform === "macos";
+          return (
+            <CollapsibleSection
+              title="Detection Engine & Pipeline"
+              description="How the detection engine decides what you're playing."
+              icon="🔄"
+              badge={
+                <span className="text-[10px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1.5 border transition-all duration-300 bg-emerald-500/10 border-emerald-500/20 text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  {engineStatus.running ? "RUNNING" : "STOPPED"}
+                </span>
+              }
+            >
+              <p className="text-xs text-white/40 mb-4 leading-relaxed">
+                Detection runs on Windows, macOS, and Linux.
+                {isMacOS && (
+                  <>
+                    {" "}
+                    On macOS, grant <strong className="text-yellow-300/80">
+                      Screen Recording
+                    </strong>{" "}
+                    permission (System Settings → Privacy &amp; Security) so the engine can read
+                    window titles.
+                  </>
+                )}
               </p>
-            </div>
-          )}
 
-          {/* Pipeline section */}
-          <div className="mt-6 pt-6 border-t border-white/[0.06]">
-            <div className="flex items-center gap-3 mb-4">
-              <span className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/5 flex items-center justify-center text-lg shadow-inner shrink-0">⛓️</span>
-              <div>
-                <h4 className="text-sm font-semibold text-white/95 tracking-wide">Detection Pipeline</h4>
-                <p className="text-[11px] text-white/40 mt-0.5">Configure the 6-stage ForgeWaterfall process pipeline.</p>
-              </div>
-            </div>
-
-          <p className="text-xs text-white/40 mb-4 leading-relaxed">
-            The multi-stage ForgeWaterfall evaluates running processes to decide whether they should
-            be accepted, rejected, or forwarded for further analysis.
-          </p>
-
-          {/* Pipeline flow indicator */}
-          <div className="flex items-center gap-1.5 mb-5 p-3 bg-white/[0.02] border border-white/5 rounded-xl">
-            {["1", "2", "3", "4", "5", "6"].map((s, i) => (
-              <span key={s} className="flex items-center gap-1">
-                <span
-                  className={`w-2.5 h-2.5 rounded-full transition-colors duration-300 ${
-                    s === "2"
-                      ? config.engine_settings.strict_forge_mode
-                        ? "bg-green-400 shadow-sm shadow-green-400/50"
-                        : "bg-white/15"
-                      : s === "3"
-                      ? config.engine_settings.process_filter_bypass
-                        ? "bg-yellow-400/60 shadow-sm shadow-yellow-400/50"
-                        : "bg-green-400"
-                      : "bg-green-400"
-                  }`}
-                />
-                {i < 5 && <span className="text-white/[0.08] text-[10px]">→</span>}
-              </span>
-            ))}
-            <span className="text-[11px] font-medium text-white/50 ml-2">
-              Waterfall Mode:{" "}
-              <span className="text-purple-300">
-                {config.engine_settings.strict_forge_mode ? "Strict Lockdown" : "Standard Evaluator"}
-              </span>
-            </span>
-          </div>
-
-          {!showPipelineAdvanced && (
-            <button
-              type="button"
-              onClick={() => setShowPipelineAdvanced(true)}
-              className="mt-2 w-full text-left text-[10px] uppercase tracking-wider font-semibold text-white/30 hover:text-white/60 transition-colors cursor-pointer px-3 py-2.5 rounded-lg border border-dashed border-white/[0.06] hover:border-white/[0.12] bg-white/[0.01] hover:bg-white/[0.03]"
-            >
-              ▸ Advanced
-            </button>
-          )}
-
-          {showPipelineAdvanced && (
-            <button
-              type="button"
-              onClick={() => setShowPipelineAdvanced(false)}
-              className="mb-3 w-full text-left text-[10px] uppercase tracking-wider font-semibold text-white/30 hover:text-white/60 transition-colors cursor-pointer px-3 py-2.5 rounded-lg border border-dashed border-white/[0.06] hover:border-white/[0.12] bg-white/[0.01] hover:bg-white/[0.03]"
-            >
-              ▸ Simple
-            </button>
-          )}
-
-          <div className={showPipelineAdvanced ? "flex flex-col gap-1" : "hidden"}>
-            {/* Stage 1: Instant Match */}
-            <div className="flex items-center justify-between py-3 border-b border-white/[0.05]">
-              <div className="flex items-center gap-3.5">
-                <span className="w-6 h-6 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-[10px] font-bold flex items-center justify-center shrink-0">
-                  1
-                </span>
-                <div>
-                  <span className="text-xs text-white/80 font-medium">Instant Match</span>
-                  <p className="text-[10px] text-white/30 mt-0.5">
-                    Skips immediately to output if process matches a known game in library
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Stage 2: Lockdown */}
-            <div className="flex items-center justify-between py-3 border-b border-white/[0.05]">
-              <div className="flex items-center gap-3.5">
-                <span className="w-6 h-6 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-[10px] font-bold flex items-center justify-center shrink-0">
-                  2
-                </span>
-                <div>
-                  <span className="text-xs text-white/80 font-medium">Lockdown</span>
-                  <p className="text-[10px] text-white/30 mt-0.5">
-                    Instantly rejects any process that is not explicitly in your library
-                  </p>
-                </div>
-              </div>
-              <Toggle
-                on={config.engine_settings.strict_forge_mode}
-                onToggle={() =>
-                  setEngine("strict_forge_mode", !config.engine_settings.strict_forge_mode)
-                }
-              />
-            </div>
-
-            {/* Stage 3: Behavior Traps */}
-            <div className="border-b border-white/[0.05]">
-              <div className="flex items-center justify-between py-3">
-                <button
-                  onClick={() => setTrapsOpen(!trapsOpen)}
-                  className="flex items-center gap-3.5 cursor-pointer text-left focus:outline-none"
-                >
-                  <span className="w-6 h-6 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[10px] font-bold flex items-center justify-center shrink-0">
-                    3
+              {/* Blipy dual-PC pairing (Hub side) */}
+              <div className="mt-2 p-3 bg-blue-500/[0.04] border border-blue-500/15 rounded-xl">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xs text-white/80 font-medium">Blipy Dual-PC Link</span>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 font-semibold">
+                    OPTIONAL
                   </span>
+                </div>
+                <p className="text-[10px] text-white/30 mb-2">
+                  Streaming from two PCs? Run Blipy on the gaming PC — this hub receives its
+                  detections over the LAN and updates overlays exactly like local detection.
+                </p>
+
+                <div className="flex items-center justify-between p-2.5 mb-3 bg-white/[0.02] border border-white/5 rounded-lg">
                   <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-white/80 font-medium">Behavior Traps</span>
-                      <svg
-                        className={`w-3 h-3 text-white/30 transition-transform duration-200 ${
-                          trapsOpen ? "rotate-180" : ""
-                        }`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
+                    <p className="text-xs text-white/70">Activate Link</p>
                     <p className="text-[10px] text-white/30 mt-0.5">
-                      Instantly discards non-game software using smart geometric & system traps
+                      While active, this PC's local detection pauses — Blipy is the only engine
+                      running, preventing the two sources from crosswiring.
                     </p>
                   </div>
-                </button>
-                <button
-                  onClick={() =>
-                    setEngine(
-                      "process_filter_bypass",
-                      !config.engine_settings.process_filter_bypass
-                    )
+                  <Toggle
+                    on={config.engine_settings.blipy_link_active}
+                    onToggle={() =>
+                      setEngine("blipy_link_active", !config.engine_settings.blipy_link_active)
+                    }
+                  />
+                </div>
+
+                <label className="block text-[11px] uppercase tracking-wider text-white/50 mb-1.5">
+                  Network PIN
+                </label>
+                <input
+                  type="text"
+                  maxLength={4}
+                  value={config.engine_settings.blipy_pin}
+                  onChange={(e) =>
+                    setEngine("blipy_pin", e.target.value.replace(/\D/g, "").slice(0, 4))
                   }
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer border ${
-                    config.engine_settings.process_filter_bypass
-                      ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
-                      : "bg-white/[0.05] text-white/40 border-white/10 hover:bg-white/[0.08]"
-                  }`}
-                >
-                  {config.engine_settings.process_filter_bypass ? "Bypassed" : "Active"}
-                </button>
+                  placeholder="0000"
+                  className="input-glass !w-24 tracking-[0.5em] text-center placeholder:tracking-normal font-mono"
+                />
+                <p className="text-[10px] text-white/25 mt-1.5">
+                  4-digit PIN — must match the PIN shown in Blipy on your gaming PC.
+                </p>
               </div>
-              <div
-                className={`overflow-hidden transition-all duration-300 ease-in-out ${
-                  trapsOpen ? "max-h-[600px] opacity-100 mb-4" : "max-h-0 opacity-0"
-                }`}
-              >
-                <div className="ml-9 mt-2 p-4 bg-white/[0.02] border border-white/5 rounded-xl flex flex-col gap-4">
-                  {/* Emulator Detection */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-xs text-white/70 font-medium">Emulator Detection</span>
-                      <p className="text-[10px] text-white/35 mt-0.5">
-                        Detect games inside popular emulators (Yuzu, RPCS3, Citra, etc.)
-                      </p>
-                    </div>
-                    <Toggle
-                      on={config.engine_settings.emulator_detection}
-                      onToggle={() =>
-                        setEngine("emulator_detection", !config.engine_settings.emulator_detection)
-                      }
-                    />
-                  </div>
-                  {/* RAM Floor */}
-                  <div className="border-t border-white/[0.03] pt-3">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div>
-                        <span className="text-xs text-white/70 font-medium">RAM Floor</span>
-                        <p className="text-[10px] text-white/35 mt-0.5">
-                          Processes consuming less memory are discarded as non-games
-                        </p>
-                      </div>
-                      <span className="text-xs font-mono font-semibold text-purple-300">
-                        {config.engine_settings.ram_threshold} MB
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={10}
-                      max={500}
-                      step={10}
-                      value={config.engine_settings.ram_threshold}
-                      onChange={(e) => setEngine("ram_threshold", parseInt(e.target.value))}
-                      className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-purple-500"
-                    />
-                    <div className="flex justify-between text-[9px] text-white/20 mt-0.5 font-mono">
-                      <span>10 MB</span>
-                      <span>500 MB</span>
-                    </div>
-                  </div>
-                  {/* Chromium / Electron Trap */}
-                  <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
-                    <div>
-                      <span className="text-xs text-white/70 font-medium">Chromium / Electron Trap</span>
-                      <p className="text-[10px] text-white/35 mt-0.5">
-                        Kills Discord, Spotify, VS Code, and other Electron/Chromium shells
-                      </p>
-                    </div>
-                    <Toggle
-                      on={config.engine_settings.trap_chromium}
-                      onToggle={() =>
-                        setEngine("trap_chromium", !config.engine_settings.trap_chromium)
-                      }
-                    />
-                  </div>
-                  {/* Command-Line Flag Trap */}
-                  <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
-                    <div>
-                      <span className="text-xs text-white/70 font-medium">Command-Line Flag Trap</span>
-                      <p className="text-[10px] text-white/35 mt-0.5">
-                        Kills helper processes launched with utility/render flags
-                      </p>
-                    </div>
-                    <Toggle
-                      on={config.engine_settings.trap_cmdline}
-                      onToggle={() => setEngine("trap_cmdline", !config.engine_settings.trap_cmdline)}
-                    />
-                  </div>
-                  {/* UI Framework Trap */}
-                  <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
-                    <div>
-                      <span className="text-xs text-white/70 font-medium">UI Framework Trap</span>
-                      <p className="text-[10px] text-white/35 mt-0.5">
-                        Kills known desktop tools like Task Manager, File Explorer, etc.
-                      </p>
-                    </div>
-                    <Toggle
-                      on={config.engine_settings.trap_ui_framework}
-                      onToggle={() =>
-                        setEngine("trap_ui_framework", !config.engine_settings.trap_ui_framework)
-                      }
-                    />
-                  </div>
-                  {/* Window Geometry Trap */}
-                  <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
-                    <div>
-                      <span className="text-xs text-white/70 font-medium">Window Geometry Trap</span>
-                      <p className="text-[10px] text-white/35 mt-0.5">
-                        Kills background or invisible processes with no visible presence
-                      </p>
-                    </div>
-                    <Toggle
-                      on={config.engine_settings.trap_geometry}
-                      onToggle={() =>
-                        setEngine("trap_geometry", !config.engine_settings.trap_geometry)
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
 
-            {/* Stage 4: Authority Scan */}
-            <div className="flex items-center justify-between py-3 border-b border-white/[0.05]">
-              <div className="flex items-center gap-3.5">
-                <span className="w-6 h-6 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[10px] font-bold flex items-center justify-center shrink-0">
-                  4
-                </span>
-                <div>
-                  <span className="text-xs text-white/80 font-medium">Authority Scan</span>
-                  <p className="text-[10px] text-white/30 mt-0.5">
-                    Overrides criteria if matched in Steam Registry, Discord Rich Presence, or game managers
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Stage 5: Score & Classify */}
-            <div className="border-b border-white/[0.05]">
-              <div className="flex items-center justify-between py-3">
-                <button
-                  onClick={() => setScoreOpen(!scoreOpen)}
-                  className="flex items-center gap-3.5 cursor-pointer text-left focus:outline-none"
-                >
-                  <span className="w-6 h-6 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-bold flex items-center justify-center shrink-0">
-                    5
+              {/* Pipeline section */}
+              <div className="mt-6 pt-6 border-t border-white/[0.06]">
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/5 flex items-center justify-center text-lg shadow-inner shrink-0">
+                    ⛓️
                   </span>
                   <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-white/80 font-medium">Score & Classify</span>
-                      <svg
-                        className={`w-3 h-3 text-white/30 transition-transform duration-200 ${
-                          scoreOpen ? "rotate-180" : ""
-                        }`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                    <p className="text-[10px] text-white/30 mt-0.5">
-                      Accumulates weight traits to determine whether a process is a gaming app
+                    <h4 className="text-sm font-semibold text-white/95 tracking-wide">
+                      Detection Pipeline
+                    </h4>
+                    <p className="text-[11px] text-white/40 mt-0.5">
+                      Configure the 6-stage detection pipeline.
                     </p>
                   </div>
-                </button>
-              </div>
-              <div
-                className={`overflow-hidden transition-all duration-300 ease-in-out ${
-                  scoreOpen ? "max-h-[600px] opacity-100 mb-4" : "max-h-0 opacity-0"
-                }`}
-              >
-                <div className="ml-9 mt-2 p-4 bg-white/[0.02] border border-white/5 rounded-xl flex flex-col gap-4">
-                  {/* Engine DNA */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-[10px] font-mono font-bold text-white/35 w-7 text-right">
-                        +0.4
+                </div>
+
+                <p className="text-xs text-white/40 mb-4 leading-relaxed">
+                  Each running process passes through these stages, which decide whether it's a
+                  game, gets filtered out, or needs a closer look.
+                </p>
+
+                {/* Pipeline flow indicator */}
+                <div className="flex items-center gap-1.5 mb-5 p-3 bg-white/[0.02] border border-white/5 rounded-xl">
+                  {["1", "2", "3", "4", "5", "6"].map((s, i) => (
+                    <span key={s} className="flex items-center gap-1">
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full transition-colors duration-300 ${
+                          s === "2"
+                            ? config.engine_settings.strict_forge_mode
+                              ? "bg-green-400 shadow-sm shadow-green-400/50"
+                              : "bg-white/15"
+                            : s === "3"
+                              ? config.engine_settings.process_filter_bypass
+                                ? "bg-yellow-400/60 shadow-sm shadow-yellow-400/50"
+                                : "bg-green-400"
+                              : "bg-green-400"
+                        }`}
+                      />
+                      {i < 5 && <span className="text-white/[0.08] text-[10px]">→</span>}
+                    </span>
+                  ))}
+                  <span className="text-[11px] font-medium text-white/50 ml-2">
+                    Waterfall Mode:{" "}
+                    <span className="text-purple-300">
+                      {config.engine_settings.strict_forge_mode ? "Strict Lockdown" : "Standard"}
+                    </span>
+                  </span>
+                </div>
+
+                {!showPipelineAdvanced && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPipelineAdvanced(true)}
+                    className="mt-2 w-full text-left text-[10px] uppercase tracking-wider font-semibold text-white/30 hover:text-white/60 transition-colors cursor-pointer px-3 py-2.5 rounded-lg border border-dashed border-white/[0.06] hover:border-white/[0.12] bg-white/[0.01] hover:bg-white/[0.03]"
+                  >
+                    ▸ Advanced
+                  </button>
+                )}
+
+                {showPipelineAdvanced && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPipelineAdvanced(false)}
+                    className="mb-3 w-full text-left text-[10px] uppercase tracking-wider font-semibold text-white/30 hover:text-white/60 transition-colors cursor-pointer px-3 py-2.5 rounded-lg border border-dashed border-white/[0.06] hover:border-white/[0.12] bg-white/[0.01] hover:bg-white/[0.03]"
+                  >
+                    ▸ Simple
+                  </button>
+                )}
+
+                <div className={showPipelineAdvanced ? "flex flex-col gap-1" : "hidden"}>
+                  {/* Stage 1: Instant Match */}
+                  <div className="flex items-center justify-between py-3 border-b border-white/[0.05]">
+                    <div className="flex items-center gap-3.5">
+                      <span className="w-6 h-6 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-[10px] font-bold flex items-center justify-center shrink-0">
+                        1
                       </span>
                       <div>
-                        <span className="text-xs text-white/70 font-medium">Engine DNA</span>
-                        <p className="text-[10px] text-white/35 mt-0.5">
-                          Check for signatures (Unity, Unreal, Godot, GameMaker, RPG Maker)
+                        <span className="text-xs text-white/80 font-medium">Instant Match</span>
+                        <p className="text-[10px] text-white/30 mt-0.5">
+                          Matches instantly if the process is already in your library
                         </p>
                       </div>
                     </div>
-                    <Toggle
-                      on={config.engine_settings.score_engine_dna}
-                      onToggle={() =>
-                        setEngine("score_engine_dna", !config.engine_settings.score_engine_dna)
-                      }
-                    />
                   </div>
-                  {/* Fullscreen */}
-                  <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-[10px] font-mono font-bold text-white/35 w-7 text-right">
-                        +0.3
+
+                  {/* Stage 2: Lockdown */}
+                  <div className="flex items-center justify-between py-3 border-b border-white/[0.05]">
+                    <div className="flex items-center gap-3.5">
+                      <span className="w-6 h-6 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-[10px] font-bold flex items-center justify-center shrink-0">
+                        2
                       </span>
                       <div>
-                        <span className="text-xs text-white/70 font-medium">Fullscreen Presence</span>
-                        <p className="text-[10px] text-white/35 mt-0.5">
-                          Target owns the active fullscreen foreground graphic viewport
+                        <span className="text-xs text-white/80 font-medium">Lockdown</span>
+                        <p className="text-[10px] text-white/30 mt-0.5">
+                          Rejects anything that isn't explicitly in your library
                         </p>
                       </div>
                     </div>
                     <Toggle
-                      on={config.engine_settings.score_fullscreen}
+                      on={config.engine_settings.strict_forge_mode}
                       onToggle={() =>
-                        setEngine("score_fullscreen", !config.engine_settings.score_fullscreen)
+                        setEngine("strict_forge_mode", !config.engine_settings.strict_forge_mode)
                       }
-                    />
-                  </div>
-                  {/* Window Title */}
-                  <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-[10px] font-mono font-bold text-white/35 w-7 text-right">
-                        +0.2
-                      </span>
-                      <div>
-                        <span className="text-xs text-white/70 font-medium">Unique Window Title</span>
-                        <p className="text-[10px] text-white/35 mt-0.5">
-                          Window title contains localized readable display name (not .exe string)
-                        </p>
-                      </div>
-                    </div>
-                    <Toggle
-                      on={config.engine_settings.score_window_title}
-                      onToggle={() =>
-                        setEngine("score_window_title", !config.engine_settings.score_window_title)
-                      }
-                    />
-                  </div>
-                  {/* RAM Usage */}
-                  <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-[10px] font-mono font-bold text-white/35 w-7 text-right">
-                        +0.1
-                      </span>
-                      <div>
-                        <span className="text-xs text-white/70 font-medium">Heavy RAM Allocation</span>
-                        <p className="text-[10px] text-white/35 mt-0.5">
-                          Adds points when memory exceeds the base RAM floor criteria
-                        </p>
-                      </div>
-                    </div>
-                    <Toggle
-                      on={config.engine_settings.score_ram}
-                      onToggle={() => setEngine("score_ram", !config.engine_settings.score_ram)}
                     />
                   </div>
 
-                  {/* Score Threshold */}
-                  <div className="border-t border-white/[0.03] pt-3">
-                    <div className="flex items-center justify-between mb-1.5">
+                  {/* Stage 3: Behavior Traps */}
+                  <div className="border-b border-white/[0.05]">
+                    <div className="flex items-center justify-between py-3">
+                      <button
+                        onClick={() => setTrapsOpen(!trapsOpen)}
+                        className="flex items-center gap-3.5 cursor-pointer text-left focus:outline-none"
+                      >
+                        <span className="w-6 h-6 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[10px] font-bold flex items-center justify-center shrink-0">
+                          3
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-white/80 font-medium">
+                              Behavior Traps
+                            </span>
+                            <svg
+                              className={`w-3 h-3 text-white/30 transition-transform duration-200 ${
+                                trapsOpen ? "rotate-180" : ""
+                              }`}
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={2}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M19 9l-7 7-7-7"
+                              />
+                            </svg>
+                          </div>
+                          <p className="text-[10px] text-white/30 mt-0.5">
+                            Filters out non-game software using a handful of behavioral checks
+                          </p>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() =>
+                          setEngine(
+                            "process_filter_bypass",
+                            !config.engine_settings.process_filter_bypass
+                          )
+                        }
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer border ${
+                          config.engine_settings.process_filter_bypass
+                            ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
+                            : "bg-white/[0.05] text-white/40 border-white/10 hover:bg-white/[0.08]"
+                        }`}
+                      >
+                        {config.engine_settings.process_filter_bypass ? "Bypassed" : "Active"}
+                      </button>
+                    </div>
+                    <div
+                      className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                        trapsOpen ? "max-h-[600px] opacity-100 mb-4" : "max-h-0 opacity-0"
+                      }`}
+                    >
+                      <div className="ml-9 mt-2 p-4 bg-white/[0.02] border border-white/5 rounded-xl flex flex-col gap-4">
+                        {/* Emulator Detection */}
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-xs text-white/70 font-medium">
+                              Emulator Detection
+                            </span>
+                            <p className="text-[10px] text-white/35 mt-0.5">
+                              Detect games inside popular emulators (Yuzu, RPCS3, Citra, etc.)
+                            </p>
+                            <p className="text-[10px] text-white/25 mt-1">
+                              New to emulation?{" "}
+                              <button
+                                type="button"
+                                onClick={() => openUrl("https://www.emudeck.com/")}
+                                className="text-white/40 hover:text-white/60 underline cursor-pointer"
+                              >
+                                EmuDeck
+                              </button>{" "}
+                              is an easy, beginner-friendly way to set up RetroArch, Dolphin, PCSX2,
+                              RPCS3, and more at once, and it installs straight into Steam.
+                            </p>
+                          </div>
+                          <Toggle
+                            on={config.engine_settings.emulator_detection}
+                            onToggle={() =>
+                              setEngine(
+                                "emulator_detection",
+                                !config.engine_settings.emulator_detection
+                              )
+                            }
+                          />
+                        </div>
+                        {/* RAM Floor */}
+                        <div className="border-t border-white/[0.03] pt-3">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div>
+                              <span className="text-xs text-white/70 font-medium">RAM Floor</span>
+                              <p className="text-[10px] text-white/35 mt-0.5">
+                                Processes consuming less memory are discarded as non-games
+                              </p>
+                            </div>
+                            <span className="text-xs font-mono font-semibold text-purple-300">
+                              {config.engine_settings.ram_threshold} MB
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={10}
+                            max={500}
+                            step={10}
+                            value={config.engine_settings.ram_threshold}
+                            onChange={(e) => setEngine("ram_threshold", parseInt(e.target.value))}
+                            className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-purple-500"
+                          />
+                          <div className="flex justify-between text-[9px] text-white/20 mt-0.5 font-mono">
+                            <span>10 MB</span>
+                            <span>500 MB</span>
+                          </div>
+                        </div>
+                        {/* Chromium / Electron Trap */}
+                        <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
+                          <div>
+                            <span className="text-xs text-white/70 font-medium">
+                              Chromium / Electron Trap
+                            </span>
+                            <p className="text-[10px] text-white/35 mt-0.5">
+                              Filters out Discord, Spotify, VS Code, and other Electron/Chromium
+                              apps
+                            </p>
+                          </div>
+                          <Toggle
+                            on={config.engine_settings.trap_chromium}
+                            onToggle={() =>
+                              setEngine("trap_chromium", !config.engine_settings.trap_chromium)
+                            }
+                          />
+                        </div>
+                        {/* Command-Line Flag Trap */}
+                        <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
+                          <div>
+                            <span className="text-xs text-white/70 font-medium">
+                              Command-Line Flag Trap
+                            </span>
+                            <p className="text-[10px] text-white/35 mt-0.5">
+                              Filters out helper processes launched with utility/render flags
+                            </p>
+                          </div>
+                          <Toggle
+                            on={config.engine_settings.trap_cmdline}
+                            onToggle={() =>
+                              setEngine("trap_cmdline", !config.engine_settings.trap_cmdline)
+                            }
+                          />
+                        </div>
+                        {/* UI Framework Trap */}
+                        <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
+                          <div>
+                            <span className="text-xs text-white/70 font-medium">
+                              UI Framework Trap
+                            </span>
+                            <p className="text-[10px] text-white/35 mt-0.5">
+                              Filters out known desktop tools like Task Manager, File Explorer, etc.
+                            </p>
+                          </div>
+                          <Toggle
+                            on={config.engine_settings.trap_ui_framework}
+                            onToggle={() =>
+                              setEngine(
+                                "trap_ui_framework",
+                                !config.engine_settings.trap_ui_framework
+                              )
+                            }
+                          />
+                        </div>
+                        {/* Window Geometry Trap */}
+                        <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
+                          <div>
+                            <span className="text-xs text-white/70 font-medium">
+                              Window Geometry Trap
+                            </span>
+                            <p className="text-[10px] text-white/35 mt-0.5">
+                              Filters out background or invisible processes with no visible presence
+                            </p>
+                          </div>
+                          <Toggle
+                            on={config.engine_settings.trap_geometry}
+                            onToggle={() =>
+                              setEngine("trap_geometry", !config.engine_settings.trap_geometry)
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stage 4: Authority Scan */}
+                  <div className="flex items-center justify-between py-3 border-b border-white/[0.05]">
+                    <div className="flex items-center gap-3.5">
+                      <span className="w-6 h-6 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[10px] font-bold flex items-center justify-center shrink-0">
+                        4
+                      </span>
                       <div>
-                        <span className="text-xs text-white/70 font-medium">Score Threshold</span>
-                        <p className="text-[10px] text-white/35 mt-0.5">
-                          Required aggregate weight to classify process as an active game
+                        <span className="text-xs text-white/80 font-medium">Authority Scan</span>
+                        <p className="text-[10px] text-white/30 mt-0.5">
+                          Overrides everything else if Steam, Proton/Wine, or a known launcher
+                          (Epic, EA, Uplay) confirms it
                         </p>
                       </div>
-                      <span className="text-xs font-mono font-semibold text-purple-300">
-                        {config.engine_settings.confidence_threshold.toFixed(1)}
-                      </span>
                     </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={5}
-                      value={Math.round(config.engine_settings.confidence_threshold * 100)}
-                      onChange={(e) =>
-                        setEngine("confidence_threshold", parseInt(e.target.value) / 100)
-                      }
-                      className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-purple-500"
-                    />
-                    <div className="flex justify-between text-[9px] text-white/20 mt-0.5 font-mono">
-                      <span>0.0 — absolute trust</span>
-                      <span>
-                        {(
-                          (config.engine_settings.score_engine_dna ? 0.4 : 0) +
-                          (config.engine_settings.score_fullscreen ? 0.3 : 0) +
-                          (config.engine_settings.score_window_title ? 0.2 : 0) +
-                          (config.engine_settings.score_ram ? 0.1 : 0)
-                        ).toFixed(1)}{" "}
-                        — maximum strict
+                  </div>
+
+                  {/* Stage 5: Score & Classify */}
+                  <div className="border-b border-white/[0.05]">
+                    <div className="flex items-center justify-between py-3">
+                      <button
+                        onClick={() => setScoreOpen(!scoreOpen)}
+                        className="flex items-center gap-3.5 cursor-pointer text-left focus:outline-none"
+                      >
+                        <span className="w-6 h-6 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-bold flex items-center justify-center shrink-0">
+                          5
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-white/80 font-medium">
+                              Score & Classify
+                            </span>
+                            <svg
+                              className={`w-3 h-3 text-white/30 transition-transform duration-200 ${
+                                scoreOpen ? "rotate-180" : ""
+                              }`}
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={2}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M19 9l-7 7-7-7"
+                              />
+                            </svg>
+                          </div>
+                          <p className="text-[10px] text-white/30 mt-0.5">
+                            Adds up weighted signals to decide if a process is a game
+                          </p>
+                        </div>
+                      </button>
+                    </div>
+                    <div
+                      className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                        scoreOpen ? "max-h-[600px] opacity-100 mb-4" : "max-h-0 opacity-0"
+                      }`}
+                    >
+                      <div className="ml-9 mt-2 p-4 bg-white/[0.02] border border-white/5 rounded-xl flex flex-col gap-4">
+                        {/* Engine DNA */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-[10px] font-mono font-bold text-white/35 w-7 text-right">
+                              +0.4
+                            </span>
+                            <div>
+                              <span className="text-xs text-white/70 font-medium">Engine DNA</span>
+                              <p className="text-[10px] text-white/35 mt-0.5">
+                                Check for signatures (Unity, Unreal, Godot, GameMaker, RPG Maker)
+                              </p>
+                            </div>
+                          </div>
+                          <Toggle
+                            on={config.engine_settings.score_engine_dna}
+                            onToggle={() =>
+                              setEngine(
+                                "score_engine_dna",
+                                !config.engine_settings.score_engine_dna
+                              )
+                            }
+                          />
+                        </div>
+                        {/* Fullscreen */}
+                        <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-[10px] font-mono font-bold text-white/35 w-7 text-right">
+                              +0.3
+                            </span>
+                            <div>
+                              <span className="text-xs text-white/70 font-medium">
+                                Fullscreen Presence
+                              </span>
+                              <p className="text-[10px] text-white/35 mt-0.5">
+                                The window is fullscreen
+                              </p>
+                            </div>
+                          </div>
+                          <Toggle
+                            on={config.engine_settings.score_fullscreen}
+                            onToggle={() =>
+                              setEngine(
+                                "score_fullscreen",
+                                !config.engine_settings.score_fullscreen
+                              )
+                            }
+                          />
+                        </div>
+                        {/* Window Title */}
+                        <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-[10px] font-mono font-bold text-white/35 w-7 text-right">
+                              +0.2
+                            </span>
+                            <div>
+                              <span className="text-xs text-white/70 font-medium">
+                                Unique Window Title
+                              </span>
+                              <p className="text-[10px] text-white/35 mt-0.5">
+                                Window title looks like a real name, not just an .exe
+                              </p>
+                            </div>
+                          </div>
+                          <Toggle
+                            on={config.engine_settings.score_window_title}
+                            onToggle={() =>
+                              setEngine(
+                                "score_window_title",
+                                !config.engine_settings.score_window_title
+                              )
+                            }
+                          />
+                        </div>
+                        {/* RAM Usage */}
+                        <div className="flex items-center justify-between border-t border-white/[0.03] pt-3">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-[10px] font-mono font-bold text-white/35 w-7 text-right">
+                              +0.1
+                            </span>
+                            <div>
+                              <span className="text-xs text-white/70 font-medium">
+                                Heavy RAM Allocation
+                              </span>
+                              <p className="text-[10px] text-white/35 mt-0.5">
+                                Adds points when memory usage is above the RAM floor
+                              </p>
+                            </div>
+                          </div>
+                          <Toggle
+                            on={config.engine_settings.score_ram}
+                            onToggle={() =>
+                              setEngine("score_ram", !config.engine_settings.score_ram)
+                            }
+                          />
+                        </div>
+
+                        {/* Score Threshold */}
+                        <div className="border-t border-white/[0.03] pt-3">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div>
+                              <span className="text-xs text-white/70 font-medium">
+                                Score Threshold
+                              </span>
+                              <p className="text-[10px] text-white/35 mt-0.5">
+                                Minimum score needed to count as a game
+                              </p>
+                            </div>
+                            <span className="text-xs font-mono font-semibold text-purple-300">
+                              {config.engine_settings.confidence_threshold.toFixed(1)}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={Math.round(config.engine_settings.confidence_threshold * 100)}
+                            onChange={(e) =>
+                              setEngine("confidence_threshold", parseInt(e.target.value) / 100)
+                            }
+                            className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-purple-500"
+                          />
+                          <div className="flex justify-between text-[9px] text-white/20 mt-0.5 font-mono">
+                            <span>0.0 — trust everything</span>
+                            <span>
+                              {(
+                                (config.engine_settings.score_engine_dna ? 0.4 : 0) +
+                                (config.engine_settings.score_fullscreen ? 0.3 : 0) +
+                                (config.engine_settings.score_window_title ? 0.2 : 0) +
+                                (config.engine_settings.score_ram ? 0.1 : 0)
+                              ).toFixed(1)}{" "}
+                              — strictest
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stage 6: Forged Output */}
+                  <div className="flex items-center justify-between py-3">
+                    <div className="flex items-center gap-3.5">
+                      <span className="w-6 h-6 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-bold flex items-center justify-center shrink-0">
+                        6
                       </span>
+                      <div>
+                        <span className="text-xs text-white/80 font-medium">Forged Output</span>
+                        <p className="text-[10px] text-white/30 mt-0.5">
+                          Sends the detected game to your overlays and connected platforms
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
-
-            {/* Stage 6: Forged Output */}
-            <div className="flex items-center justify-between py-3">
-              <div className="flex items-center gap-3.5">
-                <span className="w-6 h-6 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-bold flex items-center justify-center shrink-0">
-                  6
-                </span>
-                <div>
-                  <span className="text-xs text-white/80 font-medium">Forged Output</span>
-                  <p className="text-[10px] text-white/30 mt-0.5">
-                    Funnels metadata out to your active overlays, rich presence, and chat integrations
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          </div>
-        </CollapsibleSection>
-        );
-      })()}
+            </CollapsibleSection>
+          );
+        })()}
 
       {/* Timing */}
       {config && (
         <CollapsibleSection
           title="Timing & Rates"
-          description="Adjust evaluator frequencies and overlay fade thresholds."
+          description="How often the engine scans, and how overlays fade."
           icon="⏳"
           badge={
             <span className="text-[10px] bg-white/5 border border-white/5 text-white/50 px-2 py-0.5 rounded font-mono font-medium">
-              Scan: {config.engine_settings.scan_interval}s
+              Scan {config.engine_settings.scan_interval}s · Fade{" "}
+              {config.engine_settings.overlay_fade_timer}s
             </span>
           }
         >
@@ -824,10 +818,10 @@ function EngineSubTab({
               </label>
               <input
                 type="number"
-                min={1}
+                min={2}
                 max={60}
                 value={config.engine_settings.scan_interval}
-                onChange={(e) => setEngine("scan_interval", parseInt(e.target.value) || 1)}
+                onChange={(e) => setEngine("scan_interval", clampInt(e.target.value, 2, 60, 2))}
                 className="input-glass font-mono"
               />
             </div>
@@ -840,46 +834,47 @@ function EngineSubTab({
                 min={0}
                 max={120}
                 value={config.engine_settings.grace_period}
-                onChange={(e) => setEngine("grace_period", parseInt(e.target.value) || 0)}
+                onChange={(e) => setEngine("grace_period", clampInt(e.target.value, 0, 120, 0))}
                 className="input-glass font-mono"
               />
             </div>
             <div>
               <label className="block text-[11px] uppercase tracking-wider text-white/50 mb-1.5">
-                Widget Poll Rate (s)
+                Overlay Poll Rate (s)
               </label>
               <input
                 type="number"
                 min={1}
                 max={60}
-                value={config.engine_settings.widget_poll_rate}
-                onChange={(e) => setEngine("widget_poll_rate", parseInt(e.target.value) || 1)}
+                value={config.engine_settings.overlay_poll_rate}
+                onChange={(e) => setEngine("overlay_poll_rate", clampInt(e.target.value, 1, 60, 1))}
                 className="input-glass font-mono"
               />
             </div>
             <div>
               <label className="block text-[11px] uppercase tracking-wider text-white/50 mb-1.5">
-                Widget Fade Timer (s)
+                Overlay Fade Timer (s)
               </label>
               <input
                 type="number"
                 min={0}
-                max={600}
-                value={config.engine_settings.widget_fade_timer}
-                onChange={(e) => setEngine("widget_fade_timer", parseInt(e.target.value) || 0)}
+                max={120}
+                value={config.engine_settings.overlay_fade_timer}
+                onChange={(e) =>
+                  setEngine("overlay_fade_timer", clampInt(e.target.value, 0, 120, 0))
+                }
                 className="input-glass font-mono"
               />
             </div>
           </div>
-
         </CollapsibleSection>
       )}
 
       {/* Idle State */}
       {config && (
         <CollapsibleSection
-          title="Idle State fallback"
-          description="Decide fallback behavior when zero active games are found."
+          title="Idle State"
+          description="What to show when no game is running."
           icon="🌙"
           badge={
             <span className="text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-2.5 py-1 rounded-full font-semibold max-w-[120px] truncate">
@@ -902,7 +897,6 @@ function EngineSubTab({
               Category published to streaming APIs when no valid game is detected.
             </p>
           </div>
-
         </CollapsibleSection>
       )}
 
@@ -910,7 +904,7 @@ function EngineSubTab({
       {config && (
         <CollapsibleSection
           title="Streamer.bot Automation"
-          description="Hook events out to local streamer.bot websocket pipelines."
+          description="Send events to Streamer.bot over its local websocket."
           icon="🤖"
           badge={
             <span className="text-[10px] bg-white/5 border border-white/5 text-white/50 px-2 py-0.5 rounded font-mono font-medium">
@@ -945,14 +939,13 @@ function EngineSubTab({
               />
             </div>
           </div>
-
         </CollapsibleSection>
       )}
 
       {/* Token Security */}
       <CollapsibleSection
         title="Token Security"
-        description="Migrate tokens from plaintext into the secure operating system keychain."
+        description="Move your saved tokens out of plain text and into your OS keychain."
         icon="🔐"
         badge={
           keychainInfo && (
@@ -969,9 +962,8 @@ function EngineSubTab({
         }
       >
         <p className="text-xs text-white/50 mb-4 leading-relaxed">
-          OAuth keys are normally stored as plain text inside Config.json. Migrating transfers
-          credentials into Windows Credential Manager / macOS Keychain, scrubbing them safely from
-          disk.
+          OAuth tokens are normally stored as plain text in Config.json. Migrating moves them into
+          Windows Credential Manager / macOS Keychain and removes them from disk.
         </p>
         <div className="flex flex-col gap-4">
           <div>
@@ -985,6 +977,14 @@ function EngineSubTab({
                 } else {
                   toast("Migration failed", "error");
                 }
+                // The "Protected"/"Plaintext config" badge and the stored-entries
+                // list both read keychainInfo, which was only ever fetched once
+                // on mount — without this, a successful migration left both
+                // showing the pre-migration state until the user reopened
+                // Settings.
+                getKeychainStatus()
+                  .then(setKeychainInfo)
+                  .catch(() => {});
               }}
               className="btn-cta"
             >
@@ -995,7 +995,7 @@ function EngineSubTab({
           {keychainInfo && keychainInfo.stored.length > 0 && (
             <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl">
               <span className="text-[10px] uppercase tracking-wider text-white/40 block mb-2 font-bold">
-                Stored Keychain Signatures ({keychainInfo.count})
+                Stored Keychain Entries ({keychainInfo.count})
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {keychainInfo.stored.map((k) => (
@@ -1015,41 +1015,47 @@ function EngineSubTab({
   );
 }
 
-// ─── Default config fallback for dev mode (when Tauri sidecar is not running) ──
+// ─── Default config fallback for dev mode (when the Tauri backend is not running) ──
+// Deliberately empty/inert — never hardcode real keys, tokens, or IDs here.
+// This is a fallback shown before any real config loads, not a fixture.
 const defaultConfig: AppConfig = {
   api_keys: {
-    steamgrid: "7bbccc9fc8a24808bbf291e09680a287",
-    rawg: "ca51c9c394c84a9393bbc5e7782b4bd6",
+    steamgrid: "",
+    rawg: "",
     igdb_client: "",
     igdb_secret: "",
-    igdb_token: "tccpdz3xa6w94fvxm89g2c0k4is7qn",
+    igdb_token: "",
+    thegamesdb: "",
   },
   broadcaster: {
     routing_mode: "native" as const,
-    twitch_client: "ixed8yr0njzcpq8daetkmxdzcpktre",
-    twitch_secret: "d66u8jfbj6vnj298681basg9c5y180",
-    twitch_token: "gd0g2aijmfbmsyqjqioqyc79krskej",
-    twitch_refresh: "yrdtvtz5cadppd0auqtxu6tmg4j47xcryk1zs348swbbn4iiay",
-    twitch_broadcaster_id: "704830285",
-    kick_client: "01KJEPPVHARF4VQBNCC5DC2XGB",
-    kick_secret: "31e65c778d76924e869a02ea9fc3526315a304ab2c785086ed5788d8bb356909",
-    kick_channel_id: "bearddoddity",
-    kick_token: "M2JLNJVINGUTMZC3NS0ZOGFMLWJKMJITNTHMZWRLODU1ZWJI",
-    kick_refresh: "ZDZKM2I5NZCTYWU3ZI01OWU3LTGYNZKTOTLIODAWNDYXMZI4",
+    twitch_client: "",
+    twitch_secret: "",
+    twitch_token: "",
+    twitch_refresh: "",
+    twitch_broadcaster_id: "",
+    kick_client: "",
+    kick_secret: "",
+    kick_channel_id: "",
+    kick_token: "",
+    kick_refresh: "",
   },
   engine_settings: {
     idle_category: "Just Chatting",
     sb_port: 8080,
     scan_interval: 15,
     grace_period: 0,
-    widget_poll_rate: 8,
+    overlay_poll_rate: 8,
     safe_mode: false,
     auto_push: false,
-    widget_fade_timer: 15,
+    platform_push_enabled: true,
+    overlay_fade_timer: 15,
     strict_forge_mode: false,
     sb_action_name: "UpdateCategory",
-    widget_token: "KXMDVXdcmYRflUGRieg7Sg",
-    spark_pin: "0000",
+    overlay_token: "",
+    blipy_pin: "0000",
+    blipy_pairing_key: "",
+    blipy_link_active: false,
     emulator_detection: true,
     ram_threshold: 80,
     process_filter_bypass: false,
@@ -1063,13 +1069,6 @@ const defaultConfig: AppConfig = {
     score_window_title: true,
     score_ram: true,
   },
-  detection: {
-    mode: "python" as const,
-    python_fallback: true,
-    scan_interval_secs: 5,
-    dev_tools_enabled: false,
-    closed_beta_channel: false,
-  },
 };
 
 // ─── Key catalog (all available slots) ─────────────────────────────────────
@@ -1078,380 +1077,45 @@ const KEY_CATALOG: {
   label: string;
   desc: string;
   icon: string;
+  keyUrl: string;
   group?: { key: string; label: string }[];
 }[] = [
-  { key: "steamgrid", label: "SteamGridDB", desc: "Custom grid artwork, hero banners, and logo images", icon: "🖼️" },
-  { key: "rawg", label: "RAWG", desc: "Game metadata — genres, ratings, release dates, screenshots", icon: "🎮" },
+  {
+    key: "steamgrid",
+    label: "SteamGridDB",
+    desc: "Custom grid artwork, hero banners, and logo images",
+    icon: "🖼️",
+    keyUrl: "https://www.steamgriddb.com/profile/preferences/api",
+  },
+  {
+    key: "rawg",
+    label: "RAWG",
+    desc: "Game metadata — genres, ratings, release dates, screenshots",
+    icon: "🎮",
+    keyUrl: "https://rawg.io/apidocs",
+  },
   {
     key: "igdb",
     label: "IGDB",
     desc: "Twitch-authenticated IGDB API — game data, covers, screenshots, release dates",
     icon: "🎮",
+    keyUrl: "https://dev.twitch.tv/console/apps",
     group: [
       { key: "igdb_client", label: "Client ID" },
       { key: "igdb_secret", label: "Client Secret" },
       { key: "igdb_token", label: "Access Token" },
     ],
   },
+  {
+    key: "thegamesdb",
+    label: "TheGamesDB",
+    desc: "Community-run game database — strong coverage for older/retro console games",
+    icon: "🕹️",
+    keyUrl: "https://thegamesdb.net/",
+  },
 ];
 
-// ─── API Keys Sub-tab ────────────────────────────────────────────────────────
-function ApiKeysSubTab({
-  toast,
-}: {
-  toast: (msg: string, type?: ToastType) => void;
-}) {
-  const [config, setConfig] = useState<AppConfig | null>(null);
-  const [floatingOpen, setFloatingOpen] = useState(false);
-  const skipSave = useRef(false);
-  const [floatingClosing, setFloatingClosing] = useState(false);
-  const [search, setSearch] = useState("");
-  const [editingKey, setEditingKey] = useState<string | null>(null);
-  const floatingRef = useRef<HTMLDivElement>(null);
-
-  const loadConfig = useCallback(async () => {
-    skipSave.current = true;
-    const res = await tauriApi("export_config");
-    if (res && typeof res === "object" && !("error" in res)) {
-      setConfig(res as AppConfig);
-    } else {
-      setConfig(defaultConfig);
-    }
-    setTimeout(() => { skipSave.current = false; }, 500);
-  }, []);
-
-  useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
-
-  useEffect(() => {
-    if (!config || skipSave.current) return;
-    const timer = setTimeout(async () => {
-      try {
-        const res = await saveConfig(config);
-        toast(res, res.includes("success") ? "success" : "error");
-      } catch {
-        toast("Dev mode: config saved to memory (Tauri not connected)", "info");
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [config]);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && floatingOpen) closeFloating();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [floatingOpen]);
-
-  const openFloating = () => {
-    setSearch("");
-    setFloatingClosing(false);
-    setFloatingOpen(true);
-  };
-
-  const closeFloating = () => {
-    setFloatingClosing(true);
-    setTimeout(() => {
-      setFloatingOpen(false);
-      setFloatingClosing(false);
-    }, 200);
-  };
-
-  const setKey = (key: string, value: string) => {
-    setConfig((prev) => ({
-      ...prev!,
-      api_keys: { ...prev!.api_keys, [key]: value },
-    }));
-  };
-
-  const isEntryActive = (entry: (typeof KEY_CATALOG)[number]) => {
-    if (entry.group) return entry.group.some((g) => activeKeys.includes(g.key as keyof ApiKeys));
-    return activeKeys.includes(entry.key as keyof ApiKeys);
-  };
-
-  const activeKeys = config ? (Object.keys(config.api_keys) as Array<keyof ApiKeys>) : [];
-
-  const availableKeys = KEY_CATALOG.filter((k) => !isEntryActive(k));
-  const filteredAvailable = search
-    ? availableKeys.filter(
-        (k) =>
-          k.label.toLowerCase().includes(search.toLowerCase()) ||
-          k.desc.toLowerCase().includes(search.toLowerCase())
-      )
-    : availableKeys;
-
-  const addKeyFromCatalog = (entry: (typeof KEY_CATALOG)[number]) => {
-    setConfig((prev) => {
-      const next = { ...prev!.api_keys };
-      if (entry.group) {
-        for (const g of entry.group) next[g.key as keyof ApiKeys] = next[g.key as keyof ApiKeys] || "";
-        return { ...prev!, api_keys: next };
-      }
-      next[entry.key as keyof ApiKeys] = "";
-      return { ...prev!, api_keys: next };
-    });
-    setEditingKey(entry.key);
-    closeFloating();
-  };
-
-  const removeEntry = (entry: (typeof KEY_CATALOG)[number]) => {
-    setConfig((prev) => {
-      const next = { ...prev!.api_keys };
-      if (entry.group) {
-        for (const g of entry.group) delete next[g.key as keyof ApiKeys];
-      } else {
-        delete next[entry.key as keyof ApiKeys];
-      }
-      return { ...prev!, api_keys: next };
-    });
-    if (editingKey === entry.key) setEditingKey(null);
-    toast("Key removed — save to confirm", "info");
-  };
-
-  const truncate = (v: string) =>
-    v.length > 8 ? v.slice(0, 4) + "…" + v.slice(-4) : "—";
-
-  const renderFloatingCard = () => {
-    if (!floatingOpen) return null;
-    return (
-      <div
-        className={`fixed inset-0 z-[100] flex items-center justify-end bg-black/50 ${
-          floatingClosing ? "" : "animate-float-backdrop"
-        }`}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) closeFloating();
-        }}
-      >
-        <div
-          ref={floatingRef}
-          className={`relative w-[380px] h-full max-h-[600px] m-4 flex flex-col bg-[#0c0c0c] border border-white/10 rounded-2xl shadow-2xl shadow-purple-900/20 ${
-            floatingClosing ? "animate-float-card-out" : "animate-float-card-in"
-          }`}
-        >
-          <div className="p-5 pb-0">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">Add API Key</h3>
-              <button
-                onClick={closeFloating}
-                className="w-7 h-7 rounded-lg surface-1 hover:bg-white/[0.1] flex items-center justify-center text-white/40 hover:text-white/80 transition-colors cursor-pointer"
-              >
-                <svg
-                  className="w-3.5 h-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search keys…"
-              className="input-glass"
-            />
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-5 pt-3 flex flex-col gap-2 min-h-0">
-            {filteredAvailable.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 text-white/30">
-                <p className="text-sm mb-1">{search ? "No matches" : "All keys added"}</p>
-                <p className="text-[10px]">
-                  {search ? "Try a different search term" : "You can manage keys in the list"}
-                </p>
-              </div>
-            ) : (
-              filteredAvailable.map((k) => (
-                <button
-                  key={k.key}
-                  onClick={() => addKeyFromCatalog(k)}
-                  className="flex items-center gap-3 p-3 rounded-xl surface-1 hover:bg-white/[0.07] hover:border-white/15 transition-all cursor-pointer text-left group"
-                >
-                  <span className="section-head-icon text-sm !w-8 !h-8 !rounded-lg">
-                    {k.icon}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-xs text-white/80 font-medium block">{k.label}</span>
-                    <span className="text-[10px] text-white/30 block truncate">{k.desc}</span>
-                  </div>
-                  <span className="badge badge-purple opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                    + Add
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  if (!config) return <p className="text-white/40 p-6">Loading…</p>;
-
-  const apiKeys = config.api_keys || ({} as AppConfig["api_keys"]);
-
-  const displayEntries = KEY_CATALOG.filter((entry) => isEntryActive(entry));
-  const catalogKeys = new Set(
-    KEY_CATALOG.flatMap((e) => (e.group ? e.group.map((g) => g.key) : [e.key]))
-  );
-  const orphanKeys = activeKeys.filter((k) => !catalogKeys.has(k));
-  const orphanEntries: typeof displayEntries = orphanKeys.map((k) => ({ key: k, label: k, desc: "", icon: "🔑" }));
-  const allDisplay = [...displayEntries, ...orphanEntries];
-  const entryCount = allDisplay.length;
-
-  return (
-    <div>
-      {renderFloatingCard()}
-
-      <SettingsPanel>
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-white font-semibold">API Keys</h3>
-          <button
-            onClick={openFloating}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 hover:border-purple-500/40 transition-all cursor-pointer"
-          >
-            <span className="text-sm leading-none">+</span>
-            Add Key
-          </button>
-        </div>
-
-        {allDisplay.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-white/30">
-            <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-4">
-              <svg
-                className="w-6 h-6 text-white/20"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-                />
-              </svg>
-            </div>
-            <p className="text-sm mb-1">No API keys configured</p>
-            <p className="text-[10px] text-white/20">Click "Add Key" to get started</p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {allDisplay.map((entry) => {
-              const isGroup = 'group' in entry && !!(entry as any).group;
-              const isEditing = editingKey === entry.key;
-              const filledCount = isGroup
-                ? (entry as any).group.filter((g: { key: string }) => !!apiKeys[g.key as keyof ApiKeys]).length
-                : apiKeys[entry.key as keyof ApiKeys]
-                ? 1
-                : 0;
-              const totalCount = isGroup ? (entry as any).group.length : 1;
-              const hasValue = filledCount > 0;
-              const allFilled = filledCount === totalCount;
-              const subFilled = isGroup
-                ? `${filledCount}/${totalCount} fields filled`
-                : hasValue
-                ? truncate(apiKeys[entry.key as keyof ApiKeys] as string)
-                : "Not configured";
-
-              return (
-                <div
-                  key={entry.key}
-                  className={`rounded-xl border transition-all duration-200 ${
-                    isEditing
-                      ? "bg-white/[0.04] border-purple-500/30"
-                      : "bg-white/[0.02] border-white/[0.06] hover:border-white/10"
-                  }`}
-                >
-                  <div className="flex items-center gap-3 px-4 py-3">
-                    <span
-                      className={`w-2 h-2 rounded-full shrink-0 ${
-                        hasValue ? (allFilled ? "bg-green-400" : "bg-yellow-400") : "bg-white/15"
-                      }`}
-                    />
-                    <span className="text-lg shrink-0 w-7 h-7 rounded-md bg-white/[0.05] flex items-center justify-center">
-                      {entry.icon}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-xs text-white/80 font-medium block">{entry.label}</span>
-                      <span className="text-[10px] text-white/30 block truncate font-mono">
-                        {subFilled}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => setEditingKey(isEditing ? null : entry.key)}
-                        className={`btn-icon-sm edit ${isEditing ? "active" : ""}`}
-                      >
-                        {isEditing ? "Close" : "Edit"}
-                      </button>
-                      <button
-                        onClick={() => removeEntry(entry as (typeof KEY_CATALOG)[number])}
-                        className="btn-icon-sm remove"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-
-                  {isEditing && (
-                    <div className="px-4 pb-3 pt-0">
-                      <div className="ml-9 flex flex-col gap-2.5">
-                        {isGroup ? (
-                          entry.group!.map((g) => (
-                            <div key={g.key}>
-                              <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">
-                                {g.label}
-                              </label>
-                              <input
-                                type="password"
-                                value={apiKeys[g.key as keyof ApiKeys] || ""}
-                                onChange={(e) => setKey(g.key, e.target.value)}
-                                placeholder={`Enter ${g.label}`}
-                                className="input-glass"
-                              />
-                            </div>
-                          ))
-                        ) : (
-                          <>
-                            <label className="block text-[10px] uppercase tracking-wider text-white/40">
-                              {entry.label}
-                            </label>
-                            <input
-                              type="password"
-                              value={apiKeys[entry.key as keyof ApiKeys] || ""}
-                              onChange={(e) => setKey(entry.key, e.target.value)}
-                              placeholder={`Enter ${entry.label}`}
-                              className="input-glass"
-                              autoFocus
-                            />
-                            <p className="text-[10px] text-white/20">{entry.desc}</p>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <div className="mt-5 pt-4 border-t border-white/[0.06]">
-          <span className="text-[10px] text-white/25">{entryCount} keys configured</span>
-        </div>
-      </SettingsPanel>
-    </div>
-  );
-}
-
-// ─── Routing catalog ───────────────────────────────────────────────────────
+// ─── Routing catalog ───────────────────────────────────
 const ROUTING_CATALOG: {
   key: string;
   label: string;
@@ -1459,13 +1123,15 @@ const ROUTING_CATALOG: {
   icon: React.ReactNode;
   color: string;
   connectUrl: string;
-  userFields: { key: string; label: string }[];
+  keyUrl: string;
+  userFields: { key: string; label: string; hint?: string; optional?: boolean }[];
   managedFields?: { key: string; label: string }[];
 }[] = [
   {
     key: "twitch",
     label: "Twitch",
     desc: "OAuth2 via Twitch — game category updates, stream info, broadcaster identity",
+    keyUrl: "https://dev.twitch.tv/console/apps",
     icon: (
       <svg width="16" height="16" viewBox="0 0 2400 2800" fill="currentColor">
         <path d="M500,0L0,500v1800h600v500l500-500h400l900-900V0H500z M2200,1300l-400,400h-400l-350,350v-350H600V200h1600 V1300z" />
@@ -1478,17 +1144,26 @@ const ROUTING_CATALOG: {
     userFields: [
       { key: "twitch_client", label: "Client ID" },
       { key: "twitch_secret", label: "Client Secret" },
+      {
+        key: "twitch_token",
+        label: "Access Token (Optional)",
+        hint: "Alternate to Client Secret — paste a token here if you generate one yourself (your own OAuth tool/callback). Client ID is still required; Twitch's API needs it on every request regardless of how the token was obtained.",
+        optional: true,
+      },
+      {
+        key: "twitch_broadcaster_id",
+        label: "Broadcaster ID (Optional)",
+        hint: 'Only needed alongside a manually-pasted Access Token — "Connect Twitch" fetches this automatically.',
+        optional: true,
+      },
     ],
-    managedFields: [
-      { key: "twitch_token", label: "Access Token" },
-      { key: "twitch_refresh", label: "Refresh Token" },
-      { key: "twitch_broadcaster_id", label: "Broadcaster ID" },
-    ],
+    managedFields: [{ key: "twitch_refresh", label: "Refresh Token" }],
   },
   {
     key: "kick",
     label: "Kick",
     desc: "OAuth2 via Kick — channel updates, chat, stream metadata",
+    keyUrl: "https://kick.com/settings/developer",
     icon: (
       <svg width="16" height="16" viewBox="0 0 453.9 510.6" fill="currentColor">
         <path d="M0,0h170.2v113.5h56.7v-56.7h56.7V0h170.2v170.2h-56.7v56.7h-56.7v56.7h56.7v56.7h56.7v170.2h-170.2v-56.7h-56.7v-56.7h-56.7v113.5H0V0Z" />
@@ -1500,37 +1175,55 @@ const ROUTING_CATALOG: {
       { key: "kick_client", label: "Client ID" },
       { key: "kick_secret", label: "Client Secret" },
       { key: "kick_channel_id", label: "Channel ID" },
+      {
+        key: "kick_token",
+        label: "Access Token (Optional)",
+        hint: "Alternate to Client ID and Client Secret — paste a token here if you generate one yourself (your own OAuth tool/callback). Kick's API doesn't need either once you have a token.",
+        optional: true,
+      },
     ],
-    managedFields: [
-      { key: "kick_token", label: "Access Token" },
-      { key: "kick_refresh", label: "Refresh Token" },
-    ],
+    managedFields: [{ key: "kick_refresh", label: "Refresh Token" }],
   },
 ];
 
-// ─── Routing Sub-tab ─────────────────────────────────────────────────────────
-function RoutingSubTab({
-  toast,
-}: {
-  toast: (msg: string, type?: ToastType) => void;
-}) {
+// ─── API & Routing Sub-tab ──────────────────────────────
+function ApiRoutingSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void }) {
+  const [section, setSection] = useState<"keys" | "routing">("keys");
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [floatingOpen, setFloatingOpen] = useState(false);
   const [floatingClosing, setFloatingClosing] = useState(false);
+  const [floatingType, setFloatingType] = useState<"keys" | "routing">("keys");
   const [search, setSearch] = useState("");
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [oauthModal, setOauthModal] = useState<{ platform: "twitch" | "kick"; url: string } | null>(
+    null
+  );
+  const [validatingPlatform, setValidatingPlatform] = useState<string | null>(null);
   const floatingRef = useRef<HTMLDivElement>(null);
   const skipSave = useRef(false);
+
+  const [showAccessTokens, setShowAccessTokens] = useState(
+    () => loadSystemPrefs().showAccessTokens
+  );
+  useEffect(() => {
+    const handler = () => setShowAccessTokens(loadSystemPrefs().showAccessTokens);
+    window.addEventListener(SYSTEM_PREFS_EVENT, handler);
+    return () => window.removeEventListener(SYSTEM_PREFS_EVENT, handler);
+  }, []);
 
   const loadConfig = useCallback(async () => {
     skipSave.current = true;
     const res = await tauriApi("export_config");
-    if (res && typeof res === "object" && !("error" in res)) {
+    // A fresh install (no Config.json yet) returns {} — fall back to defaults
+    // so section accesses (engine_settings, api_keys, …) never crash.
+    if (res && typeof res === "object" && !("error" in res) && "engine_settings" in res) {
       setConfig(res as AppConfig);
     } else {
       setConfig(defaultConfig);
     }
-    setTimeout(() => { skipSave.current = false; }, 500);
+    setTimeout(() => {
+      skipSave.current = false;
+    }, 500);
   }, []);
 
   useEffect(() => {
@@ -1581,9 +1274,10 @@ function RoutingSubTab({
     return () => window.removeEventListener("message", handler);
   }, [loadConfig, toast]);
 
-  const openFloating = () => {
+  const openFloating = (type: "keys" | "routing") => {
     setSearch("");
     setFloatingClosing(false);
+    setFloatingType(type);
     setFloatingOpen(true);
   };
 
@@ -1595,6 +1289,62 @@ function RoutingSubTab({
     }, 200);
   };
 
+  // ── API Keys helpers ─────────────────────────────────
+  const setKey = (key: string, value: string) => {
+    setConfig((prev) => ({
+      ...prev!,
+      api_keys: { ...prev!.api_keys, [key]: value },
+    }));
+  };
+
+  const isKeyEntryActive = (entry: (typeof KEY_CATALOG)[number]) => {
+    if (entry.group) return entry.group.some((g) => activeApiKeys.includes(g.key as keyof ApiKeys));
+    return activeApiKeys.includes(entry.key as keyof ApiKeys);
+  };
+
+  const activeApiKeys = config ? (Object.keys(config.api_keys) as Array<keyof ApiKeys>) : [];
+
+  const availableKeys = KEY_CATALOG.filter((k) => !isKeyEntryActive(k));
+  const filteredAvailableKeys = search
+    ? availableKeys.filter(
+        (k) =>
+          k.label.toLowerCase().includes(search.toLowerCase()) ||
+          k.desc.toLowerCase().includes(search.toLowerCase())
+      )
+    : availableKeys;
+
+  const addKeyFromCatalog = (entry: (typeof KEY_CATALOG)[number]) => {
+    setConfig((prev) => {
+      const next = { ...prev!.api_keys };
+      if (entry.group) {
+        for (const g of entry.group)
+          next[g.key as keyof ApiKeys] = next[g.key as keyof ApiKeys] || "";
+        return { ...prev!, api_keys: next };
+      }
+      next[entry.key as keyof ApiKeys] = "";
+      return { ...prev!, api_keys: next };
+    });
+    setEditingKey(entry.key);
+    closeFloating();
+  };
+
+  const removeKeyEntry = (entry: (typeof KEY_CATALOG)[number]) => {
+    setConfig((prev) => {
+      const next = { ...prev!.api_keys };
+      if (entry.group) {
+        for (const g of entry.group) delete next[g.key as keyof ApiKeys];
+      } else {
+        delete next[entry.key as keyof ApiKeys];
+      }
+      return { ...prev!, api_keys: next };
+    });
+    if (editingKey === entry.key) setEditingKey(null);
+    toast("Key removed — save to confirm", "info");
+  };
+
+  const truncate = (v: string) => (v.length > 8 ? v.slice(0, 4) + "…" + v.slice(-4) : "—");
+
+  // ── Routing helpers ────────────────────────────────
   const setField = (key: string, value: string) => {
     setConfig((prev) => ({
       ...prev!,
@@ -1602,35 +1352,41 @@ function RoutingSubTab({
     }));
   };
 
-  const isEntryActive = (entry: (typeof ROUTING_CATALOG)[number]) => {
+  const isRouteEntryActive = (entry: (typeof ROUTING_CATALOG)[number]) => {
     if (!config) return false;
     const allKeys = [
       ...entry.userFields.map((f) => f.key),
       ...(entry.managedFields?.map((f) => f.key) ?? []),
     ];
-    return allKeys.some((k) => !!config.broadcaster[k as keyof typeof config.broadcaster]);
+    // Presence, not truthiness: addRouteFromCatalog sets a field to "" to
+    // activate its card (so the user can type into it), and removeRouteEntry
+    // deletes the key entirely to deactivate it. A truthy check meant a
+    // freshly-added, still-empty platform never satisfied its own
+    // activation check, so clicking "+ Add" silently did nothing.
+    return allKeys.some((k) => k in config.broadcaster);
   };
 
-  const availableEntries = ROUTING_CATALOG.filter((e) => !isEntryActive(e));
-  const filteredAvailable = search
-    ? availableEntries.filter(
+  const availableRoutes = ROUTING_CATALOG.filter((e) => !isRouteEntryActive(e));
+  const filteredAvailableRoutes = search
+    ? availableRoutes.filter(
         (e) =>
           e.label.toLowerCase().includes(search.toLowerCase()) ||
           e.desc.toLowerCase().includes(search.toLowerCase())
       )
-    : availableEntries;
+    : availableRoutes;
 
-  const addEntryFromCatalog = (entry: (typeof ROUTING_CATALOG)[number]) => {
+  const addRouteFromCatalog = (entry: (typeof ROUTING_CATALOG)[number]) => {
     setConfig((prev) => {
       const next = { ...prev!.broadcaster };
-      for (const f of entry.userFields) next[f.key as keyof typeof next] = (next[f.key as keyof typeof next] || "") as any;
+      for (const f of entry.userFields)
+        next[f.key as keyof typeof next] = (next[f.key as keyof typeof next] || "") as any;
       return { ...prev!, broadcaster: next };
     });
     setEditingKey(entry.key);
     closeFloating();
   };
 
-  const removeEntry = (entry: (typeof ROUTING_CATALOG)[number]) => {
+  const removeRouteEntry = (entry: (typeof ROUTING_CATALOG)[number]) => {
     setConfig((prev) => {
       const next = { ...prev!.broadcaster };
       const allKeys = [
@@ -1644,8 +1400,71 @@ function RoutingSubTab({
     toast("Integration removed — save to confirm", "info");
   };
 
+  // OAuth-backed entries (Twitch/Kick) route through disconnect_platform,
+  // which deletes the keychain entry too — clearing fields alone leaves it
+  // in place and the next config load just backfills it. Persists right
+  // away, unlike removeRouteEntry's "save to confirm".
+  const disconnectRoute = async (entry: (typeof ROUTING_CATALOG)[number]) => {
+    try {
+      await tauriApi("disconnect_platform", { platform: entry.key });
+    } catch (e) {
+      toast(`Failed to disconnect ${entry.label}: ${e}`, "error");
+      return;
+    }
+    if (editingKey === entry.key) setEditingKey(null);
+    // disconnect_platform already persisted the change to disk — reload
+    // rather than locally clearing fields, so state matches what's saved.
+    const res = await tauriApi("export_config").catch(() => null);
+    if (res) setConfig(res as AppConfig);
+    toast(`${entry.label} disconnected. Reconnect any time in API & Routing.`, "success");
+  };
+
+  // If a manually-pasted access token is already present, validate it
+  // directly instead of launching the OAuth popup — that's the whole point
+  // of the "Access Token (Optional)" field as an alternate connection path.
+  const connectOrValidate = async (entry: (typeof ROUTING_CATALOG)[number]) => {
+    const tokenKey = `${entry.key}_token`;
+    const hasManualToken = !!bc[tokenKey as keyof typeof bc];
+    if (!hasManualToken) {
+      setOauthModal({ platform: entry.key as "twitch" | "kick", url: entry.connectUrl });
+      return;
+    }
+
+    setValidatingPlatform(entry.key);
+    const cmd = entry.key === "kick" ? "kick_validate_token" : "twitch_validate_token";
+    const res = await tauriApi(cmd);
+    setValidatingPlatform(null);
+
+    if (res && typeof res === "object" && "error" in res) {
+      toast(`${entry.label} token invalid: ${(res as { error: string }).error}`, "error");
+      return;
+    }
+    toast(`Connected to ${entry.label} as ${res}`, "success");
+    loadConfig();
+  };
+
+  // ── Floating card ─────────────────────────────────
   const renderFloatingCard = () => {
     if (!floatingOpen) return null;
+    const isKeys = floatingType === "keys";
+    const items = isKeys ? filteredAvailableKeys : filteredAvailableRoutes;
+    const title = isKeys ? "Add API Key" : "Add Integration";
+    const placeholder = isKeys ? "Search keys…" : "Search integrations…";
+    const emptyMain = isKeys
+      ? search
+        ? "No matches"
+        : "All keys added"
+      : search
+        ? "No matches"
+        : "All integrations active";
+    const emptySub = isKeys
+      ? search
+        ? "Try a different search term"
+        : "You can manage keys in the list"
+      : search
+        ? "Try a different search term"
+        : "You can manage integrations in the list";
+
     return (
       <div
         className={`fixed inset-0 z-[100] flex items-center justify-end bg-black/50 ${
@@ -1657,13 +1476,13 @@ function RoutingSubTab({
       >
         <div
           ref={floatingRef}
-          className={`relative w-[380px] h-full max-h-[600px] m-4 flex flex-col bg-[#0c0c0c] border border-white/10 rounded-2xl shadow-2xl shadow-purple-900/20 ${
+          className={`relative w-[380px] h-full max-h-[600px] m-4 flex flex-col bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-purple-900/20 ${
             floatingClosing ? "animate-float-card-out" : "animate-float-card-in"
           }`}
         >
           <div className="p-5 pb-0">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">Add Integration</h3>
+              <h3 className="text-white font-semibold text-sm">{title}</h3>
               <button
                 onClick={closeFloating}
                 className="w-7 h-7 rounded-lg surface-1 hover:bg-white/[0.1] flex items-center justify-center text-white/40 hover:text-white/80 transition-colors cursor-pointer"
@@ -1683,24 +1502,39 @@ function RoutingSubTab({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search integrations…"
+              placeholder={placeholder}
               className="input-glass"
             />
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 pt-3 flex flex-col gap-2 min-h-0">
-            {filteredAvailable.length === 0 ? (
+            {items.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-white/30">
-                <p className="text-sm mb-1">{search ? "No matches" : "All integrations active"}</p>
-                <p className="text-[10px]">
-                  {search ? "Try a different search term" : "You can manage integrations in the list"}
-                </p>
+                <p className="text-sm mb-1">{emptyMain}</p>
+                <p className="text-[10px]">{emptySub}</p>
               </div>
+            ) : isKeys ? (
+              (items as (typeof KEY_CATALOG)[number][]).map((k) => (
+                <button
+                  key={k.key}
+                  onClick={() => addKeyFromCatalog(k)}
+                  className="flex items-center gap-3 p-3 rounded-xl surface-1 hover:bg-white/[0.07] hover:border-white/15 transition-all cursor-pointer text-left group"
+                >
+                  <span className="section-head-icon text-sm !w-8 !h-8 !rounded-lg">{k.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs text-white/80 font-medium block">{k.label}</span>
+                    <span className="text-[10px] text-white/30 block truncate">{k.desc}</span>
+                  </div>
+                  <span className="badge badge-purple opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    + Add
+                  </span>
+                </button>
+              ))
             ) : (
-              filteredAvailable.map((e) => (
+              (items as (typeof ROUTING_CATALOG)[number][]).map((e) => (
                 <button
                   key={e.key}
-                  onClick={() => addEntryFromCatalog(e)}
+                  onClick={() => addRouteFromCatalog(e)}
                   className="flex items-center gap-3 p-3 rounded-xl surface-1 hover:bg-white/[0.07] hover:border-white/15 transition-all cursor-pointer text-left group"
                 >
                   <span
@@ -1727,10 +1561,29 @@ function RoutingSubTab({
 
   if (!config) return <p className="text-white/40 p-6">Loading…</p>;
 
+  // ── API Keys display data ──────────────────────────
+  const apiKeys = config.api_keys || ({} as AppConfig["api_keys"]);
+
+  const displayKeyEntries = KEY_CATALOG.filter((entry) => isKeyEntryActive(entry));
+  const catalogKeys = new Set(
+    KEY_CATALOG.flatMap((e) => (e.group ? e.group.map((g) => g.key) : [e.key]))
+  );
+  const orphanApiKeys = activeApiKeys.filter((k) => !catalogKeys.has(k));
+  const orphanKeyEntries: typeof displayKeyEntries = orphanApiKeys.map((k) => ({
+    key: k,
+    label: k,
+    desc: "",
+    icon: "🔑",
+    keyUrl: "",
+  }));
+  const allKeyDisplay = [...displayKeyEntries, ...orphanKeyEntries];
+  const keyCount = allKeyDisplay.length;
+
+  // ── Routing display data ───────────────────────────
   const bc = config.broadcaster || ({} as AppConfig["broadcaster"]);
 
-  const displayEntries = ROUTING_CATALOG.filter((entry) => isEntryActive(entry));
-  const catalogKeys = new Set(
+  const displayRouteEntries = ROUTING_CATALOG.filter((entry) => isRouteEntryActive(entry));
+  const routeCatalogKeys = new Set(
     ROUTING_CATALOG.flatMap((e) => [
       ...e.userFields.map((f) => f.key),
       ...(e.managedFields?.map((f) => f.key) ?? []),
@@ -1739,208 +1592,486 @@ function RoutingSubTab({
   const activeBroadcasterKeys = Object.keys(bc).filter(
     (k) => !!bc[k as keyof typeof bc] && k !== "routing_mode"
   );
-  const orphanKeys = activeBroadcasterKeys.filter((k) => !catalogKeys.has(k));
-  const orphanEntries = orphanKeys.map((k) => ({
+  const orphanRouteKeys = activeBroadcasterKeys.filter((k) => !routeCatalogKeys.has(k));
+  const orphanRouteEntries = orphanRouteKeys.map((k) => ({
     key: k,
     label: k,
     desc: "",
     icon: "🔗",
     color: "#fff",
     connectUrl: "",
+    keyUrl: "",
     userFields: [{ key: k, label: k }],
-  })) as typeof displayEntries;
-  const allDisplay = [...displayEntries, ...orphanEntries];
-  const entryCount = allDisplay.length;
+  })) as typeof displayRouteEntries;
+  const allRouteDisplay = [...displayRouteEntries, ...orphanRouteEntries];
+  const routeCount = allRouteDisplay.length;
 
   return (
     <div>
       {renderFloatingCard()}
 
-      <SettingsPanel>
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-white font-semibold">Broadcaster Routing</h3>
-          <button
-            onClick={openFloating}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 hover:border-purple-500/40 transition-all cursor-pointer"
-          >
-            <span className="text-sm leading-none">+</span>
-            Add Integration
-          </button>
-        </div>
+      {/* Section toggle */}
+      <div className="flex gap-2 mb-5">
+        <button
+          onClick={() => setSection("keys")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 border cursor-pointer ${
+            section === "keys"
+              ? "bg-purple-500/15 text-purple-300 border-purple-500/25 shadow-md shadow-purple-500/5"
+              : "bg-transparent text-white/40 border-transparent hover:text-white/80 hover:bg-white/[0.04]"
+          }`}
+        >
+          <span className="text-sm">🗝️</span>
+          API Keys
+          {keyCount > 0 && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/[0.06] text-white/50">
+              {keyCount}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setSection("routing")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 border cursor-pointer ${
+            section === "routing"
+              ? "bg-purple-500/15 text-purple-300 border-purple-500/25 shadow-md shadow-purple-500/5"
+              : "bg-transparent text-white/40 border-transparent hover:text-white/80 hover:bg-white/[0.04]"
+          }`}
+        >
+          <span className="text-sm">♾️</span>
+          Routing
+          {routeCount > 0 && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/[0.06] text-white/50">
+              {routeCount}
+            </span>
+          )}
+        </button>
+      </div>
 
-        {allDisplay.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-white/30">
-            <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-4">
-              <svg
-                className="w-6 h-6 text-white/20"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
-                />
-              </svg>
-            </div>
-            <p className="text-sm mb-1">No broadcaster channels routed</p>
-            <p className="text-[10px] text-white/20">Click "Add Integration" to connect Twitch or Kick</p>
+      {/* API Keys section */}
+      {section === "keys" && (
+        <SettingsPanel>
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-white font-semibold">API Keys</h3>
+            <button
+              onClick={() => openFloating("keys")}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 hover:border-purple-500/40 transition-all cursor-pointer"
+            >
+              <span className="text-sm leading-none">+</span>
+              Add Key
+            </button>
           </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {allDisplay.map((entry) => {
-              const isEditing = editingKey === entry.key;
-              const userFilled = entry.userFields.filter((f) => !!bc[f.key as keyof typeof bc]).length;
-              const userTotal = entry.userFields.length;
-              const managedFields = 'managedFields' in entry ? (entry as any).managedFields as { key: string; label: string }[] | undefined : undefined;
-              const hasOauth = managedFields?.some((f: { key: string }) => !!bc[f.key as keyof typeof bc]) ?? false;
-              const hasValue = userFilled > 0 || hasOauth;
-              const allFilled = userFilled === userTotal;
-              const subFilled = hasOauth
-                ? "Connected via OAuth"
-                : `${userFilled}/${userTotal} configuration fields filled`;
 
-              return (
-                <div
-                  key={entry.key}
-                  className={`rounded-xl border transition-all duration-200 ${
-                    isEditing
-                      ? "bg-white/[0.04] border-purple-500/30"
-                      : "bg-white/[0.02] border-white/[0.06] hover:border-white/10"
-                  }`}
+          {allKeyDisplay.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-white/30">
+              <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-4">
+                <svg
+                  className="w-6 h-6 text-white/20"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
                 >
-                  <div className="flex items-center gap-3 px-4 py-3">
-                    <span
-                      className={`w-2 h-2 rounded-full shrink-0 ${
-                        hasValue ? (allFilled || hasOauth ? "bg-green-400" : "bg-yellow-400") : "bg-white/15"
-                      }`}
-                    />
-                    <span
-                      className="text-lg shrink-0 w-7 h-7 rounded-md flex items-center justify-center"
-                      style={{ backgroundColor: `${entry.color}15`, color: entry.color }}
-                    >
-                      {entry.icon}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-xs text-white/80 font-medium block font-sans">
-                        {entry.label}
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                  />
+                </svg>
+              </div>
+              <p className="text-sm mb-1">No API keys configured</p>
+              <p className="text-[10px] text-white/20">Click "Add Key" to get started</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {allKeyDisplay.map((entry) => {
+                const isGroup = "group" in entry && !!(entry as any).group;
+                const isEditing = editingKey === entry.key;
+                const filledCount = isGroup
+                  ? (entry as any).group.filter(
+                      (g: { key: string }) => !!apiKeys[g.key as keyof ApiKeys]
+                    ).length
+                  : apiKeys[entry.key as keyof ApiKeys]
+                    ? 1
+                    : 0;
+                const totalCount = isGroup ? (entry as any).group.length : 1;
+                const hasValue = filledCount > 0;
+                const allFilled = filledCount === totalCount;
+                const subFilled = isGroup
+                  ? `${filledCount}/${totalCount} fields filled`
+                  : hasValue
+                    ? truncate(apiKeys[entry.key as keyof ApiKeys] as string)
+                    : "Not configured";
+
+                return (
+                  <div
+                    key={entry.key}
+                    className={`rounded-xl border transition-all duration-200 ${
+                      isEditing
+                        ? "bg-white/[0.04] border-purple-500/30"
+                        : "bg-white/[0.02] border-white/[0.06] hover:border-white/10"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          hasValue ? (allFilled ? "bg-green-400" : "bg-yellow-400") : "bg-white/15"
+                        }`}
+                      />
+                      <span className="text-lg shrink-0 w-7 h-7 rounded-md bg-white/[0.05] flex items-center justify-center">
+                        {entry.icon}
                       </span>
-                      <span className="text-[10px] text-white/30 block truncate font-mono">
-                        {subFilled}
-                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs text-white/80 font-medium block">
+                          {entry.label}
+                        </span>
+                        <span className="text-[10px] text-white/30 block truncate font-mono">
+                          {subFilled}
+                        </span>
+                      </div>
+
+                      <EditRemoveButtons
+                        isEditing={isEditing}
+                        onToggleEdit={() => setEditingKey(isEditing ? null : entry.key)}
+                        onOpenLink={entry.keyUrl ? () => openUrl(entry.keyUrl).catch(() => {}) : undefined}
+                        onRemove={() => removeKeyEntry(entry as (typeof KEY_CATALOG)[number])}
+                      />
                     </div>
 
-                    <EditRemoveButtons
-                      isEditing={isEditing}
-                      onToggleEdit={() => setEditingKey(isEditing ? null : entry.key)}
-                      onRemove={() => removeEntry(entry as (typeof ROUTING_CATALOG)[number])}
-                    />
-                  </div>
-
-                  {isEditing && (
-                    <div className="px-4 pb-3 pt-0">
-                      <div className="ml-9 flex flex-col gap-3">
-                        <div className="flex flex-col gap-2.5">
-                          {entry.userFields.map((f) => (
-                            <div key={f.key}>
-                              <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">
-                                {f.label}
+                    {isEditing && (
+                      <div className="px-4 pb-3 pt-0">
+                        <div className="ml-9 flex flex-col gap-2.5">
+                          {isGroup ? (
+                            entry.group!.map((g) => (
+                              <div key={g.key}>
+                                <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">
+                                  {g.label}
+                                </label>
+                                <input
+                                  type="password"
+                                  value={apiKeys[g.key as keyof ApiKeys] || ""}
+                                  onChange={(e) => setKey(g.key, e.target.value)}
+                                  placeholder={`Enter ${g.label}`}
+                                  className="input-glass"
+                                />
+                              </div>
+                            ))
+                          ) : (
+                            <>
+                              <label className="block text-[10px] uppercase tracking-wider text-white/40">
+                                {entry.label}
                               </label>
                               <input
-                                type={f.key.includes("secret") ? "password" : "text"}
-                                value={(bc[f.key as keyof typeof bc] as string) || ""}
-                                onChange={(e) => setField(f.key, e.target.value)}
-                                placeholder={`Enter ${f.label}`}
+                                type="password"
+                                value={apiKeys[entry.key as keyof ApiKeys] || ""}
+                                onChange={(e) => setKey(entry.key, e.target.value)}
+                                placeholder={`Enter ${entry.label}`}
                                 className="input-glass"
+                                autoFocus
                               />
-                            </div>
-                          ))}
+                              <p className="text-[10px] text-white/20">{entry.desc}</p>
+                            </>
+                          )}
                         </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
-                        {entry.connectUrl && (
-                          <button
-                            onClick={() => window.open(entry.connectUrl, "_blank")}
-                            className="btn-cta"
-                          >
-                            🔗 Connect {entry.label}
-                          </button>
-                        )}
+          <div className="mt-5 pt-4 border-t border-white/[0.06]">
+            <span className="text-[10px] text-white/25">{keyCount} keys configured</span>
+          </div>
+        </SettingsPanel>
+      )}
 
-                        {managedFields && managedFields.length > 0 && (
-                          <div className="flex flex-col gap-2.5 mt-1 pt-2.5 border-t border-white/[0.06]">
-                            <span className="text-[10px] uppercase tracking-wider text-white/25 font-semibold">
-                              Managed (from OAuth)
-                            </span>
-                            {managedFields.map((f: { key: string; label: string }) => {
-                              const val = bc[f.key as keyof typeof bc] as string;
+      {/* Routing section */}
+      {section === "routing" && (
+        <SettingsPanel>
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-white font-semibold">Broadcaster Routing</h3>
+            <button
+              onClick={() => openFloating("routing")}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 hover:border-purple-500/40 transition-all cursor-pointer"
+            >
+              <span className="text-sm leading-none">+</span>
+              Add Integration
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between py-3 mb-2 border-b border-white/[0.05]">
+            <div>
+              <span className="text-xs text-white/80 font-medium">Platform Detection</span>
+              <p className="text-[10px] text-white/30 mt-0.5">
+                Send detected game state to Twitch / Kick. Turn off to keep detection local-only.
+              </p>
+            </div>
+            <Toggle
+              on={config.engine_settings.platform_push_enabled}
+              onToggle={() => {
+                const next = !config.engine_settings.platform_push_enabled;
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        engine_settings: { ...prev.engine_settings, platform_push_enabled: next },
+                      }
+                    : prev
+                );
+                // Off leaves the last-pushed category as-is; on picks up an
+                // in-progress session immediately instead of waiting for the
+                // next game switch.
+                if (next) tauriApi("refresh_platform_push");
+              }}
+            />
+          </div>
+
+          {allRouteDisplay.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-white/30">
+              <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-4">
+                <svg
+                  className="w-6 h-6 text-white/20"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+                  />
+                </svg>
+              </div>
+              <p className="text-sm mb-1">No broadcaster channels routed</p>
+              <p className="text-[10px] text-white/20">
+                Click "Add Integration" to connect Twitch or Kick
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {allRouteDisplay.map((entry) => {
+                const isEditing = editingKey === entry.key;
+                const requiredFields = entry.userFields.filter((f) => !f.optional);
+                const userFilled = requiredFields.filter(
+                  (f) => !!bc[f.key as keyof typeof bc]
+                ).length;
+                const userTotal = requiredFields.length;
+                const managedFields =
+                  "managedFields" in entry
+                    ? ((entry as any).managedFields as { key: string; label: string }[] | undefined)
+                    : undefined;
+                const hasOauth =
+                  managedFields?.some((f: { key: string }) => !!bc[f.key as keyof typeof bc]) ??
+                  false;
+                const hasValue = userFilled > 0 || hasOauth;
+                const allFilled = userFilled === userTotal;
+                const subFilled = hasOauth
+                  ? "Connected via OAuth"
+                  : `${userFilled}/${userTotal} configuration fields filled`;
+
+                return (
+                  <div
+                    key={entry.key}
+                    className={`rounded-xl border transition-all duration-200 ${
+                      isEditing
+                        ? "bg-white/[0.04] border-purple-500/30"
+                        : "bg-white/[0.02] border-white/[0.06] hover:border-white/10"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          hasValue
+                            ? allFilled || hasOauth
+                              ? "bg-green-400"
+                              : "bg-yellow-400"
+                            : "bg-white/15"
+                        }`}
+                      />
+                      <span
+                        className="text-lg shrink-0 w-7 h-7 rounded-md flex items-center justify-center"
+                        style={{ backgroundColor: `${entry.color}15`, color: entry.color }}
+                      >
+                        {entry.icon}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs text-white/80 font-medium block font-sans">
+                          {entry.label}
+                        </span>
+                        <span className="text-[10px] text-white/30 block truncate font-mono">
+                          {subFilled}
+                        </span>
+                      </div>
+
+                      <EditRemoveButtons
+                        isEditing={isEditing}
+                        onToggleEdit={() => setEditingKey(isEditing ? null : entry.key)}
+                        onOpenLink={entry.keyUrl ? () => openUrl(entry.keyUrl).catch(() => {}) : undefined}
+                        onRemove={() =>
+                          managedFields && managedFields.length > 0
+                            ? disconnectRoute(entry as (typeof ROUTING_CATALOG)[number])
+                            : removeRouteEntry(entry as (typeof ROUTING_CATALOG)[number])
+                        }
+                        removeLabel={
+                          managedFields && managedFields.length > 0 ? "Disconnect" : "Remove"
+                        }
+                      />
+                    </div>
+
+                    {isEditing && (
+                      <div className="px-4 pb-3 pt-0">
+                        <div className="ml-9 flex flex-col gap-3">
+                          <div className="flex flex-col gap-2.5">
+                            {entry.userFields.map((f) => {
+                              // Access Token specifically (not Client Secret,
+                              // not Refresh Token) is hidden entirely — label,
+                              // input, and hint all disappear — unless "Show
+                              // Access Tokens" is on (Settings > System >
+                              // Network).
+                              if (f.key.includes("token") && !showAccessTokens) return null;
                               return (
-                                <div key={f.key} className="flex items-center justify-between">
-                                  <div className="flex-1 min-w-0">
-                                    <span className="text-[10px] text-white/40 block">{f.label}</span>
-                                    <span className="text-[10px] text-white/20 font-mono block truncate">
-                                      {val
-                                        ? val.length > 12
-                                          ? val.slice(0, 6) + "…" + val.slice(-4)
-                                          : val
-                                        : "—"}
-                                    </span>
-                                  </div>
-                                  <span
-                                    className={`text-[9px] px-1.5 py-0.5 rounded ${
-                                      val
-                                        ? "bg-green-500/10 text-green-400/70"
-                                        : "bg-white/[0.04] text-white/20"
-                                    }`}
-                                  >
-                                    {val ? "Active" : "Pending"}
-                                  </span>
+                                <div key={f.key}>
+                                  <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">
+                                    {f.label}
+                                  </label>
+                                  <input
+                                    type={f.key.includes("secret") ? "password" : "text"}
+                                    value={(bc[f.key as keyof typeof bc] as string) || ""}
+                                    onChange={(e) => setField(f.key, e.target.value)}
+                                    placeholder={`Enter ${f.label}`}
+                                    className="input-glass"
+                                  />
+                                  {f.hint && (
+                                    <p className="text-[10px] text-white/20 mt-1 leading-snug">
+                                      {f.hint}
+                                    </p>
+                                  )}
                                 </div>
                               );
                             })}
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
 
-        <div className="mt-5 pt-4 border-t border-white/[0.06]">
-          <span className="text-[10px] text-white/25">{entryCount} integrations configured</span>
-        </div>
-      </SettingsPanel>
+                          {entry.connectUrl &&
+                            (() => {
+                              const hasManualToken = !!bc[`${entry.key}_token` as keyof typeof bc];
+                              const isValidating = validatingPlatform === entry.key;
+                              return (
+                                <button
+                                  onClick={() => connectOrValidate(entry)}
+                                  disabled={isValidating}
+                                  className="btn-cta"
+                                >
+                                  {isValidating
+                                    ? "Verifying…"
+                                    : hasManualToken
+                                      ? `✓ Verify ${entry.label} Token`
+                                      : `🔗 Connect ${entry.label}`}
+                                </button>
+                              );
+                            })()}
+
+                          {managedFields && managedFields.length > 0 && (
+                            <div className="flex flex-col gap-2.5 mt-1 pt-2.5 border-t border-white/[0.06]">
+                              <span className="text-[10px] uppercase tracking-wider text-white/25 font-semibold">
+                                Managed (from OAuth)
+                              </span>
+                              {managedFields.map((f: { key: string; label: string }) => {
+                                const val = bc[f.key as keyof typeof bc] as string;
+                                return (
+                                  <div key={f.key} className="flex items-center justify-between">
+                                    <div className="flex-1 min-w-0">
+                                      <span className="text-[10px] text-white/40 block">
+                                        {f.label}
+                                      </span>
+                                      <span className="text-[10px] text-white/20 font-mono block truncate">
+                                        {val
+                                          ? val.length > 12
+                                            ? val.slice(0, 6) + "…" + val.slice(-4)
+                                            : val
+                                          : "—"}
+                                      </span>
+                                    </div>
+                                    <span
+                                      className={`text-[9px] px-1.5 py-0.5 rounded ${
+                                        val
+                                          ? "bg-green-500/10 text-green-400/70"
+                                          : "bg-white/[0.04] text-white/20"
+                                      }`}
+                                    >
+                                      {val ? "Active" : "Pending"}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="mt-5 pt-4 border-t border-white/[0.06]">
+            <span className="text-[10px] text-white/25">{routeCount} integrations configured</span>
+          </div>
+        </SettingsPanel>
+      )}
+
+      {oauthModal && (
+        <OAuthConnectModal
+          open={!!oauthModal}
+          onClose={() => setOauthModal(null)}
+          platform={oauthModal.platform}
+          connectUrl={oauthModal.url}
+          onSuccess={() => {
+            loadConfig();
+            setOauthModal(null);
+            toast(
+              oauthModal.platform.charAt(0).toUpperCase() +
+                oauthModal.platform.slice(1) +
+                " connected!",
+              "success"
+            );
+          }}
+        />
+      )}
     </div>
   );
 }
 
 // ─── About Sub-tab ───────────────────────────────────────────────────────────
 function AboutSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void }) {
+  const [appVersion, setAppVersion] = useState("");
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
+
   return (
     <div>
       <CollapsibleSection
-        title="System Information Dashboard"
-        description="View hardware variables, Tauri dependencies, and database signatures."
+        title="About"
+        description="App version, platform, and where your data lives."
         icon="ℹ️"
         defaultOpen={true}
         badge={
           <span className="text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-2.5 py-1 rounded-full font-semibold">
-            StatusForge v1.0.8
+            StatusForge v{appVersion || "…"}
           </span>
         }
       >
         <div className="grid grid-cols-2 gap-4">
           {[
-            { label: "App Version", value: "1.0.8", icon: "🚀" },
-            { label: "Tauri Version", value: "2.x Sidecar", icon: "🦀" },
-            { label: "Runtime Host", value: navigator.platform, icon: "💻" },
+            { label: "App Version", value: appVersion || "…", icon: "🚀" },
+            { label: "Tauri Version", value: "2.x", icon: "🦀" },
+            { label: "Platform", value: navigator.platform, icon: "💻" },
             { label: "Local Database", value: "Forge_Database.json", icon: "📂" },
-            { label: "Keychain Service", value: "Active (Encrypted)", icon: "🛡️" },
-            { label: "Environment Mode", value: "Tauri sidecar host", icon: "🌐" },
+            { label: "Keychain", value: "Active", icon: "🛡️" },
           ].map((item) => (
             <div
               key={item.label}
@@ -1960,16 +2091,10 @@ function AboutSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
         </div>
         <div className="mt-6 pt-4 border-t border-white/[0.04] flex gap-2">
           <button
-            onClick={() => toast("System parameters synchronized", "success")}
+            onClick={() => toast("Info refreshed", "success")}
             className="px-4 py-2 rounded-lg text-xs font-semibold bg-white/[0.04] border border-white/10 text-white/70 hover:bg-white/[0.08] hover:text-white/90 transition-all cursor-pointer"
           >
             Refresh Info
-          </button>
-          <button
-            onClick={() => toast("JSON configuration exported", "success")}
-            className="px-4 py-2 rounded-lg text-xs font-semibold bg-white/[0.04] border border-white/10 text-white/70 hover:bg-white/[0.08] hover:text-white/90 transition-all cursor-pointer"
-          >
-            Export Config
           </button>
         </div>
       </CollapsibleSection>
@@ -1978,50 +2103,15 @@ function AboutSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
 }
 
 // ─── System Sub-tab ───────────────────────────────────────────────────────────
-interface SystemPrefs {
-  autoStartEngine: boolean;
-  minimizeToTray: boolean;
-  launchOnLogin: boolean;
-  hardwareAccel: boolean;
-  showNotifications: boolean;
-  notifyOnGameDetect: boolean;
-  notifyOnStreamEvents: boolean;
-  logLevel: "error" | "warn" | "info" | "debug";
-  language: string;
-  configBackupEnabled: boolean;
-  steamRichPresence: boolean;
-  discordRichPresence: boolean;
-  customWebhookEnabled: boolean;
-  customWebhookUrl: string;
-  wsAutoReconnect: boolean;
-  updateChannel: "stable" | "beta" | "closed-beta";
-}
-
-const defaultSystemPrefs: SystemPrefs = {
-  autoStartEngine: false,
-  minimizeToTray: true,
-  launchOnLogin: false,
-  hardwareAccel: true,
-  showNotifications: true,
-  notifyOnGameDetect: true,
-  notifyOnStreamEvents: false,
-  logLevel: "info",
-  language: "en",
-  configBackupEnabled: true,
-  steamRichPresence: false,
-  discordRichPresence: false,
-  customWebhookEnabled: false,
-  customWebhookUrl: "",
-  wsAutoReconnect: true,
-  updateChannel: "stable",
-};
+// SystemPrefs interface/defaults/apply live in src/systemPrefs.ts (shared with
+// App.tsx boot wiring and useWebSocket).
 
 function AdvancedAnimations({
   prefs,
   set,
 }: {
-  prefs: SystemPrefs;
-  set: (key: keyof SystemPrefs, value: string | boolean) => void;
+  prefs: ThemePrefs;
+  set: (key: keyof ThemePrefs, value: string | boolean) => void;
 }) {
   return (
     <>
@@ -2068,7 +2158,7 @@ function AdvancedAnimations({
             <div>
               <span className="text-xs text-white/75 font-medium">Cover Glint Reflection</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Sweeping bright diagonal reflection across art pieces
+                A soft light sweep across cover art
               </p>
             </div>
             <Toggle on={prefs.coverGlint} onToggle={() => set("coverGlint", !prefs.coverGlint)} />
@@ -2086,7 +2176,7 @@ function AdvancedAnimations({
             <div>
               <span className="text-xs text-white/75 font-medium">Hover Card Lifting</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Translate library elements vertically and drop nice shadows on hover
+                Lift cards slightly and add a shadow on hover
               </p>
             </div>
             <Toggle
@@ -2098,7 +2188,7 @@ function AdvancedAnimations({
             <div>
               <span className="text-xs text-white/75 font-medium">Card Sweep Glint</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Run soft light sweeps across card bounds on cursor hover
+                A soft light sweep across the card on hover
               </p>
             </div>
             <Toggle on={prefs.cardGlint} onToggle={() => set("cardGlint", !prefs.cardGlint)} />
@@ -2106,11 +2196,12 @@ function AdvancedAnimations({
           <div className="flex items-center justify-between border-t border-white/[0.02] pt-3">
             <div>
               <span className="text-xs text-white/75 font-medium">Holographic Borders</span>
-              <p className="text-[10px] text-white/35 mt-0.5">
-                Animate rainbow accent borders on cursor hover
-              </p>
+              <p className="text-[10px] text-white/35 mt-0.5">Rainbow border animation on hover</p>
             </div>
-            <Toggle on={prefs.holoEffects} onToggle={() => set("holoEffects", !prefs.holoEffects)} />
+            <Toggle
+              on={prefs.holoEffects}
+              onToggle={() => set("holoEffects", !prefs.holoEffects)}
+            />
           </div>
         </div>
       </div>
@@ -2123,18 +2214,23 @@ function AdvancedAnimations({
         <div className="flex flex-col gap-3.5">
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-xs text-white/75 font-medium font-sans">Indicators Pulsing</span>
+              <span className="text-xs text-white/75 font-medium font-sans">
+                Pulsing Indicators
+              </span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Pulsing green/yellow nodes for LIVE &amp; active system engines
+                Pulsing dots for live and active status
               </p>
             </div>
-            <Toggle on={prefs.statusPulse} onToggle={() => set("statusPulse", !prefs.statusPulse)} />
+            <Toggle
+              on={prefs.statusPulse}
+              onToggle={() => set("statusPulse", !prefs.statusPulse)}
+            />
           </div>
           <div className="flex items-center justify-between border-t border-white/[0.02] pt-3">
             <div>
-              <span className="text-xs text-white/75 font-medium">Toast Notification slide</span>
+              <span className="text-xs text-white/75 font-medium">Toast Notifications</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Smooth slide-in coordinates for notifications
+                Smooth slide-in animation for toast notifications
               </p>
             </div>
             <Toggle
@@ -2144,9 +2240,9 @@ function AdvancedAnimations({
           </div>
           <div className="flex items-center justify-between border-t border-white/[0.02] pt-3">
             <div>
-              <span className="text-xs text-white/75 font-medium">Overlay Popups slide</span>
+              <span className="text-xs text-white/75 font-medium">Modal Animations</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Smooth scaling and fade curves for modal cards
+                Smooth scale and fade when modals open
               </p>
             </div>
             <Toggle
@@ -2156,9 +2252,11 @@ function AdvancedAnimations({
           </div>
           <div className="flex items-center justify-between border-t border-white/[0.02] pt-3">
             <div>
-              <span className="text-xs text-white/75 font-medium font-sans">Usage Bar Transition</span>
+              <span className="text-xs text-white/75 font-medium font-sans">
+                Usage Bar Transition
+              </span>
               <p className="text-[10px] text-white/35 mt-0.5 font-sans">
-                Enable smooth layout width transitions on CPU / Memory monitoring stats
+                Smoothly animate the CPU / Memory usage bars
               </p>
             </div>
             <Toggle
@@ -2170,7 +2268,7 @@ function AdvancedAnimations({
             <div>
               <span className="text-xs text-white/75 font-medium">Button Hover Lift</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Subtle shadow scale changes when hovering cursor over button elements
+                Subtle lift and shadow when hovering over buttons
               </p>
             </div>
             <Toggle
@@ -2184,17 +2282,15 @@ function AdvancedAnimations({
   );
 }
 
-function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg: string, type?: ToastType) => void; config: AppConfig | null; setConfig: React.Dispatch<React.SetStateAction<AppConfig | null>>; onSaveConfig: (section: string) => Promise<void> }) {
-  const [prefs, setPrefs] = useState<SystemPrefs>(() => {
-    try {
-      const stored = localStorage.getItem("statusforge_system_prefs");
-      return stored ? { ...defaultSystemPrefs, ...JSON.parse(stored) } : defaultSystemPrefs;
-    } catch {
-      return defaultSystemPrefs;
-    }
-  });
-  const [showAnimAdvanced, setShowAnimAdvanced] = useState(false);
-  const skipSave = useRef(false);
+function SystemSubTab({
+  toast,
+}: {
+  toast: (msg: string, type?: ToastType) => void;
+  config: AppConfig | null;
+  setConfig: React.Dispatch<React.SetStateAction<AppConfig | null>>;
+  onSaveConfig: (section: string) => Promise<void>;
+}) {
+  const [prefs, setPrefs] = useState<SystemPrefs>(loadSystemPrefs);
 
   const toggle = (key: keyof SystemPrefs) => {
     setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -2204,17 +2300,33 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
     setPrefs((prev) => ({ ...prev, [key]: value }));
   };
 
+  // "Launch on Login" is backed by the OS autostart entry, not localStorage —
+  // read the real state on mount and write it via set_autostart on toggle.
   useEffect(() => {
-    if (skipSave.current) return;
+    tauriApi("get_autostart")
+      .then((v) => {
+        if (typeof v === "boolean") setPrefs((p) => ({ ...p, launchOnLogin: v }));
+      })
+      .catch(() => {});
+  }, []);
+
+  const toggleLaunchOnLogin = async () => {
+    const next = !prefs.launchOnLogin;
+    const res = await tauriApi("set_autostart", { enabled: next });
+    if (res && typeof res === "object" && "error" in res) {
+      toast(`Autostart failed: ${(res as { error: string }).error}`, "error");
+      return;
+    }
+    set("launchOnLogin", next);
+    toast(next ? "StatusForge will start on login" : "Autostart disabled", "success");
+  };
+
+  useEffect(() => {
     const timer = setTimeout(() => {
-      try {
-        localStorage.setItem("statusforge_system_prefs", JSON.stringify(prefs));
-        if (config && setConfig && onSaveConfig) {
-          const isClosedBeta = prefs.updateChannel === "closed-beta";
-          setConfig((prev) => prev ? ({ ...prev, detection: { ...prev.detection!, closed_beta_channel: isClosedBeta } }) : prev);
-          onSaveConfig("detection").catch(() => {});
-        }
-      } catch {}
+      // Persists + applies (hardware-accel class); log level goes to the
+      // Rust logger immediately.
+      saveSystemPrefs(prefs);
+      tauriApi("set_log_level", { level: prefs.logLevel });
     }, 300);
     return () => clearTimeout(timer);
   }, [prefs]);
@@ -2237,6 +2349,52 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
     }
   };
 
+  const exportGameDatabase = async () => {
+    const res = await tauriApi("export_game_database");
+    if (typeof res === "string") {
+      toast(`Database exported to ${res}`, "success");
+    } else {
+      const err =
+        res && typeof res === "object" && "error" in res ? (res as { error: string }).error : "";
+      toast(err ? `Export failed: ${err}` : "Export failed", "error");
+    }
+  };
+
+  const exportMetadataReadme = async () => {
+    const res = await tauriApi("export_metadata_readme");
+    if (typeof res === "string") {
+      toast(`Library table saved to ${res}`, "success");
+    } else {
+      const err =
+        res && typeof res === "object" && "error" in res ? (res as { error: string }).error : "";
+      toast(err ? `Export failed: ${err}` : "Export failed", "error");
+    }
+  };
+
+  // Bulk counterpart of the per-game import in the Add Game popup — reads
+  // the picked file in the browser sandbox (no backend path access) and
+  // hands the raw JSON to import_game_database, which does the actual
+  // signature check/merge. A signed file from BearddOddity's curated
+  // database gets applied field-for-field (still respecting any locks);
+  // anything else only fills in blanks.
+  const importLibraryFile = async (file: File) => {
+    let json: string;
+    try {
+      json = await file.text();
+    } catch {
+      toast("Couldn't read that file", "error");
+      return;
+    }
+    const res = await tauriApi("import_game_database", { json });
+    if (typeof res === "string") {
+      toast(res, "success");
+    } else {
+      const err =
+        res && typeof res === "object" && "error" in res ? (res as { error: string }).error : "";
+      toast(err ? `Import failed: ${err}` : "Import failed", "error");
+    }
+  };
+
   const startupCount = [prefs.launchOnLogin, prefs.autoStartEngine, prefs.minimizeToTray].filter(
     Boolean
   ).length;
@@ -2245,18 +2403,14 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
     prefs.notifyOnGameDetect,
     prefs.notifyOnStreamEvents,
   ].filter(Boolean).length;
-  const integrationsCount = [
-    prefs.steamRichPresence,
-    prefs.discordRichPresence,
-    prefs.customWebhookEnabled,
-  ].filter(Boolean).length;
+  const integrationsCount = [prefs.customWebhookEnabled].filter(Boolean).length;
 
   return (
     <div>
       {/* Startup */}
       <CollapsibleSection
         title="Startup & OS"
-        description="Configure how StatusForge initializes and behaves on computer boot."
+        description="Control what happens when your computer starts."
         icon="🚀"
         badge={
           <span className="text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-2.5 py-1 rounded-full font-semibold">
@@ -2269,16 +2423,16 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
             <div>
               <span className="text-xs text-white/75 font-medium">Launch on Login</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Automatically run StatusForge on user log-in
+                Start StatusForge automatically when you log in
               </p>
             </div>
-            <Toggle on={prefs.launchOnLogin} onToggle={() => toggle("launchOnLogin")} />
+            <Toggle on={prefs.launchOnLogin} onToggle={toggleLaunchOnLogin} />
           </div>
           <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
             <div>
               <span className="text-xs text-white/75 font-medium">Auto-start Engine</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Immediately trigger the Python process when the UI app starts
+                Start the detection engine as soon as StatusForge opens
               </p>
             </div>
             <Toggle on={prefs.autoStartEngine} onToggle={() => toggle("autoStartEngine")} />
@@ -2287,7 +2441,7 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
             <div>
               <span className="text-xs text-white/75 font-medium">Minimize to Tray</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Closing the primary window hides StatusForge inside the OS menu bar/tray
+                Closing the window keeps StatusForge running in the tray instead of quitting
               </p>
             </div>
             <Toggle on={prefs.minimizeToTray} onToggle={() => toggle("minimizeToTray")} />
@@ -2298,7 +2452,7 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
       {/* Display */}
       <CollapsibleSection
         title="Display & Hardware"
-        description="Leverage your GPU for hardware-accelerated animations and layouts."
+        description="Use your GPU for smoother animations and rendering."
         icon="📺"
         badge={
           <span
@@ -2316,7 +2470,7 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
           <div>
             <span className="text-xs text-white/75 font-medium">Hardware Acceleration</span>
             <p className="text-[10px] text-white/35 mt-0.5">
-              Leverage graphics core resources for composite window rendering (reduces lag)
+              Use your GPU to render the window (reduces lag)
             </p>
           </div>
           <Toggle on={prefs.hardwareAccel} onToggle={() => toggle("hardwareAccel")} />
@@ -2326,7 +2480,7 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
       {/* Notifications */}
       <CollapsibleSection
         title="Alert Notifications"
-        description="Receive rich desktop alerts and toaster notifications on crucial app events."
+        description="Get desktop notifications for important events."
         icon="🔔"
         badge={
           <span className="text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-2.5 py-1 rounded-full font-semibold">
@@ -2339,7 +2493,7 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
             <div>
               <span className="text-xs text-white/75 font-medium">Master Notifications</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Enable global operating system alerts for StatusForge events
+                Turn all desktop notifications on or off
               </p>
             </div>
             <Toggle on={prefs.showNotifications} onToggle={() => toggle("showNotifications")} />
@@ -2348,58 +2502,43 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
             <div>
               <span className="text-xs text-white/75 font-medium">Game Detection Alerts</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Deliver alerts immediately when a new active process is successfully verified
+                Notify you when a new game is detected
               </p>
             </div>
             <Toggle on={prefs.notifyOnGameDetect} onToggle={() => toggle("notifyOnGameDetect")} />
           </div>
           <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
             <div>
-              <span className="text-xs text-white/75 font-medium">Category Broadcast Events</span>
+              <span className="text-xs text-white/75 font-medium">Category Update Alerts</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Notify when Twitch / Kick channel categories update successfully
+                Notify you when your Twitch / Kick category updates
               </p>
             </div>
-            <Toggle on={prefs.notifyOnStreamEvents} onToggle={() => toggle("notifyOnStreamEvents")} />
+            <Toggle
+              on={prefs.notifyOnStreamEvents}
+              onToggle={() => toggle("notifyOnStreamEvents")}
+            />
           </div>
         </div>
       </CollapsibleSection>
 
       {/* Integrations */}
       <CollapsibleSection
-        title="Integrations & Rich Presence"
-        description="Publish your live status and games directly into Steam, Discord, or webhooks."
+        title="Integrations"
+        description="Publish live status events to a custom webhook."
         icon="🎮"
         badge={
           <span className="text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-2.5 py-1 rounded-full font-semibold">
-            {integrationsCount} / 3 Hooked
+            {integrationsCount} / 1 Hooked
           </span>
         }
       >
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-xs text-white/75 font-medium">Steam Rich Presence</span>
+              <span className="text-xs text-white/75 font-medium">Custom Webhook</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Modify friends list status on active Steam account via sidecar API
-              </p>
-            </div>
-            <Toggle on={prefs.steamRichPresence} onToggle={() => toggle("steamRichPresence")} />
-          </div>
-          <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
-            <div>
-              <span className="text-xs text-white/75 font-medium">Discord Rich Presence</span>
-              <p className="text-[10px] text-white/35 mt-0.5 font-sans">
-                Automatically display current game in your Discord user status profile card
-              </p>
-            </div>
-            <Toggle on={prefs.discordRichPresence} onToggle={() => toggle("discordRichPresence")} />
-          </div>
-          <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
-            <div>
-              <span className="text-xs text-white/75 font-medium">Custom Webhook Relay</span>
-              <p className="text-[10px] text-white/35 mt-0.5">
-                Send real-time JSON payload events directly to an HTTP destination
+                Send live status events to your own URL
               </p>
             </div>
             <Toggle
@@ -2423,8 +2562,8 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
 
       {/* Network */}
       <CollapsibleSection
-        title="Network socket configuration"
-        description="Establish fail-safes for websocket connection dropouts."
+        title="Network"
+        description="Control how dropped connections are handled."
         icon="🌐"
         badge={
           <span
@@ -2444,27 +2583,40 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
               Auto-Reconnect WebSocket
             </span>
             <p className="text-[10px] text-white/35 mt-0.5">
-              Instantly retry socket handshakes if link with Python service falls out
+              Automatically reconnect if the connection to the engine drops
             </p>
           </div>
           <Toggle on={prefs.wsAutoReconnect} onToggle={() => toggle("wsAutoReconnect")} />
+        </div>
+        <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/[0.06]">
+          <div>
+            <span className="text-xs text-white/75 font-medium font-sans">Show Access Tokens</span>
+            <p className="text-[10px] text-white/35 mt-0.5">
+              Reveal Access/Refresh Token previews in API &amp; Routing. Off by default — they stay
+              masked.
+            </p>
+          </div>
+          <Toggle on={prefs.showAccessTokens} onToggle={() => toggle("showAccessTokens")} />
         </div>
       </CollapsibleSection>
 
       {/* Logging & Data */}
       <CollapsibleSection
-        title="Console, Logs & Versioning"
-        description="Manage log verbosities, backups, and app updates."
+        title="Logs & Updates"
+        description="Manage logging, config backups, and app updates."
         icon="📓"
         badge={
-          <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-medium uppercase border ${
-            prefs.updateChannel === "closed-beta"
-              ? "bg-red-500/10 border-red-500/20 text-red-400"
-              : prefs.updateChannel === "beta"
-              ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-400"
-              : "bg-white/5 border-white/5 text-white/50"
-          }`}>
-            Channel: {prefs.updateChannel === "closed-beta" ? "Closed Beta" : prefs.updateChannel}
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded font-mono font-medium uppercase border ${
+              prefs.updateChannel === "closed-beta"
+                ? "bg-red-500/10 border-red-500/20 text-red-400"
+                : prefs.updateChannel === "beta"
+                  ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-400"
+                  : "bg-white/5 border-white/5 text-white/50"
+            }`}
+          >
+            {prefs.updateChannel === "closed-beta" ? "Closed Beta" : prefs.updateChannel} · Log{" "}
+            {prefs.logLevel}
           </span>
         }
       >
@@ -2472,116 +2624,138 @@ function SystemSubTab({ toast, config, setConfig, onSaveConfig }: { toast: (msg:
           <div className="flex items-center justify-between">
             <div>
               <span className="text-xs text-white/75 font-medium font-sans">Debug Log Level</span>
-              <p className="text-[10px] text-white/35 mt-0.5">
-                Set granularity of runtime stdout logging
-              </p>
+              <p className="text-[10px] text-white/35 mt-0.5">How much detail gets logged</p>
             </div>
             <GlassSelect
               value={prefs.logLevel}
-              options={logLevelOptions}
-              onChange={(v) => set("logLevel", v)}
-              className="font-mono"
+              options={[
+                { value: "error", label: "Error" },
+                { value: "warn", label: "Warning" },
+                { value: "info", label: "Info" },
+                { value: "debug", label: "Debug" },
+              ]}
+              onChange={(v) => set("logLevel", v as any)}
             />
           </div>
           <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
             <div>
               <span className="text-xs text-white/75 font-medium">Dashboard Language</span>
-              <p className="text-[10px] text-white/35 mt-0.5">
-                Set default localization for dashboard displays
-              </p>
-            </div>
-            <GlassSelect value={prefs.language} options={languageOptions} onChange={(v) => set("language", v)} />
-          </div>
-          <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
-            <div>
-              <span className="text-xs text-white/75 font-medium">Release Track Channel</span>
-              <p className="text-[10px] text-white/35 mt-0.5">
-                Opt-in for experimental developer versions or production builds
-              </p>
+              <p className="text-[10px] text-white/35 mt-0.5">Display language</p>
             </div>
             <GlassSelect
-              value={prefs.updateChannel}
-              options={updateChannelOptions}
-              onChange={(v) => set("updateChannel", v)}
-              className="font-mono"
+              value={prefs.language}
+              options={[{ value: "en", label: "English (US)" }]}
+              onChange={(v) => set("language", v)}
             />
           </div>
           <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
             <div>
-              <span className="text-xs text-white/75 font-medium">Automatic Backups</span>
+              <span className="text-xs text-white/75 font-medium font-sans">
+                Automatically Check for Updates
+              </span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Preserve up to 5 prior backups of Config.json before writing updates
+                Check GitHub releases once per launch. Installing an update is always your call.
               </p>
             </div>
-            <Toggle on={prefs.configBackupEnabled} onToggle={() => toggle("configBackupEnabled")} />
+            <Toggle
+              on={prefs.autoUpdateCheckEnabled}
+              onToggle={() => toggle("autoUpdateCheckEnabled")}
+            />
+          </div>
+          <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
+            <div>
+              <span className="text-xs text-white/75 font-medium">Update Channel</span>
+              <p className="text-[10px] text-white/35 mt-0.5">
+                Choose between stable and early-access builds
+              </p>
+            </div>
+            <GlassSelect
+              value={prefs.updateChannel}
+              options={[
+                { value: "stable", label: "Stable" },
+                { value: "beta", label: "Beta (Nightly)" },
+                { value: "closed-beta", label: "Closed Beta (Dev)" },
+              ]}
+              onChange={(v) => set("updateChannel", v as any)}
+            />
+          </div>
+          <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
+            <div>
+              <span className="text-xs text-white/75 font-medium">Dev Tools</span>
+              <p className="text-[10px] text-white/35 mt-0.5">
+                Show the Dev Tools sidebar tab (log terminal + diagnostics)
+              </p>
+            </div>
+            <Toggle on={prefs.showDevTools} onToggle={() => toggle("showDevTools")} />
           </div>
         </div>
       </CollapsibleSection>
 
+      <CollapsibleSection
+        title="Game Database"
+        description="Back up or share your library's metadata, or import a curated database."
+        icon="🗄️"
+      >
+        <div className="flex gap-3 flex-wrap">
+          <button
+            onClick={exportGameDatabase}
+            className="btn-ghost"
+            title="Full raw backup of every scraped field for every game (JSON)"
+          >
+            Export Full Database (.json)
+          </button>
+          <button
+            onClick={exportMetadataReadme}
+            className="btn-ghost"
+            title="Shareable Markdown table (cover, title, genre, year, dev, publisher) — paste into a GitHub README"
+          >
+            Export Shareable Library Table (.md)
+          </button>
+          <label
+            className="btn-ghost cursor-pointer"
+            title="Import a shared or BearddOddity-verified game database (JSON) — signed entries overwrite matching fields, unsigned ones only fill in blanks"
+          >
+            Import Library (.json)
+            <input
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) importLibraryFile(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+      </CollapsibleSection>
+
       {/* Actions */}
-      <div className="flex gap-3 mt-5">
-        <button onClick={exportConfig} className="btn-ghost">Export Config</button>
+      <div className="flex gap-3 mt-5 flex-wrap">
+        <button onClick={exportConfig} className="btn-ghost">
+          Export Config
+        </button>
+        <button
+          onClick={() => {
+            saveSystemPrefs({ ...loadSystemPrefs(), onboardingComplete: false });
+            toast("Setup guide reopened", "info");
+          }}
+          className="btn-ghost"
+        >
+          Replay Setup Guide
+        </button>
       </div>
     </div>
   );
 }
 
 // ─── Theme prefs ──────────────────────────────────────────────────────────────
-interface ThemePrefs {
-  accentColor: string;
-  bgColor: string;
-  bgOpacity: number;
-  bgBlur: number;
-  bgImage: string;
-  panelOpacity: number;
-  borderRadius: "sharp" | "soft" | "rounded";
-  fontScale: number;
-  density: "compact" | "default" | "spacious";
-  sidebarIconOnly: boolean;
-  animationsEnabled: boolean;
-  reducedMotion: boolean;
-  transitionSpeed: "instant" | "fast" | "normal" | "slow";
-  coverBreathe: boolean;
-  coverGlint: boolean;
-  cardHoverLift: boolean;
-  cardGlint: boolean;
-  holoEffects: boolean;
-  statusPulse: boolean;
-  toastAnimations: boolean;
-  modalAnimations: boolean;
-  progressBarAnimation: boolean;
-  buttonHoverEffects: boolean;
-}
-
-const defaultThemePrefs: ThemePrefs = {
-  accentColor: "#9146FF",
-  bgColor: "#050505",
-  bgOpacity: 100,
-  bgBlur: 0,
-  bgImage: "",
-  panelOpacity: 30,
-  borderRadius: "rounded",
-  fontScale: 100,
-  density: "default",
-  sidebarIconOnly: false,
-  animationsEnabled: true,
-  reducedMotion: false,
-  transitionSpeed: "normal",
-  coverBreathe: true,
-  coverGlint: true,
-  cardHoverLift: true,
-  cardGlint: true,
-  holoEffects: true,
-  statusPulse: true,
-  toastAnimations: true,
-  modalAnimations: true,
-  progressBarAnimation: true,
-  buttonHoverEffects: true,
-};
+// Storage + CSS application live in src/theme.ts (shared with App.tsx so the
+// full theme applies on boot, not just after visiting this tab).
 
 const ACCENT_PRESETS: { name: string; color: string; bg: string }[] = [
   { name: "Twitch Purple", color: "#9146FF", bg: "#080212" },
-  { name: "Kick Green", color: "#00e676", bg: "#021208" },
+  { name: "Kick Green", color: "#53FC18", bg: "#0a1403" },
   { name: "Electric Blue", color: "#3b82f6", bg: "#030818" },
   { name: "Crimson", color: "#ef4444", bg: "#120303" },
   { name: "Amber", color: "#f59e0b", bg: "#120e02" },
@@ -2599,88 +2773,145 @@ const BG_PRESETS: { name: string; color: string }[] = [
   { name: "Slate", color: "#0d1117" },
 ];
 
+// ─── Image Compression Helper ────────────────────────────────────────────────
+// Compresses uploaded images to JPEG at 85% quality, max 1920px, to keep
+// data URLs small enough for localStorage (~5MB quota).
+function compressImage(file: File, maxSize = 1920, quality = 0.85): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // Reject files larger than 25MB (before compression)
+    if (file.size > 25 * 1024 * 1024) {
+      reject(new Error("Image too large. Max 25 MB."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let w = img.width;
+        let h = img.height;
+        if (w > maxSize || h > maxSize) {
+          if (w > h) {
+            h = Math.round((h * maxSize) / w);
+            w = maxSize;
+          } else {
+            w = Math.round((w * maxSize) / h);
+            h = maxSize;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Canvas not supported"));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => reject(new Error("Failed to load image"));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+// The individual toggles inside the Animations "Advanced" dropdown — kept in
+// one place so the Quality/Performance master switches can drive them all.
+const ADVANCED_ANIM_KEYS = [
+  "coverBreathe",
+  "coverGlint",
+  "cardHoverLift",
+  "cardGlint",
+  "holoEffects",
+  "statusPulse",
+  "toastAnimations",
+  "modalAnimations",
+  "progressBarAnimation",
+  "buttonHoverEffects",
+] as const satisfies readonly (keyof ThemePrefs)[];
+
 // ─── Theme Sub-tab ────────────────────────────────────────────────────────────
 function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void }) {
-  const [prefs, setPrefs] = useState<ThemePrefs>(() => {
-    try {
-      const stored = localStorage.getItem("statusforge_theme_prefs");
-      return stored ? { ...defaultThemePrefs, ...JSON.parse(stored) } : defaultThemePrefs;
-    } catch {
-      return defaultThemePrefs;
-    }
-  });
+  const [prefs, setPrefs] = useState<ThemePrefs>(loadThemePrefs);
   const [showAnimAdvanced, setShowAnimAdvanced] = useState(false);
-  const skipSave = useRef(false);
 
   const set = <K extends keyof ThemePrefs>(key: K, value: ThemePrefs[K]) => {
     setPrefs((prev) => ({ ...prev, [key]: value }));
   };
 
-  const themeStyle = (prefs: ThemePrefs) => {
-    const root = document.documentElement;
-    root.style.setProperty("--user-accent", prefs.accentColor);
-    root.style.setProperty("--user-bg", prefs.bgColor);
-    root.style.setProperty("--user-bg-opacity", String(prefs.bgOpacity / 100));
-    root.style.setProperty("--user-bg-blur", `${prefs.bgBlur}px`);
-    root.style.setProperty("--user-bg-image", prefs.bgImage ? `url(${prefs.bgImage})` : "none");
-    root.style.setProperty("--user-panel-opacity", String(prefs.panelOpacity / 100));
-    root.style.setProperty("--user-font-scale", String(prefs.fontScale / 100));
-    root.style.setProperty("--user-radius", prefs.borderRadius === "sharp" ? "2px" : prefs.borderRadius === "soft" ? "8px" : "16px");
-    root.style.setProperty("--user-density", prefs.density === "compact" ? "0.75rem" : prefs.density === "spacious" ? "1.5rem" : "1rem");
-    const animOff = !prefs.animationsEnabled || prefs.reducedMotion;
-    root.style.setProperty("--user-anim-duration", animOff ? "0s" : "unset");
-    root.style.setProperty("--user-reduced-motion", prefs.reducedMotion ? "true" : "false");
-    root.style.setProperty("--user-transition-speed", animOff ? "0s" : { instant: "0s", fast: "0.1s", normal: "0.2s", slow: "0.4s" }[prefs.transitionSpeed]);
-    root.style.setProperty("--user-cover-breathe", prefs.coverBreathe && !animOff ? "unset" : "none");
-    root.style.setProperty("--user-cover-glint", prefs.coverGlint && !animOff ? "unset" : "none");
-    root.style.setProperty("--user-card-lift", prefs.cardHoverLift && !animOff ? "unset" : "none");
-    root.style.setProperty("--user-card-glint", prefs.cardGlint && !animOff ? "unset" : "none");
-    root.style.setProperty("--user-holo-opacity", prefs.holoEffects && !animOff ? "1" : "0");
-    root.style.setProperty("--user-status-pulse", prefs.statusPulse && !animOff ? "unset" : "none");
-    root.style.setProperty("--user-toast-anim", prefs.toastAnimations && !animOff ? "unset" : "none");
-    root.style.setProperty("--user-modal-anim", prefs.modalAnimations && !animOff ? "unset" : "none");
-    root.style.setProperty("--user-progress-anim", prefs.progressBarAnimation && !animOff ? "unset" : "none");
-    root.style.setProperty("--user-btn-hover", prefs.buttonHoverEffects && !animOff ? "unset" : "none");
+  // Quality and Performance are mutually exclusive — only one can be active.
+  // Quality (on) forces every Advanced toggle on and switches Performance
+  // off; Performance (on) forces them all off and switches Quality off.
+  const toggleQuality = () => {
+    setPrefs((prev) => {
+      const enabling = !prev.animationsEnabled;
+      const next: ThemePrefs = {
+        ...prev,
+        animationsEnabled: enabling,
+        reducedMotion: enabling ? false : prev.reducedMotion,
+      };
+      if (enabling) {
+        ADVANCED_ANIM_KEYS.forEach((key) => {
+          next[key] = true;
+        });
+      }
+      return next;
+    });
+  };
+
+  const togglePerformance = () => {
+    setPrefs((prev) => {
+      const enabling = !prev.reducedMotion;
+      const next: ThemePrefs = {
+        ...prev,
+        reducedMotion: enabling,
+        animationsEnabled: enabling ? false : prev.animationsEnabled,
+      };
+      if (enabling) {
+        ADVANCED_ANIM_KEYS.forEach((key) => {
+          next[key] = false;
+        });
+      }
+      return next;
+    });
   };
 
   useEffect(() => {
-    if (skipSave.current) return;
     const timer = setTimeout(() => {
       try {
-        localStorage.setItem("statusforge_theme_prefs", JSON.stringify(prefs));
-        themeStyle(prefs);
-      } catch {}
+        saveThemePrefs(prefs);
+        applyThemePrefs(prefs);
+      } catch {
+        if (prefs.bgImage.startsWith("data:") && prefs.bgImage.length > 4 * 1024 * 1024) {
+          toast("Background image too large for storage. Try a smaller image.", "error");
+        }
+      }
     }, 300);
     return () => clearTimeout(timer);
   }, [prefs]);
 
   const radiusLabel = (r: ThemePrefs["borderRadius"]) =>
     r === "sharp" ? "Sharp (2px)" : r === "soft" ? "Soft (8px)" : "Rounded (16px)";
-  const densityLabel = (d: ThemePrefs["density"]) =>
-    d === "compact" ? "Compact" : d === "spacious" ? "Spacious" : "Default";
 
-  const logLevelOptions = [
-    { value: "error", label: "Error" },
-    { value: "warn", label: "Warning" },
-    { value: "info", label: "Info" },
-    { value: "debug", label: "Debug" },
-  ];
-  const languageOptions = [{ value: "en", label: "English (US)" }];
-  const updateChannelOptions = [
-    { value: "stable", label: "Stable" },
-    { value: "beta", label: "Beta (Nightly)" },
-    { value: "closed-beta", label: "Closed Beta (Dev)" },
-  ];
-  const borderRadiusOptions = [
-    { value: "sharp", label: "Sharp (2px)" },
-    { value: "soft", label: "Soft (8px)" },
-    { value: "rounded", label: "Rounded (16px)" },
-  ];
-  const densityOptions = [
-    { value: "compact", label: "Compact" },
-    { value: "default", label: "Default" },
-    { value: "spacious", label: "Spacious" },
-  ];
+  const handleBgImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    set("bgImage", "");
+    compressImage(file)
+      .then((compressed) => {
+        try {
+          set("bgImage", compressed);
+        } catch {
+          toast("Failed to save background — image may be too large", "error");
+        }
+      })
+      .catch((err) => {
+        toast(err.message || "Failed to process image", "error");
+      });
+    e.target.value = "";
+  };
 
   return (
     <div>
@@ -2691,11 +2922,21 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
             Live Theme Preview
           </h4>
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: prefs.accentColor }} />
-            <span className="text-[10px] font-mono text-white/30">{prefs.accentColor.toUpperCase()}</span>
+            <span
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: prefs.accentColor }}
+            />
+            <span className="text-[10px] font-mono text-white/30">
+              {prefs.accentColor.toUpperCase()}
+            </span>
             <span className="text-white/10">•</span>
-            <span className="w-2.5 h-2.5 rounded-full border border-white/10" style={{ backgroundColor: prefs.bgColor }} />
-            <span className="text-[10px] font-mono text-white/30">{prefs.bgColor.toUpperCase()}</span>
+            <span
+              className="w-2.5 h-2.5 rounded-full border border-white/10"
+              style={{ backgroundColor: prefs.bgColor }}
+            />
+            <span className="text-[10px] font-mono text-white/30">
+              {prefs.bgColor.toUpperCase()}
+            </span>
           </div>
         </div>
         <div
@@ -2723,8 +2964,8 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
                   prefs.borderRadius === "sharp"
                     ? "2px"
                     : prefs.borderRadius === "soft"
-                    ? "8px"
-                    : "16px",
+                      ? "8px"
+                      : "16px",
               }}
             >
               <p className="text-xs font-bold mb-1" style={{ color: prefs.accentColor }}>
@@ -2744,8 +2985,8 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
                       prefs.borderRadius === "sharp"
                         ? "2px"
                         : prefs.borderRadius === "soft"
-                        ? "6px"
-                        : "12px",
+                          ? "6px"
+                          : "12px",
                   }}
                 >
                   Primary Button
@@ -2757,8 +2998,8 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
                       prefs.borderRadius === "sharp"
                         ? "2px"
                         : prefs.borderRadius === "soft"
-                        ? "6px"
-                        : "12px",
+                          ? "6px"
+                          : "12px",
                   }}
                 >
                   Ghost Button
@@ -2766,7 +3007,10 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: prefs.accentColor }} />
+              <span
+                className="w-2 h-2 rounded-full animate-pulse"
+                style={{ backgroundColor: prefs.accentColor }}
+              />
               <span className="text-[10px] text-white/40 font-medium">Streamer status active</span>
               <span className="text-[10px] text-white/20 font-mono ml-auto">Token: KXMDV•••Sg</span>
             </div>
@@ -2777,7 +3021,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
       {/* Colors */}
       <CollapsibleSection
         title="App Colors & Presets"
-        description="Choose primary accents and overall dark theme base background colors."
+        description="Pick your accent color and base background."
         icon="🎨"
         badge={
           <div className="flex items-center gap-1.5 bg-white/5 px-2 py-0.5 rounded border border-white/5 font-mono text-[10px]">
@@ -2799,7 +3043,10 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 hover:border-white/20 transition-all shrink-0 shadow-sm p-0.5" style={{ backgroundColor: prefs.accentColor }}>
+              <div
+                className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 hover:border-white/20 transition-all shrink-0 shadow-sm p-0.5"
+                style={{ backgroundColor: prefs.accentColor }}
+              >
                 <input
                   type="color"
                   value={prefs.accentColor}
@@ -2860,7 +3107,10 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 hover:border-white/20 transition-all shrink-0 shadow-sm p-0.5" style={{ backgroundColor: prefs.bgColor }}>
+              <div
+                className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 hover:border-white/20 transition-all shrink-0 shadow-sm p-0.5"
+                style={{ backgroundColor: prefs.bgColor }}
+              >
                 <input
                   type="color"
                   value={prefs.bgColor}
@@ -2912,7 +3162,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
       {/* Background Image / Blur */}
       <CollapsibleSection
         title="Background Wallpaper"
-        description="Configure backdrop transparency layers, custom image uploads, and blur."
+        description="Set a custom background image, opacity, and blur."
         icon="🖼️"
         badge={
           <span
@@ -2931,7 +3181,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
             <div>
               <span className="text-xs text-white/75 font-medium">Upload custom wallpaper</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Set an image backdrop behind the dashboard layouts
+                Add a background image behind the app
               </p>
             </div>
             {prefs.bgImage && (
@@ -2946,7 +3196,11 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
 
           {prefs.bgImage ? (
             <div className="relative w-full h-32 rounded-xl overflow-hidden border border-white/10 group">
-              <img src={prefs.bgImage} alt="Background preview" className="w-full h-full object-cover" />
+              <img
+                src={prefs.bgImage}
+                alt="Background preview"
+                className="w-full h-full object-cover"
+              />
               <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <label className="px-3.5 py-1.5 rounded-xl bg-white/10 border border-white/20 text-white/90 text-xs font-semibold cursor-pointer hover:bg-white/20 transition-all">
                   Upload New
@@ -2954,15 +3208,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
                     type="file"
                     accept="image/*"
                     className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = (ev) => {
-                        set("bgImage", ev.target?.result as string);
-                      };
-                      reader.readAsDataURL(file);
-                    }}
+                    onChange={handleBgImageUpload}
                   />
                 </label>
               </div>
@@ -2988,15 +3234,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = (ev) => {
-                    set("bgImage", ev.target?.result as string);
-                  };
-                  reader.readAsDataURL(file);
-                }}
+                onChange={handleBgImageUpload}
               />
             </label>
           )}
@@ -3005,7 +3243,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
               type="url"
               value={prefs.bgImage.startsWith("data:") ? "" : prefs.bgImage}
               onChange={(e) => set("bgImage", e.target.value)}
-              placeholder="Or paste an image URL destination…"
+              placeholder="Or paste an image URL…"
               className="input-glass font-mono"
             />
           </div>
@@ -3015,9 +3253,9 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
         <div className="mb-5 border-t border-white/[0.03] pt-4">
           <div className="flex items-center justify-between mb-1.5">
             <div>
-              <span className="text-xs text-white/75 font-medium">Backdrop Overlay Opacity</span>
+              <span className="text-xs text-white/75 font-medium">Background Opacity</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Set image visibility overlay transparency scales
+                How visible the background image is
               </p>
             </div>
             <span className="text-xs font-mono font-semibold text-purple-300">
@@ -3043,12 +3281,14 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
         <div className="border-t border-white/[0.03] pt-4">
           <div className="flex items-center justify-between mb-1.5">
             <div>
-              <span className="text-xs text-white/75 font-medium">Backdrop Gaussian Blur</span>
+              <span className="text-xs text-white/75 font-medium">Background Blur</span>
               <p className="text-[10px] text-white/35 mt-0.5 font-sans">
-                Apply standard hardware-accelerated blurring to background pixels
+                Blur the background image
               </p>
             </div>
-            <span className="text-xs font-mono font-semibold text-purple-300">{prefs.bgBlur}px</span>
+            <span className="text-xs font-mono font-semibold text-purple-300">
+              {prefs.bgBlur}px
+            </span>
           </div>
           <input
             type="range"
@@ -3069,11 +3309,11 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
       {/* Panels & Radius */}
       <CollapsibleSection
         title="Panels & Geometry"
-        description="Configure rounding factors, font scales, and container panel transparency."
+        description="Adjust corner rounding, text size, and panel transparency."
         icon="📐"
         badge={
           <span className="text-[10px] bg-white/5 border border-white/5 text-white/50 px-2 py-0.5 rounded font-mono font-medium">
-            Radius: {prefs.borderRadius}
+            {prefs.borderRadius} · {prefs.panelOpacity}% · {prefs.fontScale}%
           </span>
         }
       >
@@ -3082,7 +3322,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
             <div>
               <span className="text-xs text-white/75 font-medium">Glass Panel Opacity</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Backdrop opacity scale for main panel cards
+                How transparent panel backgrounds are
               </p>
             </div>
             <span className="text-xs font-mono font-semibold text-purple-300">
@@ -3109,13 +3349,17 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
           <div>
             <span className="text-xs text-white/75 font-medium">Border Radius</span>
             <p className="text-[10px] text-white/35 mt-0.5">
-              Roundness parameters of container cards and action buttons
+              How rounded corners are on cards and buttons
             </p>
           </div>
           <GlassSelect
             value={prefs.borderRadius}
-            options={borderRadiusOptions}
-            onChange={(v) => set("borderRadius", v)}
+            options={[
+              { value: "sharp", label: radiusLabel("sharp") },
+              { value: "soft", label: radiusLabel("soft") },
+              { value: "rounded", label: radiusLabel("rounded") },
+            ]}
+            onChange={(v) => set("borderRadius", v as any)}
           />
         </div>
 
@@ -3124,7 +3368,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
           <div className="flex items-center justify-between mb-1.5">
             <div>
               <span className="text-xs text-white/75 font-medium font-sans">Global Font Scale</span>
-              <p className="text-[10px] text-white/35 mt-0.5">Scale size metrics of core texts</p>
+              <p className="text-[10px] text-white/35 mt-0.5">Scale text size across the app</p>
             </div>
             <span className="text-xs font-mono font-semibold text-purple-300">
               {prefs.fontScale}%
@@ -3143,17 +3387,74 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
             <span>75% — compact</span>
             <span>125% — generous</span>
           </div>
-          <div className="mt-3 bg-white/[0.02] border border-white/5 rounded-xl px-4 py-2.5">
-            <p style={{ fontSize: `${prefs.fontScale}%` }} className="text-white/60 truncate font-sans">
-              Preview: StatusForge game evaluation engines are ready.
+        </div>
+
+        {/* Font Family */}
+        <div className="border-t border-white/[0.03] pt-4 mt-5">
+          <div className="flex items-center justify-between mb-1.5">
+            <div>
+              <span className="text-xs text-white/75 font-medium">Font Family</span>
+              <p className="text-[10px] text-white/35 mt-0.5">
+                Type any Google Fonts family name — fetched on demand. Leave as "Montserrat" to use
+                the bundled default (works offline).
+              </p>
+            </div>
+          </div>
+          <input
+            type="text"
+            value={prefs.fontFamily}
+            onChange={(e) => set("fontFamily", e.target.value)}
+            placeholder="Montserrat"
+            className="input-glass"
+          />
+          {prefs.fontFamily.trim() && prefs.fontFamily.trim().toLowerCase() !== "montserrat" && (
+            <p className="text-[10px] text-white/25 mt-1.5">
+              If "{prefs.fontFamily.trim()}" isn't a real Google Fonts family, the UI quietly falls
+              back to Montserrat.
+            </p>
+          )}
+        </div>
+
+        {/* Font Weight */}
+        <div className="flex items-center justify-between border-t border-white/[0.03] pt-4 mt-5">
+          <div>
+            <span className="text-xs text-white/75 font-medium">Font Weight</span>
+            <p className="text-[10px] text-white/35 mt-0.5">
+              Base body text weight — headings keep their own weight
             </p>
           </div>
+          <GlassSelect
+            value={String(prefs.fontWeight)}
+            options={[
+              { value: "400", label: "Regular (400)" },
+              { value: "500", label: "Medium (500)" },
+              { value: "600", label: "Semibold (600)" },
+              { value: "700", label: "Bold (700)" },
+              { value: "800", label: "Extra Bold (800)" },
+              { value: "900", label: "Black (900)" },
+            ]}
+            onChange={(v) => set("fontWeight", parseInt(v) as ThemePrefs["fontWeight"])}
+          />
+        </div>
+
+        {/* One shared preview for scale + family + weight together */}
+        <div className="mt-5 bg-white/[0.02] border border-white/5 rounded-xl px-4 py-2.5">
+          <p
+            style={{
+              fontSize: `${prefs.fontScale}%`,
+              fontFamily: `"${prefs.fontFamily.trim() || "Montserrat"}"`,
+              fontWeight: prefs.fontWeight,
+            }}
+            className="text-white/60 truncate"
+          >
+            Preview: StatusForge game evaluation engines are ready.
+          </p>
         </div>
       </CollapsibleSection>
 
       {/* Animations & Visual Effects */}
       <CollapsibleSection
-        title="Micro-Animations & FX"
+        title="Animations"
         description="Toggle holographic borders, breathing covers, status sweeps, and progress bars."
         icon="✨"
         badge={
@@ -3171,24 +3472,21 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-xs text-white/75 font-medium">(Quality)</span>
+              <span className="text-xs text-white/75 font-medium">Quality</span>
               <p className="text-[10px] text-white/35 mt-0.5">
-                Enable transitions and rich dynamic layout movements
+                Turn on transitions and motion effects
               </p>
             </div>
-            <Toggle
-              on={prefs.animationsEnabled}
-              onToggle={() => set("animationsEnabled", !prefs.animationsEnabled)}
-            />
+            <Toggle on={prefs.animationsEnabled} onToggle={toggleQuality} />
           </div>
           <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
             <div>
-              <span className="text-xs text-white/75 font-medium">(Performance)</span>
+              <span className="text-xs text-white/75 font-medium">Performance</span>
               <p className="text-[10px] text-white/35 mt-0.5 font-sans">
-                Instantly terminate all hover translations and scales for optimal hardware response
+                Turn off hover animations for better performance
               </p>
             </div>
-            <Toggle on={prefs.reducedMotion} onToggle={() => set("reducedMotion", !prefs.reducedMotion)} />
+            <Toggle on={prefs.reducedMotion} onToggle={togglePerformance} />
           </div>
 
           {showAnimAdvanced && <AdvancedAnimations prefs={prefs} set={set} />}
@@ -3213,44 +3511,6 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
           )}
         </div>
       </CollapsibleSection>
-
-      {/* Layout */}
-      <CollapsibleSection
-        title="Layout & Density"
-        description="Switch default spacing densitites and toggle sidebar layout profiles."
-        icon="📏"
-        badge={
-          <span className="text-[10px] bg-white/5 border border-white/5 text-white/50 px-2 py-0.5 rounded font-mono font-medium">
-            Density: {prefs.density}
-          </span>
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-xs text-white/75 font-medium">Spacing Density</span>
-              <p className="text-[10px] text-white/35 mt-0.5">
-                Set overall element padding and row gap sizes
-              </p>
-            </div>
-            <GlassSelect
-              value={prefs.density}
-              options={densityOptions}
-              onChange={(v) => set("density", v)}
-            />
-          </div>
-          <div className="flex items-center justify-between border-t border-white/[0.03] pt-4">
-            <div>
-              <span className="text-xs text-white/75 font-medium">Sidebar Icons Only</span>
-              <p className="text-[10px] text-white/35 mt-0.5 font-sans">
-                Condense sidebar navigation tabs, hiding text labels
-              </p>
-            </div>
-            <Toggle on={prefs.sidebarIconOnly} onToggle={() => set("sidebarIconOnly", !prefs.sidebarIconOnly)} />
-          </div>
-        </div>
-      </CollapsibleSection>
-
     </div>
   );
 }
@@ -3260,19 +3520,20 @@ export default function SettingsView({
   engineStatus,
   onRefresh,
   toast,
-  devUnlocked,
 }: {
   engineStatus: EngineStatus;
   onRefresh: () => void;
   toast: (msg: string, type?: ToastType) => void;
-  devUnlocked: boolean;
 }) {
   const [subTab, setSubTab] = useState<SettingsSubTab>("system");
+
   const [config, setConfig] = useState<AppConfig | null>(null);
 
   const loadConfig = useCallback(async () => {
     const res = await tauriApi("export_config");
-    if (res && typeof res === "object" && !("error" in res)) {
+    // A fresh install (no Config.json yet) returns {} — fall back to defaults
+    // so section accesses (engine_settings, api_keys, …) never crash.
+    if (res && typeof res === "object" && !("error" in res) && "engine_settings" in res) {
       setConfig(res as AppConfig);
     } else {
       setConfig(defaultConfig);
@@ -3283,7 +3544,7 @@ export default function SettingsView({
     loadConfig();
   }, [loadConfig]);
 
-  const saveSection = async (section: string) => {
+  const saveSection = async (_section: string) => {
     if (!config) return;
     try {
       const res = await saveConfig(config);
@@ -3312,16 +3573,10 @@ export default function SettingsView({
           label="Engine"
         />
         <SubTabBtn
-          active={subTab === "api"}
-          onClick={() => setSubTab("api")}
-          icon="🗝️"
-          label="API Keys"
-        />
-        <SubTabBtn
-          active={subTab === "routing"}
-          onClick={() => setSubTab("routing")}
-          icon="♾️"
-          label="Routing"
+          active={subTab === "api-routing"}
+          onClick={() => setSubTab("api-routing")}
+          icon="🔑"
+          label="API & Routing"
         />
         <SubTabBtn
           active={subTab === "theme"}
@@ -3339,12 +3594,18 @@ export default function SettingsView({
 
       {/* Sub-tab content */}
       <div className="flex-1 overflow-y-auto min-h-0 pr-1">
-        {subTab === "system" && <SystemSubTab toast={toast} config={config} setConfig={setConfig} onSaveConfig={saveSection} />}
-        {subTab === "engine" && (
-          <EngineSubTab engineStatus={engineStatus} onRefresh={onRefresh} toast={toast} devUnlocked={devUnlocked} />
+        {subTab === "system" && (
+          <SystemSubTab
+            toast={toast}
+            config={config}
+            setConfig={setConfig}
+            onSaveConfig={saveSection}
+          />
         )}
-        {subTab === "api" && <ApiKeysSubTab toast={toast} />}
-        {subTab === "routing" && <RoutingSubTab toast={toast} />}
+        {subTab === "engine" && (
+          <EngineSubTab engineStatus={engineStatus} onRefresh={onRefresh} toast={toast} />
+        )}
+        {subTab === "api-routing" && <ApiRoutingSubTab toast={toast} />}
         {subTab === "theme" && <ThemeSubTab toast={toast} />}
         {subTab === "about" && <AboutSubTab toast={toast} />}
       </div>

@@ -1,4 +1,6 @@
-/* StatusForge theme extensions */
+@import "tailwindcss";
+
+/* Custom theme extensions */
 @theme {
   --color-theme-bg: #050505;
   --color-accent: #9146ff;
@@ -55,6 +57,17 @@
   }
 }
 
+@keyframes oauth-pulse {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.4);
+  }
+}
+
 /* Respect reduced-motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -73,8 +86,9 @@
   --user-bg-image: none;
   --user-panel-opacity: 0.3;
   --user-font-scale: 1;
+  --user-font-family: "Montserrat";
+  --user-font-weight: 400;
   --user-radius: 16px;
-  --user-density: 1rem;
   --user-anim-duration: 0.2s;
   --user-reduced-motion: false;
   --user-transition-speed: 0.2s;
@@ -90,16 +104,69 @@
   --user-btn-hover: unset;
 }
 
+/* Bundled default font (Montserrat) — works fully offline, no CDN round trip
+   for the out-of-the-box experience. Latin subset only; matches what most of
+   the UI's text actually needs. */
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-800.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-900.woff2") format("woff2");
+}
+
 /* Base overrides */
 body {
   @apply bg-theme-bg text-white/80 h-screen overflow-hidden m-0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+  font-family: var(--user-font-family, "Montserrat"), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
     Ubuntu, sans-serif;
   background-color: var(--user-bg);
   font-size: calc(1rem * var(--user-font-scale));
+  font-weight: var(--user-font-weight, 400);
 }
 
-/* Background image layer */
+/* Base body background — shows behind the app when no image is set */
+body {
+  background-color: var(--user-bg, #050505);
+  margin: 0;
+}
+
+/* Background image layer — sits behind all content via z-index: -1 */
 body::before {
   content: "";
   position: fixed;
@@ -133,7 +200,7 @@ body::before {
 .carousel-track {
   content-visibility: auto;
   contain-intrinsic-size: auto 400px auto;
-  contain: layout style;
+  contain: layout style paint;
 }
 
 /* Carousel — hide scrollbar but keep scroll behavior */
@@ -313,10 +380,10 @@ body::before {
   50%      { background-position: 100% 50%; }
 }
 
-/* Select dropdown styling */
+/* Select dropdown styling — native dropdown */
 select option {
-  background: #111;
-  color: #fff;
+  background: #111118;
+  color: #e0e0e0;
 }
 
 /* Button hover effects - respects --user-btn-hover */
@@ -361,11 +428,11 @@ input[type="submit"]:not(:disabled):hover {
 
 /* ── Shared card shell ────────────────────────────────────────────────────── */
 .card-glass {
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(0, 0, 0, var(--user-panel-opacity, 0.3));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border-radius: var(--user-radius, 16px);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.03);
   transition: border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
 }
@@ -495,9 +562,9 @@ input[type="submit"]:not(:disabled):hover {
 .input-glass {
   width: 100%;
   padding: 10px 14px;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, calc(0.35 + var(--user-panel-opacity, 0.3) * 0.15));
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: var(--user-radius, 12px);
   color: white;
   font-size: 13px;
   outline: none;
@@ -518,27 +585,136 @@ input[type="submit"]:not(:disabled):hover {
 
 /* ── Select input pattern ──────────────────────────────────────────────────── */
 .select-glass {
-  padding: 6px 12px;
+  flex-shrink: 0;
+  min-width: 140px;
+  padding: 10px 36px 10px 14px;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  color: white;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+  font-weight: 500;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.35)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.select-glass:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background-color: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.select-glass:focus {
+  border-color: rgba(145, 70, 255, 0.5);
+  background-color: rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 3px rgba(145, 70, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.select-glass option {
+  background: #111118;
+  color: #e0e0e0;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.select-glass option:checked {
+  background: rgba(145, 70, 255, 0.2);
+  color: #fff;
+}
+
+/* ── Glass Select (custom dropdown) ───────────────────────────────────────── */
+.glass-select-wrapper {
+  width: 140px;
+}
+.glass-select-wrapper.w-full {
+  width: 100%;
+}
+.glass-select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 7px 12px;
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   color: white;
   font-size: 12px;
-  outline: none;
-  cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease;
   font-weight: 500;
-  appearance: none;
-  padding-right: 28px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.4)' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  text-align: left;
 }
-.select-glass:hover {
+.glass-select-trigger:hover {
   border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.5);
 }
-.select-glass:focus {
+.glass-select-trigger.open {
   border-color: rgba(145, 70, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(145, 70, 255, 0.1);
+}
+.glass-select-arrow {
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.glass-select-arrow.rotated {
+  transform: rotate(180deg);
+}
+.glass-select-menu {
+  background: rgba(12, 12, 16, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 4px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transform: translateY(-4px) scale(0.97);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.glass-select-menu.open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.glass-select-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.12s ease, color 0.12s ease;
+  text-align: left;
+}
+.glass-select-option:hover {
+  background: rgba(145, 70, 255, 0.12);
+  color: white;
+}
+.glass-select-option.selected {
+  background: rgba(145, 70, 255, 0.18);
+  color: white;
+}
+.glass-select-check {
+  color: rgba(145, 70, 255, 0.9);
+  flex-shrink: 0;
 }
 
 /* ── Toolbar bar (search + actions row) ────────────────────────────────────── */
@@ -572,7 +748,7 @@ input[type="submit"]:not(:disabled):hover {
   font-size: 13px;
   font-weight: 500;
   border-radius: var(--user-radius, 12px);
-  transition: all 0.25s ease;
+  transition: background 0.25s ease, color 0.25s ease, padding 0.3s ease, gap 0.3s ease, justify-content 0.3s ease;
   border: none;
   cursor: pointer;
   background: transparent;
@@ -590,6 +766,12 @@ input[type="submit"]:not(:disabled):hover {
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
   border: 1px solid color-mix(in srgb, var(--user-accent, #9146FF) 20%, transparent);
 }
+.nav-item-label {
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: opacity 0.25s ease, max-width 0.3s ease, margin-left 0.3s ease;
+}
 .nav-item-icon {
   font-size: 16px;
   width: 32px;
@@ -601,7 +783,12 @@ input[type="submit"]:not(:disabled):hover {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.04);
-  transition: all 0.25s ease;
+  transition: all 0.3s ease;
+  color: rgba(255, 255, 255, 0.55);
+}
+.nav-item-icon:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
 }
 /* ── View toggle active (mirrors nav-item-active glow) ─────────────────────── */
 .toggle-active {
@@ -630,7 +817,7 @@ input[type="submit"]:not(:disabled):hover {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
-  transition: width 0.3s ease, background 0.3s ease;
+  transition: width 0.3s ease, padding 0.3s ease, padding-top 0.3s ease, background 0.3s ease;
 }
 .sidebar-glass.sidebar-icon-only {
   width: 68px;
@@ -641,15 +828,25 @@ input[type="submit"]:not(:disabled):hover {
   justify-content: center;
   padding: 10px 0;
   gap: 0;
+  transition: all 0.3s ease;
 }
-.sidebar-glass.sidebar-icon-only .nav-item-label,
+.sidebar-glass.sidebar-icon-only .nav-item-label {
+  opacity: 0;
+  max-width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: opacity 0.25s ease, max-width 0.3s ease, margin-left 0.3s ease;
+}
 .sidebar-glass.sidebar-icon-only .badge,
 .sidebar-glass.sidebar-icon-only .flex-grow + * {
   display: none;
 }
 .sidebar-glass.sidebar-icon-only .nav-item-icon {
-  width: auto;
+  width: 32px;
+  height: 32px;
   font-size: 20px;
+  transition: all 0.3s ease;
 }
 .sidebar-glass.sidebar-icon-only img {
   display: none;
@@ -698,12 +895,12 @@ input[type="submit"]:not(:disabled):hover {
 
 /* ── Modal panel ───────────────────────────────────────────────────────────── */
 .modal-panel {
-  background: rgba(10, 10, 12, 0.9);
+  background: rgba(0, 0, 0, calc(0.35 + var(--user-panel-opacity, 0.3) * 0.5));
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5), 0 0 80px rgba(145, 70, 255, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border-radius: var(--user-radius, 16px);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5), 0 0 80px color-mix(in srgb, var(--user-accent, #9146FF) 12%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   animation: var(--user-modal-anim, slide-in 0.3s ease);
   overflow: hidden;
 }
@@ -784,7 +981,7 @@ input[type="range"]::-moz-range-thumb {
 /* ── Reusable action button (purple gradient CTA) ─────────────────────────── */
 .btn-cta {
   padding: 10px 20px;
-  border-radius: 12px;
+  border-radius: var(--user-radius, 12px);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -811,7 +1008,7 @@ input[type="range"]::-moz-range-thumb {
 /* ── Reusable reset / ghost button ────────────────────────────────────────── */
 .btn-ghost {
   padding: 10px 20px;
-  border-radius: 12px;
+  border-radius: var(--user-radius, 12px);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -830,7 +1027,7 @@ input[type="range"]::-moz-range-thumb {
 /* ── Reusable danger button (red gradient) ────────────────────────────────── */
 .btn-danger {
   padding: 10px 20px;
-  border-radius: 12px;
+  border-radius: var(--user-radius, 12px);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -887,18 +1084,37 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(248, 113, 113, 0.2);
   color: #f87171;
 }
+.btn-icon-sm.link {
+  background: rgba(145, 70, 255, 0.1);
+  color: rgba(192, 132, 252, 0.85);
+  border-color: rgba(145, 70, 255, 0.18);
+}
+.btn-icon-sm.link:hover {
+  background: rgba(145, 70, 255, 0.2);
+  color: #c084fc;
+}
 
 /* ── Reusable settings panel card ─────────────────────────────────────────── */
 .surface-card {
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, var(--user-panel-opacity, 0.3));
   border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--user-radius, 16px);
 }
 
 /* ── Reusable loading placeholder panel ───────────────────────────────────── */
 .panel-loading {
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, var(--user-panel-opacity, 0.3));
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 16px;
   padding: 24px;
   margin-bottom: 20px;
+}
+
+/* ── Hardware acceleration OFF (System tab): drop heavy animation work ────── */
+.no-hwaccel *,
+.no-hwaccel *::before,
+.no-hwaccel *::after {
+  animation: none !important;
+  transition: none !important;
+  backdrop-filter: none !important;
 }
