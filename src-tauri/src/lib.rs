@@ -7,6 +7,7 @@ pub mod blipy_protocol;
 pub mod hub;
 pub mod metadata;
 pub mod metadata_signing;
+pub mod multichat;
 pub mod server;
 use config::{AppConfig, EngineStatus};
 
@@ -2357,6 +2358,8 @@ pub fn run() {
         .manage(hub_state.clone())
         .manage(SystemMonitor::new())
         .setup(move |app| {
+            multichat::start_overlay_server();
+
             init_app_base_dir(app.handle());
 
             // Log to stdout + <app base dir>/debug.log so `dev_get_log_tail`
@@ -2546,6 +2549,36 @@ pub fn run() {
             import_single_game_metadata,
             import_game_database,
             refresh_platform_push,
+            multichat::overlay_broadcast,
+            multichat::resolve_kick_chatroom,
+            multichat::resolve_kick_avatar,
+            multichat::kick_resolve_avatars,
+            multichat::kick_resolve_broadcaster_id,
+            multichat::twitch_resolve_clip,
+            multichat::oauth_login,
+            multichat::oauth_get_account,
+            multichat::oauth_logout,
+            multichat::oauth_get_client_id,
+            multichat::oauth_has_client_secret,
+            multichat::oauth_get_client_secret,
+            multichat::send_twitch_message,
+            multichat::send_kick_message,
+            multichat::twitch_delete_message,
+            multichat::twitch_moderate_user,
+            multichat::kick_delete_message,
+            multichat::kick_moderate_user,
+            multichat::translate_text,
+            multichat::twitch_eventsub_subscribe,
+            multichat::twitch_resolve_avatars,
+            multichat::twitch_resolve_badges,
+            multichat::kick_resolve_sub_badges,
+            multichat::streamerbot_save_password,
+            multichat::streamerbot_has_password,
+            multichat::streamerbot_get_password,
+            multichat::streamerbot_clear_password,
+            multichat::joystick_delete_message,
+            multichat::joystick_moderate_user,
+            multichat::wipe_all_credentials_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
