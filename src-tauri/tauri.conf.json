@@ -20,12 +20,21 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: https:; font-src 'self'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https: asset: http://asset.localhost; connect-src 'self' ws: wss: https:; font-src 'self' https://fonts.gstatic.com; frame-src https://127.0.0.1:53735 http://127.0.0.1:53735",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**/*"]
+      }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": []
+    "icon": [],
+    "resources": {
+      "../widgets/": "widgets/",
+      "../Config.json.template": "",
+      "../public/": "public/"
+    }
   }
 }
