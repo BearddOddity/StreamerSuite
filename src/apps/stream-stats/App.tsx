@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PlatformIcon } from "@/components/common/PlatformIcon";
 import { useStreamStats } from "./useStreamStats";
+import { openJoystickReporting } from "./joystickReporting";
 
 function formatUptime(startedAt: string | undefined): string {
   if (!startedAt) return "—";
@@ -96,6 +97,16 @@ export default function StreamStatsApp() {
               </button>
             </>
           )}
+        </div>
+
+        <div className="surface-glass p-3 mb-6 flex items-center gap-2">
+          <PlatformIcon platform="joystick" size="sm" />
+          <span className="text-[11px] text-white/50 flex-1">
+            Joystick.tv has no public stats API — open your real dashboard to see viewers, followers, and tips.
+          </span>
+          <button onClick={openJoystickReporting} className="text-[11px] text-white/40 hover:text-white/70">
+            Open Reporting
+          </button>
         </div>
 
         {/* Stats grid */}
