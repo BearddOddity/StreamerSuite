@@ -21,12 +21,12 @@ function FieldRow({
           value={field.text}
           onChange={(e) => onChange({ ...field, text: e.target.value })}
           placeholder={field.source ? "Label prefix (optional)" : "Text"}
-          className="flex-1 input-glass text-[12px]"
+          className="flex-1 min-w-0 input-glass text-[12px]"
         />
         <select
           value={field.source}
           onChange={(e) => onChange({ ...field, source: e.target.value })}
-          className="input-glass text-[11px] w-44"
+          className="select-glass text-[11px] w-44 shrink-0"
         >
           {LIVE_SOURCES.map((s) => (
             <option key={s.value} value={s.value}>
@@ -143,7 +143,7 @@ export default function OverlayMaker({
                 <select
                   value={params.position}
                   onChange={(e) => set("position", e.target.value)}
-                  className="w-full input-glass text-[11px]"
+                  className="w-full select-glass text-[11px]"
                 >
                   {template.positions.map((p) => (
                     <option key={p.value} value={p.value}>
@@ -213,7 +213,7 @@ export default function OverlayMaker({
                 <select
                   value={params.fontFamily}
                   onChange={(e) => set("fontFamily", e.target.value)}
-                  className="w-full input-glass text-[11px]"
+                  className="w-full select-glass text-[11px]"
                 >
                   {FONT_PRESETS.map((f) => (
                     <option key={f} value={f}>
@@ -229,7 +229,7 @@ export default function OverlayMaker({
                 <select
                   value={params.borderRadius}
                   onChange={(e) => set("borderRadius", e.target.value as TemplateParams["borderRadius"])}
-                  className="w-full input-glass text-[11px]"
+                  className="w-full select-glass text-[11px]"
                 >
                   <option value="sharp">Sharp</option>
                   <option value="soft">Soft</option>
