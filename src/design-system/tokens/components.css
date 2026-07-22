@@ -83,6 +83,17 @@
 }
 .bd-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-card-hover); }
 
+/* ── Stat card ───────────────────────────────────────────────────────────── */
+.bd-stat-card { padding: var(--space-8); }
+.bd-stat-label {
+  font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: var(--tracking-wider);
+  color: var(--text-faint); font-weight: var(--fw-semibold);
+}
+.bd-stat-value { font-size: var(--fs-xl); font-weight: var(--fw-bold); color: var(--text-strong); line-height: var(--lh-tight); margin-top: 6px; }
+.bd-stat-delta { font-size: var(--fs-mini); color: var(--text-muted); margin-top: 4px; }
+.bd-stat-delta-up   { color: var(--bd-green); }
+.bd-stat-delta-down { color: var(--bd-red); }
+
 /* ── Badge / Tag ─────────────────────────────────────────────────────────── */
 .bd-badge {
   display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
