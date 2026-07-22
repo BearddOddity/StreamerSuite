@@ -55,7 +55,7 @@
   backdrop-filter: var(--blur-md);
   -webkit-backdrop-filter: var(--blur-md);
   border: 1px solid var(--border-card);
-  border-radius: var(--radius-2xl);
+  border-radius: var(--bd-radius-2xl);
   box-shadow: var(--shadow-card);
   transition: var(--transition-glass);
 }

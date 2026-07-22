@@ -186,13 +186,29 @@ function migrateLegacy(): Partial<SharedSettings> | null {
 
 // ─── Load / merge ────────────────────────────────────────────────────────────
 
+// A previously-stored oversized wallpaper (from before uploads were
+// size-capped, or from testing an earlier build) can make every future
+// write fail with QuotaExceededError before the write-time recovery in
+// the persist effect ever gets a chance to run — the corrupted value
+// just sits there forever. Stripping it here, at load time, means a
+// profile carrying old bloated data self-heals on the very next launch
+// instead of staying permanently stuck with settings that appear to do
+// nothing.
+const MAX_BG_IMAGE_CHARS = 300_000;
+function sanitizeLoaded(settings: SharedSettings): SharedSettings {
+  if (settings.theme?.bgImage && settings.theme.bgImage.length > MAX_BG_IMAGE_CHARS) {
+    return { ...settings, theme: { ...settings.theme, bgImage: "" } };
+  }
+  return settings;
+}
+
 function load(): SharedSettings {
   // 1. Try unified key first
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return deepMerge(defaultSharedSettings, parsed) as SharedSettings;
+      return sanitizeLoaded(deepMerge(defaultSharedSettings, parsed) as SharedSettings);
     }
   } catch { /* ignore */ }
 
