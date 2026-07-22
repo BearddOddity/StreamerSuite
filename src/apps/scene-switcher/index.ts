@@ -5,7 +5,7 @@ registerApp({
   id: "scene-switcher",
   name: "Scene Switcher",
   icon: "🎬",
-  description: "Control OBS scenes remotely. Switch between Starting Soon, Gameplay, BRB, and more.",
+  description: "Control Meld Studio scenes, audio, and streaming remotely over its WebSocket API.",
   category: "tools",
   component: SceneSwitcherApp,
 });

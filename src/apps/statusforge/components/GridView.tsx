@@ -1,6 +1,15 @@
-import type { ForgeLibraryEntry } from "../types";
+import type { ForgeLibraryEntry } from "@statusforge/types";
 import { useRef, useCallback, type MouseEvent } from "react";
 import { Card, CoverImage } from "./ui";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GridView — Pokémon binder style
+// ═══════════════════════════════════════════════════════════════════════════════
+// Research applied:
+//   • min() + minmax() pattern (responsive-design-notes §1)
+//   • content-visibility: auto (performance.md §1)
+//   • Container queries for card internals (container-queries.md §2)
+//   • aspect-ratio prevents CLS (performance.md §4)
 
 export default function GridView({
   entries,
@@ -77,11 +86,13 @@ function GridCard({
         boxSizing: "content-box",
       }}
     >
+      {/* 3D inner — the visual card that rotates (border + cover move together) */}
       <div
         ref={innerRef}
-        className="w-full h-full rounded-xl animate-fade-in"
+        className="w-full h-full rounded-xl"
         style={{
-          transition: "transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), border 0.3s, box-shadow 0.3s",
+          transition:
+            "transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), border 0.3s, box-shadow 0.3s",
           transformStyle: "preserve-3d",
           background: "rgba(0, 0, 0, 0.25)",
           border: "1px solid rgba(255, 255, 255, 0.05)",
@@ -90,17 +101,24 @@ function GridCard({
           boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
         }}
       >
+        {/* Cover art — 2:3 ratio */}
         <div className="grid-view-cover">
           <CoverImage src={entry.cover_url} alt={entry.title} lazy />
           <div className="grid-view-glint" />
           <div className="grid-view-gradient" />
         </div>
 
-        <div className="grid-view-title p-3">
-          <p className="text-white text-[11px] font-bold truncate leading-tight drop-shadow-lg">{entry.title}</p>
-          {entry.release_year && <p className="text-white/40 text-[9px] font-medium mt-px">{entry.release_year}</p>}
+        {/* Title plate */}
+        <div className="grid-view-title">
+          <p className="text-white text-[11px] font-bold truncate leading-tight drop-shadow-lg">
+            {entry.title}
+          </p>
+          {entry.release_year && (
+            <p className="text-white/40 text-[9px] font-medium mt-px">{entry.release_year}</p>
+          )}
         </div>
 
+        {/* Genre badge — visible via container query */}
         {entry.genre && (
           <div className="grid-view-genre-badge">
             <span className="text-[9px] font-semibold tracking-wider text-purple-300/80">
@@ -109,6 +127,7 @@ function GridCard({
           </div>
         )}
 
+        {/* Hover holo border */}
         <div className="grid-view-holo" />
       </div>
     </div>

@@ -1,5 +1,5 @@
-import { useCallback, useRef } from "react";
-import type { ForgeLibraryEntry } from "../types";
+import { useCallback, useEffect, useRef } from "react";
+import type { ForgeLibraryEntry } from "@statusforge/types";
 import { Card, CoverImage } from "./ui";
 
 const CARD_WIDTH = 280;
@@ -27,6 +27,50 @@ export default function CarouselView({
     [entries.length, onSelect]
   );
 
+  // Arrow keys move the active cover, Home/End jump to the ends, Enter/Space
+  // opens the focused cover — global listener since the carousel has no
+  // natural single focusable element to bind to, but skipped while the user
+  // is typing into an input/textarea/contenteditable elsewhere on the page.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTyping =
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (isTyping) return;
+
+      switch (e.key) {
+        case "ArrowLeft":
+          e.preventDefault();
+          goTo(activeIndex - 1);
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          goTo(activeIndex + 1);
+          break;
+        case "Home":
+          e.preventDefault();
+          goTo(0);
+          break;
+        case "End":
+          e.preventDefault();
+          goTo(entries.length - 1);
+          break;
+        case "Enter":
+        case " ":
+          if (onActiveCardClick) {
+            e.preventDefault();
+            onActiveCardClick();
+          }
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeIndex, entries.length, goTo, onActiveCardClick]);
+
   if (entries.length === 0) {
     return (
       <Card>
@@ -46,7 +90,7 @@ export default function CarouselView({
     <div className="relative w-full" style={{ height: 520 }}>
       <button
         onClick={() => goTo(activeIndex - 1)}
-        className="absolute z-20 w-11 h-11 flex items-center justify-center bg-black/60 border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-black/80 transition-all cursor-pointer backdrop-blur-sm shadow-md"
+        className="absolute z-20 w-11 h-11 flex items-center justify-center bg-black/60 border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-black/80 transition-all cursor-pointer backdrop-blur-sm"
         style={{ left: -8, top: "50%", transform: "translateY(-50%)" }}
       >
         ‹
@@ -58,7 +102,7 @@ export default function CarouselView({
           className="flex items-center h-full transition-transform duration-500 ease-out"
           style={{
             gap: `${CARD_GAP}px`,
-            transform: `translateX(${-activeIndex * STEP}px)`,
+            transform: `translateX(${-(activeIndex - windowStart) * STEP}px)`,
             willChange: "transform",
           }}
         >
@@ -83,7 +127,7 @@ export default function CarouselView({
 
       <button
         onClick={() => goTo(activeIndex + 1)}
-        className="absolute z-20 w-11 h-11 flex items-center justify-center bg-black/60 border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-black/80 transition-all cursor-pointer backdrop-blur-sm shadow-md"
+        className="absolute z-20 w-11 h-11 flex items-center justify-center bg-black/60 border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-black/80 transition-all cursor-pointer backdrop-blur-sm"
         style={{ right: -8, top: 240, transform: "translateY(-50%)" }}
       >
         ›
@@ -100,7 +144,6 @@ export default function CarouselView({
 
 function CarouselCard({
   entry,
-  index,
   isActive,
   offset,
   onSelect,
@@ -140,13 +183,13 @@ function CarouselCard({
     tiltRef.current = { x: 0, y: 0 };
     const el = cardRef.current?.firstElementChild as HTMLElement | null;
     if (el) {
-      el.style.transform = isActive ? "scale(1.07)" : undefined;
+      el.style.transform = isActive ? "scale(1.07)" : "";
     }
   }, [isActive]);
 
   const dist = Math.abs(offset);
   const cardScale = isActive ? 1.07 : Math.max(0.65, 0.82 - dist * 0.04);
-  const cardOpacity = isActive ? 1 : Math.max(0.25, 0.55 - dist * 0.06);
+  const unfocusAmount = isActive ? 0 : Math.min(1, dist * 0.15);
 
   return (
     <div
@@ -165,8 +208,10 @@ function CarouselCard({
           width: CARD_WIDTH,
           height: CARD_HEIGHT,
           perspective: 1200,
-          opacity: cardOpacity,
-          transition: "opacity 0.3s ease",
+          filter: isActive
+            ? "none"
+            : `brightness(${1 - unfocusAmount * 0.7}) blur(${unfocusAmount * 3}px)`,
+          transition: "filter 0.3s ease",
         }}
       >
         <div
@@ -187,7 +232,14 @@ function CarouselCard({
             transformStyle: "preserve-3d",
           }}
         >
-          <div className="w-full h-full">
+          <div
+            className="w-full h-full"
+            style={{
+              animation: isActive
+                ? "var(--user-cover-breathe, cover-breathe 8s ease-in-out infinite)"
+                : "none",
+            }}
+          >
             <CoverImage src={entry.cover_url} alt={entry.title} lazy />
           </div>
 

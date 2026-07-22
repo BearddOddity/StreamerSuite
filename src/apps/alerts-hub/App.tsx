@@ -1,115 +1,126 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import { PlatformIcon } from "@/components/common/PlatformIcon";
+import { useAlertsSettings } from "./useAlertsSettings";
+import { useAlertsFeed } from "./useAlertsFeed";
+import { SettingsPanel } from "./SettingsPanel";
+import type { AlertEvent, AlertKind } from "./types";
+import "../../design-system/styles.css";
+import { Button, Card, SectionHead, StatusDot } from "../../design-system/components/core";
 
-interface Alert {
-  id: string;
-  type: "follow" | "sub" | "donation" | "raid" | "host";
-  user: string;
-  message: string;
-  timestamp: number;
-  icon: string;
-  color: string;
-}
+const KIND_STYLE: Record<AlertKind, { icon: string; color: string }> = {
+  follow: { icon: "💜", color: "border-purple-500/25 bg-purple-500/10" },
+  sub: { icon: "⭐", color: "border-amber-500/25 bg-amber-500/10" },
+  raid: { icon: "🚀", color: "border-cyan-500/25 bg-cyan-500/10" },
+  cheer: { icon: "💎", color: "border-pink-500/25 bg-pink-500/10" },
+  tip: { icon: "💰", color: "border-green-500/25 bg-green-500/10" },
+};
 
-const alertPool: Omit<Alert, "id" | "timestamp">[] = [
-  { type: "follow", user: "StreamFan42", message: "just followed!", icon: "💜", color: "border-purple-500/25 bg-purple-500/10" },
-  { type: "sub", user: "ProGamer99", message: "subscribed for 3 months!", icon: "⭐", color: "border-amber-500/25 bg-amber-500/10" },
-  { type: "donation", user: "GenerousViewer", message: "donated $10 — 'Love the stream!'", icon: "💰", color: "border-green-500/25 bg-green-500/10" },
-  { type: "raid", user: "AnotherStreamer", message: "is raiding with 45 viewers!", icon: "🚀", color: "border-cyan-500/25 bg-cyan-500/10" },
-  { type: "sub", user: "LoyalSub", message: "gifted 5 subs to the community!", icon: "🎁", color: "border-pink-500/25 bg-pink-500/10" },
-  { type: "follow", user: "NewFollower", message: "just followed!", icon: "💜", color: "border-purple-500/25 bg-purple-500/10" },
-  { type: "host", user: "FriendlyStreamer", message: "is hosting you with 120 viewers!", icon: "📡", color: "border-blue-500/25 bg-blue-500/10" },
+const TEST_EVENTS: Omit<AlertEvent, "id" | "timestamp">[] = [
+  { platform: "twitch", kind: "follow", user: "StreamFan42", message: "just followed!" },
+  { platform: "twitch", kind: "sub", user: "ProGamer99", message: "subscribed (tier 1)!" },
+  { platform: "twitch", kind: "raid", user: "AnotherStreamer", message: "is raiding with 45 viewers!", amount: "45" },
+  { platform: "twitch", kind: "cheer", user: "GenerousViewer", message: "cheered 500 bits!", amount: "500" },
+  { platform: "kick", kind: "sub", user: "LoyalSub", message: "gifted 5 subs!", amount: "5" },
+  { platform: "joystick", kind: "tip", user: "BigFan", message: "sent a tip!", amount: "100" },
 ];
 
+/** Maps the feed's 4-state connection status onto StatusDot's 3 visual states —
+ *  "error" reads as "warn" since the shared dot has no red variant. */
+function toDotStatus(status: "disconnected" | "connecting" | "live" | "error"): "on" | "off" | "warn" {
+  if (status === "live") return "on";
+  if (status === "connecting" || status === "error") return "warn";
+  return "off";
+}
+
 export default function AlertsHubApp() {
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [enabled, setEnabled] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const { settings, update, toggle } = useAlertsSettings();
+  const { alerts, push, clear, twitchAccount, refreshTwitchAccount, twitchStatus, kickStatus, joystickStatus } = useAlertsFeed(settings);
+  const [showSettings, setShowSettings] = useState(false);
 
-  const spawnAlert = useCallback(() => {
-    const template = alertPool[Math.floor(Math.random() * alertPool.length)];
-    const alert: Alert = {
-      ...template,
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      timestamp: Date.now(),
-    };
-    setAlerts((prev) => [alert, ...prev].slice(0, 50));
-  }, []);
-
-  useEffect(() => {
-    if (!enabled) return;
-    // Seed some initial alerts
-    const seed = Array.from({ length: 5 }, (_, i) => {
-      const template = alertPool[Math.floor(Math.random() * alertPool.length)];
-      return { ...template, id: `seed-${i}`, timestamp: Date.now() - (5 - i) * 60000 };
-    });
-    setAlerts(seed);
-
-    const interval = setInterval(() => {
-      if (Math.random() > 0.4) spawnAlert();
-    }, 8000);
-    return () => clearInterval(interval);
-  }, [enabled, spawnAlert]);
+  const anyLive = twitchStatus === "live" || kickStatus === "live" || joystickStatus === "live";
 
   return (
     <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
       <div className="max-w-2xl mx-auto w-full">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-[18px] font-bold text-white/90">Alerts & Events</h2>
-            <p className="text-[11px] text-white/30 mt-0.5">Follows, subs, donations, raids, and more</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setSoundEnabled(!soundEnabled)}
-              className={`px-3 py-2 rounded-xl text-xs font-medium transition-all border ${
-                soundEnabled ? "bg-white/[0.04] text-white/50 border-white/[0.08]" : "bg-white/[0.02] text-white/20 border-white/[0.04]"
-              }`}>
-              {soundEnabled ? "🔊" : "🔇"}
-            </button>
-            <button onClick={() => setEnabled(!enabled)}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all border ${
-                enabled ? "bg-green-500/10 text-green-400 border-green-500/25" : "btn-ghost"
-              }`}>
-              {enabled ? "🟢 Active" : "⏸ Paused"}
-            </button>
-          </div>
+        <div className="mb-6">
+          <SectionHead
+            icon="🔔"
+            title="Alerts & Events"
+            desc={`${anyLive ? "🟢 Live — " : ""}Follows, subs, raids, cheers, and tips across Twitch, Kick, and Joystick.tv`}
+            right={
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => update({ soundEnabled: !settings.soundEnabled })}>
+                  {settings.soundEnabled ? "🔊" : "🔇"}
+                </Button>
+                <Button variant="primary" size="sm" onClick={() => setShowSettings(true)}>
+                  ⚙ Settings
+                </Button>
+              </div>
+            }
+          />
         </div>
 
-        {/* Quick trigger */}
+        <div className="flex items-center gap-4 mb-6">
+          <span className="flex items-center gap-1.5"><PlatformIcon platform="twitch" size="xs" /><StatusDot status={toDotStatus(twitchStatus)} label={twitchStatus} /></span>
+          <span className="flex items-center gap-1.5"><PlatformIcon platform="kick" size="xs" /><StatusDot status={toDotStatus(kickStatus)} label={kickStatus} /></span>
+          <span className="flex items-center gap-1.5"><PlatformIcon platform="joystick" size="xs" /><StatusDot status={toDotStatus(joystickStatus)} label={joystickStatus} /></span>
+        </div>
+
+        {/* Quick trigger — local test alerts, doesn't touch any platform */}
         <div className="flex gap-2 mb-6 flex-wrap">
-          {alertPool.map((a, i) => (
-            <button key={i} onClick={() => {
-              const alert: Alert = { ...a, id: `manual-${Date.now()}`, timestamp: Date.now() };
-              setAlerts((prev) => [alert, ...prev].slice(0, 50));
-            }}
-              className={`px-3 py-2 rounded-xl text-[11px] font-medium border transition-all hover:-translate-y-0.5 ${a.color}`}>
-              {a.icon} {a.type}
+          {TEST_EVENTS.map((e, i) => (
+            <button
+              key={i}
+              onClick={() => push(e)}
+              className={`px-3 py-2 rounded-xl text-[11px] font-medium border transition-all hover:-translate-y-0.5 ${KIND_STYLE[e.kind].color}`}
+            >
+              {KIND_STYLE[e.kind].icon} test {e.kind}
             </button>
           ))}
+          {alerts.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={clear}>
+              Clear
+            </Button>
+          )}
         </div>
 
-        {/* Alert feed */}
         <div className="space-y-2">
           {alerts.length === 0 ? (
-            <div className="text-center py-12 text-white/20 text-sm">
-              No alerts yet. Waiting for events...
-            </div>
+            <Card padding={24} className="text-center text-white/20 text-sm">
+              No alerts yet. Connect a platform in Settings, or try a test alert above.
+            </Card>
           ) : (
-            alerts.map((alert) => (
-              <div key={alert.id} className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${alert.color}`}>
-                <span className="text-xl">{alert.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <span className="text-[12px] font-semibold text-white/80">{alert.user}</span>
-                  <span className="text-[11px] text-white/40 ml-1">{alert.message}</span>
+            alerts.map((alert) => {
+              const style = KIND_STYLE[alert.kind];
+              return (
+                <div key={alert.id} className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${style.color}`}>
+                  <span className="text-xl">{style.icon}</span>
+                  <PlatformIcon platform={alert.platform} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[12px] font-semibold text-white/80">{alert.user}</span>
+                    <span className="text-[11px] text-white/40 ml-1">{alert.message}</span>
+                  </div>
+                  <span className="text-[9px] text-white/15 shrink-0">{new Date(alert.timestamp).toLocaleTimeString()}</span>
                 </div>
-                <span className="text-[9px] text-white/15 shrink-0">
-                  {new Date(alert.timestamp).toLocaleTimeString()}
-                </span>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
+
+      {showSettings && (
+        <SettingsPanel
+          settings={settings}
+          onUpdate={update}
+          onToggle={toggle}
+          twitchAccount={twitchAccount}
+          onTwitchAccountChange={refreshTwitchAccount}
+          twitchStatus={twitchStatus}
+          kickStatus={kickStatus}
+          joystickStatus={joystickStatus}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </div>
   );
 }

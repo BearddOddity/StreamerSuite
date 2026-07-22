@@ -1,0 +1,39 @@
+/* ============================================================================
+   SPACING & RADII — BearddOddity Design System
+   ----------------------------------------------------------------------------
+   Dense, compact spacing (6–14px gaps are the norm). Radii run generous:
+   pills for badges, 12px for controls, 16px for cards, up to 32px for
+   PanelForge's larger panels.
+   ============================================================================ */
+
+:root {
+  /* ── Spacing scale (px) ──────────────────────────────────────────────── */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-10: 20px;
+  --space-12: 24px;
+  --space-16: 32px;
+  --space-20: 40px;
+
+  /* ── Radii ───────────────────────────────────────────────────────────── */
+  --radius-xs: 6px;     /* tiny icon buttons */
+  --radius-sm: 8px;     /* nav icon tiles */
+  --radius-md: 10px;    /* PanelForge small */
+  --radius-lg: 12px;    /* controls: inputs, selects, buttons */
+  --radius-xl: 14px;    /* toolbars, menus */
+  --radius-2xl: 16px;   /* cards, modals (default --user-radius) */
+  --radius-3xl: 24px;   /* PanelForge panels */
+  --radius-4xl: 32px;   /* PanelForge hero panels */
+  --radius-pill: 9999px;
+
+  /* ── Control heights ─────────────────────────────────────────────────── */
+  --control-sm: 32px;
+  --control-md: 40px;
+  --hit-min: 44px;      /* min touch target (PanelForge icon buttons) */
+}

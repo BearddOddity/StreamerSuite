@@ -5,7 +5,7 @@ registerApp({
   id: "sound-board",
   name: "Sound Board",
   icon: "🔊",
-  description: "Trigger sound effects on stream. Airhorn, applause, vine boom, and more at your fingertips.",
+  description: "Play your own sound clips on stream with one click or a hotkey.",
   category: "media",
   component: SoundBoardApp,
 });

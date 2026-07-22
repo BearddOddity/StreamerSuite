@@ -10,7 +10,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={`bg-black/30 border border-white/10 rounded-2xl p-5 mb-5 ${className}`}>
+    <div className={`bg-black/20 border border-white/10 rounded-2xl p-5 mb-5 ${className}`}>
       {children}
     </div>
   );
@@ -54,13 +54,7 @@ export function Btn({
 
 // ─── Field ────────────────────────────────────────────────────────────────────
 
-export function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-4">
       <label className="block text-[11px] uppercase tracking-wider text-white/50 mb-1.5">

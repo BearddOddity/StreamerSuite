@@ -1,0 +1,83 @@
+/* ============================================================================
+   COLORS — BearddOddity Design System
+   ----------------------------------------------------------------------------
+   One shared palette across every product (StreamerSuite, StatusForge,
+   PanelForge): near-black canvas + Twitch purple accent. PanelForge used to
+   re-skin indigo via a [data-theme="panelforge"] scope — that split has been
+   merged away so all apps draw from the same tokens below. PanelForge keeps
+   its own type voice (Inter body font) but not a separate color world.
+   Surfaces are white-on-black alpha glass, never opaque grey panels.
+   ============================================================================ */
+
+:root {
+  /* ── Base canvas ─────────────────────────────────────────────────────── */
+  --bd-black: #050505;          /* app background, all products */
+  --bd-panel-solid: #111118;    /* native <option> dropdown background */
+
+  /* ── Accent (Twitch purple — the through-line of the brand) ───────────── */
+  --bd-accent: #9146ff;
+  --bd-accent-dark: #6b2cff;
+  --bd-accent-text: #c084fc;    /* purple text on dark */
+  --bd-accent-soft: #c4b5fd;    /* info toast text */
+  /* CTA gradient stops */
+  --bd-cta-from: #9333ea;
+  --bd-cta-to: #4f46e5;
+  --bd-cta-from-hover: #a855f7;
+  --bd-cta-to-hover: #6366f1;
+
+  /* ── Semantic status hues ────────────────────────────────────────────── */
+  --bd-green: #4ade80;          /* success / on */
+  --bd-green-text: #86efac;
+  --bd-green-alt: #34d399;      /* ongoing badge */
+  --bd-red: #f87171;            /* error / danger */
+  --bd-red-text: #fca5a5;
+  --bd-red-strong: #dc2626;
+  --bd-amber: #facc15;          /* warn */
+  --bd-amber-alt: #fbbf24;      /* hiatus badge */
+  --bd-cyan: #22d3ee;           /* info */
+  --bd-cyan-alt: #38bdf8;       /* completed badge */
+  --bd-blue: #3b82f6;
+
+  /* ── Platform brand colors (third-party marks) ───────────────────────── */
+  --brand-twitch: #9146ff;
+  --brand-kick: #53fc18;
+  --brand-streamerbot: #a257ed;
+  --brand-joystick: #06899c;
+  --brand-youtube: #ff0033;
+  --brand-tiktok: #25f4ee;
+  --brand-rumble: #85c742;
+  /* Dual-tone gradients lifted from the actual marks: streamerbot.svg blends a
+     purple robot-arm gradient into a cyan/blue one; joystick-mark.svg is a
+     single flat teal in-source, so its gradient is a tasteful same-hue
+     light/dark pairing rather than an invented second brand hue. */
+  --brand-streamerbot-gradient: linear-gradient(135deg, #a257ed, #0b72ff); /* @kind color */
+  --brand-joystick-gradient: linear-gradient(135deg, #06899c, #0ee6c8); /* @kind color */
+
+  /* ── Text on dark (white alpha ladder) ───────────────────────────────── */
+  --text-strong: rgba(255, 255, 255, 0.92);
+  --text-body: rgba(255, 255, 255, 0.80);
+  --text-muted: rgba(255, 255, 255, 0.55);
+  --text-faint: rgba(255, 255, 255, 0.38);
+  --text-dim: rgba(255, 255, 255, 0.28);
+
+  /* ── Hairline borders (white alpha) ──────────────────────────────────── */
+  --line-1: rgba(255, 255, 255, 0.05);
+  --line-2: rgba(255, 255, 255, 0.08);
+  --line-3: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.15);
+
+  /* ── Glass surface fills (black alpha over the canvas) ───────────────── */
+  --surface-0: transparent;
+  --surface-1: rgba(0, 0, 0, 0.20);
+  --surface-2: rgba(0, 0, 0, 0.35);
+  --surface-3: rgba(0, 0, 0, 0.50);
+  --surface-glass: rgba(0, 0, 0, 0.45);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+
+  /* ── Semantic aliases (use these in components) ──────────────────────── */
+  --bg-app: var(--bd-black);
+  --accent: var(--bd-accent);
+  --accent-glow: rgba(145, 70, 255, 0.15);
+  --surface-card: var(--surface-glass);
+  --border-card: var(--line-2);
+}

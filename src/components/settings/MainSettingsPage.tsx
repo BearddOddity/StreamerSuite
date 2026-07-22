@@ -2,12 +2,12 @@ import { useState } from "react";
 import { useSharedSettings } from "@/settings";
 import GeneralTab from "./GeneralTab";
 import ApiKeysTab from "./ApiKeysTab";
-import ConnectionsTab from "./ConnectionsTab";
 import ThemeTab from "./ThemeTab";
 import EngineTab from "./EngineTab";
 import AboutTab from "./AboutTab";
 import { SubTabBtn } from "./SettingsComponents";
-import type { SettingsTabId } from "@/hooks/useAppState";
+
+export type SettingsTabId = "general" | "engine" | "apiKeys" | "theme" | "about";
 
 interface Props {
   initialTab?: SettingsTabId;
@@ -17,7 +17,6 @@ interface Props {
 const tabs: { id: SettingsTabId; label: string; icon: string }[] = [
   { id: "general", label: "General", icon: "⚙️" },
   { id: "engine", label: "Engine", icon: "⚡" },
-  { id: "connections", label: "Connections", icon: "🔗" },
   { id: "apiKeys", label: "Connections & Keys", icon: "🔑" },
   { id: "theme", label: "Appearance", icon: "🎨" },
   { id: "about", label: "About", icon: "ℹ️" },
@@ -78,9 +77,6 @@ export default function MainSettingsPage({ initialTab, onBack }: Props) {
             onEngineChange={settings.updateEngine}
             onDetectionChange={settings.updateDetection}
           />
-        )}
-        {activeTab === "connections" && (
-          <ConnectionsTab channels={[]} onSetConnectionMode={() => {}} />
         )}
         {activeTab === "apiKeys" && <ApiKeysTab />}
         {activeTab === "theme" && (

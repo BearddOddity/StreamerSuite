@@ -93,7 +93,7 @@ function scopeAndScaleSvg(svgStr: string, size: number): string {
     return svgStr.replace(/<svg([^>]*)>/, `<svg$1 width="${size}" height="${size}">`);
   }
 
-  const styleBlock = styleMatch[1];
+  const styleBlock = styleMatch[1]!;
 
   // Parse class -> fill mappings from the style block
   // Handles: .st0{fill:#FFFFFF;} and .st0 { fill: #FFFFFF; }
@@ -101,7 +101,7 @@ function scopeAndScaleSvg(svgStr: string, size: number): string {
   const classRegex = /\.([\w-]+)\s*\{[^}]*fill:\s*([#\w][^;}]*)/g;
   let m: RegExpExecArray | null;
   while ((m = classRegex.exec(styleBlock)) !== null) {
-    classFills[m[1]] = m[2].trim();
+    classFills[m[1]!] = m[2]!.trim();
   }
 
   let result = svgStr;
@@ -112,8 +112,9 @@ function scopeAndScaleSvg(svgStr: string, size: number): string {
     const fills: string[] = [];
     const remaining: string[] = [];
     for (const cls of classList) {
-      if (classFills[cls]) {
-        fills.push(`fill="${classFills[cls]}"`);
+      const fill = classFills[cls];
+      if (fill) {
+        fills.push(`fill="${fill}"`);
       } else {
         remaining.push(cls);
       }

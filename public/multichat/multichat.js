@@ -1,0 +1,2756 @@
+"use strict";
+/* ═══════════════════════════════════════════════════════════════════════
+   Multi-Chat — standalone BearddOddity multichat.
+   Read-only live chat: Twitch (anonymous IRC), Kick (public Pusher WS),
+   Joystick.tv (ActionCable, requires bot basic key).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+// Colored via CSS (color: var(--p)) wherever these render inside a
+// [data-platform] ancestor — an inline style="color:var(...)" attribute on
+// an SVG parsed from an innerHTML string silently never applies in this
+// WebView2 runtime, so don't rely on it here.
+const TWITCH_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 2800" fill="currentColor"><path d="M500,0L0,500v1800h600v500l500-500h400l900-900V0H500z M2200,1300l-400,400h-400l-350,350v-350H600V200h1600 V1300z"></path><path d="M2200,1300l-400,400h-400l-350,350v-350H600V200h1600 V1300z" fill="#fff"></path><rect x="1700" y="550" width="200" height="600"></rect><rect x="1150" y="550" width="200" height="600"></rect></svg>`;
+const KICK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 453.9 510.6" fill="currentColor"><path d="M0,0h170.2v113.5h56.7v-56.7h56.7V0h170.2v170.2h-56.7v56.7h-56.7v56.7h56.7v56.7h56.7v170.2h-170.2v-56.7h-56.7v-56.7h-56.7v113.5H0V0Z"></path></svg>`;
+const JOYSTICK_URI = "data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIj8+Cjxzdmcgd2lkdGg9IjQxIiBoZWlnaHQ9IjI1IiB2aWV3Qm94PSIwIDAgNDEgMjUiIGZpbGw9Im5vbmUiIHZlcnNpb249IjEuMSIgaWQ9InN2ZzE3IiB4bWxuczppbmtzY2FwZT0iaHR0cDovL3d3dy5pbmtzY2FwZS5vcmcvbmFtZXNwYWNlcy9pbmtzY2FwZSIgeG1sbnM6c29kaXBvZGk9Imh0dHA6Ly9zb2RpcG9kaS5zb3VyY2Vmb3JnZS5uZXQvRFREL3NvZGlwb2RpLTAuZHRkIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnN2Zz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxkZWZzIGlkPSJkZWZzMjEiPjwvZGVmcz4KICA8bmFtZWR2aWV3IGlkPSJuYW1lZHZpZXcxOSIgcGFnZWNvbG9yPSIjZmZmZmZmIiBib3JkZXJjb2xvcj0iIzY2NjY2NiIgYm9yZGVyb3BhY2l0eT0iMS4wIj48L25hbWVkdmlldz4KICA8cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGNsaXAtcnVsZT0iZXZlbm9kZCIgZD0iTTQuNTQ0MzkgMTUuMTAzTDYuMTE2MjQgMTEuNjU3Mkw1LjExNzE1IDEwLjcyNTdMNy4yMDE0NyA4LjI2NTY4TDcuNTI0NDUgOC41NzMxOEw4LjcxNzM0IDUuOTU5NDNDOC45MTU0NCA1LjU2NjAxIDkuMTY5NTIgNS4yMDQyNCA5LjQ2MjM2IDQuODgzMThDOS44NDEzMiA0LjQ0OTA2IDEwLjMzNjYgNC4xNTA2IDEwLjg4MzUgNC4wMTQ5NEMxMS4zNTcyIDMuOTE5OTggMTEuODUyNCA0LjAwMTM3IDEyLjI3NDUgNC4yNDU1N0MxMi41MTU2IDQuMzg1NzUgMTIuNzM5NiA0LjU1NzU5IDEyLjkzMzQgNC43NjEwOEwxOC41NzkxIDEwLjk0MjdMMjAuNzMyMyA4LjU3NzdMMTUuMTMzOSAyLjQ3NzQ0VjIuNDQxMjZDMTQuNzIwNSAyLjAxNjE5IDE0LjI1MTEgMS42NTQ0MiAxMy43NDMgMS4zNjUwMUMxMi42OTIyIDAuNzU5MDU1IDExLjQ3MzUgMC41NjQ2MDYgMTAuMjk3OCAwLjgwNDI3NkM5LjEyNjQ1IDEuMDY2NTYgOC4wNTg0NSAxLjY5NTEyIDcuMjM1OTIgMi42MTMxQzYuNzMyMDcgMy4xNjAyNyA2LjMwMTQyIDMuNzc5NzkgNS45NjU1MiA0LjQ1MzU4TDUuOTMxMDcgNC41MjE0MUwxLjc0MDg5IDEzLjcwNTdDMC40NDg5NTkgMTYuNDkxMyAwLjQ0ODk1OSAxOC45NDIzIDEuMTk4MjggMjAuODIzNUMxLjY0MTg0IDIxLjk0MDQgMi4zOTExNyAyMi44OSAzLjM1MTUgMjMuNTU5M0M0LjI5ODkyIDI0LjIxOTUgNS40MDEzNyAyNC41OTQ5IDYuNTM4MjggMjQuNjUzNkM4LjY2MTM2IDI0Ljc3NTcgMTEuMDU1NyAyMy44ODQ5IDEzLjA5MjcgMjEuNjk2MkwxMy43Njg4IDIwLjk3MjdMMTEuNTE2NSAxOC43MTE2TDEwLjgyNzUgMTkuMzg1NEM5LjQ3MDk3IDIwLjg0MTUgNy45NjM3MSAyMS40Mzg0IDYuNjcxNzggMjEuMzY2MUM2LjA5NDcxIDIxLjMzOSA1LjUzNDg3IDIxLjE1MzYgNS4wNTI1NSAyMC44MjM1QzQuNjA0NjggMjAuNTExNCA0LjI1NTg2IDIwLjA2MzcgNC4wNDkxNSAxOS41NDM3QzMuNjE4NSAxOC40NzIgMy42ODc0MSAxNi45NjE2IDQuNTMxNDcgMTUuMTEyMUw0LjU0NDM5IDE1LjEwM1pNNi4xMTYyNCAxMS42NTcyTDEyLjQ4MTIgMTcuNTk5MkwxNC42MzQ0IDE1LjIyOTdMNy41MDI5MiA4LjU3MzE4TDcuMTc5OTQgOC4yNjU2OEw1LjA5NTYyIDEwLjcyNTdMNi4wOTQ3MSAxMS42NTcySDYuMTE2MjRaTTE2Ljc3MDQgMTcuNjU4TDE0Ljc4MDggMTkuODI0MUMxNi42MzY5IDIxLjcyMzMgMTguNjA0OSAyMi44ODU1IDIwLjc0MDkgMjMuMDI1N0MyMi44NzY5IDIzLjE2NTkgMjQuOTQ4MyAyMi4zMTU3IDI3LjEyMzEgMjAuMjM1NkwyNC45MzExIDE3Ljg4ODZDMjMuNDcxMiAxOS4yNDUzIDIyLjE0NDggMTkuODI0MSAyMC45MjE4IDE5Ljc0NzJDMTkuNjA0IDE5LjY2MTMgMTguMjc3NyAxOC44NDI4IDE2Ljk0MjcgMTcuNDVMMTYuNzYxOCAxNy42NDlMMTYuNzcwNCAxNy42NThaTTIwLjc2NjggMTMuMjk4N0wyNC43Njc1IDE3LjY1OEwyNi45NzI0IDE1LjM5N0wyNy4xODc3IDE1LjYyNzZMMjIuOTE1NyAxMC45Njk5TDIwLjc2MjUgMTMuMzM0OVYxMy4yOTg3SDIwLjc2NjhaTTE0LjY1NTkgMTUuMjI5N0wxMi41MDI3IDE3LjU5OTJMMTEuNTEyMiAxOC42OEwxMy43NjQ1IDIwLjk0MUwxNC43ODA4IDE5LjgzMzFMMTYuNzcwNCAxNy42NjdMMTYuOTUxMyAxNy40NjgxTDIwLjc2NjggMTMuMzA3OEwyMi45MiAxMC45NDI3TDI4LjU4MyA0Ljc3MDEyQzI4Ljc4NTQgNC41NjY2MyAyOS4wMTM2IDQuMzkwMjcgMjkuMjU5MSA0LjI1MDA5QzI5LjY4MTEgNC4wMDU5IDMwLjE3NjQgMy45MjQ1IDMwLjY1MDEgNC4wMTk0NkMzMS4xOTcgNC4xNTA2IDMxLjY5MjIgNC40NTM1OCAzMi4wNzEyIDQuODg3N0MzMi4zNjg0IDUuMjA4NzcgMzIuNjE4MSA1LjU3MDUzIDMyLjgyMDUgNS45NjM5NUwzNC4wNzM3IDguNzEzMzZMMzUuNDk0OCAxMS44MjkxTDM2Ljk5MzUgMTUuMTA3NkMzNy44NTQ4IDE2Ljk1NzEgMzcuOTAyMSAxOC40Njc1IDM3LjQ3MTUgMTkuNTM5MkMzNy4yNjQ4IDIwLjA1OTIgMzYuOTE2IDIwLjUwNjkgMzYuNDY4MSAyMC44MTg5QzM1Ljk4NTggMjEuMTQ5IDM1LjQyNTkgMjEuMzM0NCAzNC44NTMyIDIxLjM2MTZDMzMuNTYxMiAyMS40MzM5IDMyLjA0OTcgMjAuODM3IDMwLjY5NzUgMTkuMzgwOUwyOS43NzU5IDE4LjQwODdMMjkuMzQ1MiAxNy45NTY1TDI3LjE5MiAxNS42MjMxTDI2Ljk3NjcgMTUuMzkyNUwyNC43NzE4IDE3LjY1MzVMMjQuNzQ1OSAxNy42ODA2TDI0Ljk0NCAxNy44OTMyTDI3LjEzNiAyMC4yNDAxTDI3LjUxOTMgMjAuNjU2MUwyOC40NTM4IDIxLjY1NTVDMzAuNDkwNyAyMy44NDQyIDMyLjg4OTQgMjQuNzM1IDM1LjAxMjUgMjQuNjEyOUMzNi4xNDk0IDI0LjU1NDIgMzcuMjQ3NiAyNC4xNzg4IDM4LjE5NSAyMy41MTg2QzM5LjE1NTMgMjIuODQ5MyAzOS45MDQ2IDIxLjg5OTcgNDAuMzQ4MiAyMC43ODI4QzQxLjA5NzUgMTguOTAxNiA0MS4wNzYgMTYuNDUwNiAzOS44MDU2IDEzLjY2NUwzNS42MTExIDQuNDgwNzFMMzUuNTgxIDQuNDEyODhDMzUuMjM2NCAzLjczOTA5IDM0LjgwMTUgMy4xMTk1NyAzNC4yODkgMi41NzI0QzMzLjQ2NjUgMS42NTg5NSAzMi4zOTg1IDEuMDI1ODYgMzEuMjI3MSAwLjc2MzU3N0MzMC4wNTE1IDAuNTIzOTA4IDI4LjgzMjggMC43MjI4NzkgMjcuNzgyIDEuMzI0MzFDMjcuMjczOCAxLjYxMzczIDI2LjgwNDQgMS45NzU0OSAyNi4zOTEgMi40MDA1NkwyNi4zNTY1IDIuNDQxMjZMMjAuNzU4MiA4LjU0MTUzTDE4LjYwNDkgMTAuOTA2NkwxNC42NjQ1IDE1LjIwMjVMMTQuNjU1OSAxNS4yMjk3Wk0zNC4wODIzIDguNzE3ODlMMjcuMTkyIDE1LjYwMDVMMjkuMzc5NyAxNy45NDc0TDM1LjQ5NDggMTEuODE1NUwzNC4wNzM3IDguNjk5OEwzNC4wODIzIDguNzE3ODlaIiBmaWxsPSIjNzZFMUYwIiBpZD0icGF0aDIiPjwvcGF0aD4KICA8bWFzayBpZD0ibWFzazBfNjAzXzkwMzQiIHN0eWxlPSJtYXNrLXR5cGU6bHVtaW5hbmNlIiBtYXNrVW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4PSIwIiB5PSIwIiB3aWR0aD0iNDEiIGhlaWdodD0iMjUiPgogICAgPHBhdGggZD0iTTQuNTQ0MzkgMTUuMTAzTDYuMTE2MjQgMTEuNjU3Mkw1LjExNzE1IDEwLjcyNTdMNy4yMDE0NyA4LjI2NTY4TDcuNTI0NDUgOC41NzMxOEw4LjcxNzM0IDUuOTU5NDNDOC45MTU0NCA1LjU2NjAxIDkuMTY5NTIgNS4yMDQyNCA5LjQ2MjM2IDQuODgzMThDOS44NDEzMiA0LjQ0OTA2IDEwLjMzNjYgNC4xNTA2IDEwLjg4MzUgNC4wMTQ5NEMxMS4zNTcyIDMuOTE5OTggMTEuODUyNCA0LjAwMTM3IDEyLjI3NDUgNC4yNDU1N0MxMi41MTU2IDQuMzg1NzUgMTIuNzM5NiA0LjU1NzU5IDEyLjkzMzQgNC43NjEwOEwxOC41NzkxIDEwLjk0MjdMMjAuNzMyMyA4LjU3NzdMMTUuMTMzOSAyLjQ3NzQ0VjIuNDQxMjZDMTQuNzIwNSAyLjAxNjE5IDE0LjI1MTEgMS42NTQ0MiAxMy43NDMgMS4zNjUwMUMxMi42OTIyIDAuNzU5MDU1IDExLjQ3MzUgMC41NjQ2MDYgMTAuMjk3OCAwLjgwNDI3NkM5LjEyNjQ1IDEuMDY2NTYgOC4wNTg0NSAxLjY5NTEyIDcuMjM1OTIgMi42MTMxQzYuNzMyMDcgMy4xNjAyNyA2LjMwMTQyIDMuNzc5NzkgNS45NjU1MiA0LjQ1MzU4TDUuOTMxMDcgNC41MjE0MUwxLjc0MDg5IDEzLjcwNTdDMC40NDg5NTkgMTYuNDkxMyAwLjQ0ODk1OSAxOC45NDIzIDEuMTk4MjggMjAuODIzNUMxLjY0MTg0IDIxLjk0MDQgMi4zOTExNyAyMi44OSAzLjM1MTUgMjMuNTU5M0M0LjI5ODkyIDI0LjIxOTUgNS40MDEzNyAyNC41OTQ5IDYuNTM4MjggMjQuNjUzNkM4LjY2MTM2IDI0Ljc3NTcgMTEuMDU1NyAyMy44ODQ5IDEzLjA5MjcgMjEuNjk2MkwxMy43Njg4IDIwLjk3MjdMMTEuNTE2NSAxOC43MTE2TDEwLjgyNzUgMTkuMzg1NEM5LjQ3MDk3IDIwLjg0MTUgNy45NjM3MSAyMS40Mzg0IDYuNjcxNzggMjEuMzY2MUM2LjA5NDcxIDIxLjMzOSA1LjUzNDg3IDIxLjE1MzYgNS4wNTI1NSAyMC44MjM1QzQuNjA0NjggMjAuNTExNCA0LjI1NTg2IDIwLjA2MzcgNC4wNDkxNSAxOS41NDM3QzMuNjE4NSAxOC40NzIgMy42ODc0MSAxNi45NjE2IDQuNTMxNDcgMTUuMTEyMUw0LjU0NDM5IDE1LjEwM1pNNi4xMTYyNCAxMS42NTcyTDEyLjQ4MTIgMTcuNTk5MkwxNC42MzQ0IDE1LjIyOTdMNy41MDI5MiA4LjU3MzE4TDcuMTc5OTQgOC4yNjU2OEw1LjA5NTYyIDEwLjcyNTdMNi4wOTQ3MSAxMS42NTcySDYuMTE2MjRaTTE2Ljc3MDQgMTcuNjU4TDE0Ljc4MDggMTkuODI0MUMxNi42MzY5IDIxLjcyMzMgMTguNjA0OSAyMi44ODU1IDIwLjc0MDkgMjMuMDI1N0MyMi44NzY5IDIzLjE2NTkgMjQuOTQ4MyAyMi4zMTU3IDI3LjEyMzEgMjAuMjM1NkwyNC45MzExIDE3Ljg4ODZDMjMuNDcxMiAxOS4yNDUzIDIyLjE0NDggMTkuODI0MSAyMC45MjE4IDE5Ljc0NzJDMTkuNjA0IDE5LjY2MTMgMTguMjc3NyAxOC44NDI4IDE2Ljk0MjcgMTcuNDVMMTYuNzYxOCAxNy42NDlMMTYuNzcwNCAxNy42NThaTTIwLjc2NjggMTMuMjk4N0wyNC43Njc1IDE3LjY1OEwyNi45NzI0IDE1LjM5N0wyNy4xODc3IDE1LjYyNzZMMjIuOTE1NyAxMC45Njk5TDIwLjc2MjUgMTMuMzM0OVYxMy4yOTg3SDIwLjc2NjhaTTE0LjY1NTkgMTUuMjI5N0wxMi41MDI3IDE3LjU5OTJMMTEuNTEyMiAxOC42OEwxMy43NjQ1IDIwLjk0MUwxNC43ODA4IDE5LjgzMzFMMTYuNzcwNCAxNy42NjdMMTYuOTUxMyAxNy40NjgxTDIwLjc2NjggMTMuMzA3OEwyMi45MiAxMC45NDI3TDI4LjU4MyA0Ljc3MDEyQzI4Ljc4NTQgNC41NjY2MyAyOS4wMTM2IDQuMzkwMjcgMjkuMjU5MSA0LjI1MDA5QzI5LjY4MTEgNC4wMDU5IDMwLjE3NjQgMy45MjQ1IDMwLjY1MDEgNC4wMTk0NkMzMS4xOTcgNC4xNTA2IDMxLjY5MjIgNC40NTM1OCAzMi4wNzEyIDQuODg3N0MzMi4zNjg0IDUuMjA4NzcgMzIuNjE4MSA1LjU3MDUzIDMyLjgyMDUgNS45NjM5NUwzNC4wNzM3IDguNzEzMzZMMzUuNDk0OCAxMS44MjkxTDM2Ljk5MzUgMTUuMTA3NkMzNy44NTQ4IDE2Ljk1NzEgMzcuOTAyMSAxOC40Njc1IDM3LjQ3MTUgMTkuNTM5MkMzNy4yNjQ4IDIwLjA1OTIgMzYuOTE2IDIwLjUwNjkgMzYuNDY4MSAyMC44MTg5QzM1Ljk4NTggMjEuMTQ5IDM1LjQyNTkgMjEuMzM0NCAzNC44NTMyIDIxLjM2MTZDMzMuNTYxMiAyMS40MzM5IDMyLjA0OTcgMjAuODM3IDMwLjY5NzUgMTkuMzgwOUwyOS43NzU5IDE4LjQwODdMMjkuMzQ1MiAxNy45NTY1TDI3LjE5MiAxNS42MjMxTDI2Ljk3NjcgMTUuMzkyNUwyNC43NzE4IDE3LjY1MzVMMjQuNzQ1OSAxNy42ODA2TDI0Ljk0NCAxNy44OTMyTDI3LjEzNiAyMC4yNDAxTDI3LjUxOTMgMjAuNjU2MUwyOC40NTM4IDIxLjY1NTVDMzAuNDkwNyAyMy44NDQyIDMyLjg4OTQgMjQuNzM1IDM1LjAxMjUgMjQuNjEyOUMzNi4xNDk0IDI0LjU1NDIgMzcuMjQ3NiAyNC4xNzg4IDM4LjE5NSAyMy41MTg2QzM5LjE1NTMgMjIuODQ5MyAzOS45MDQ2IDIxLjg5OTcgNDAuMzQ4MiAyMC43ODI4QzQxLjA5NzUgMTguOTAxNiA0MS4wNzYgMTYuNDUwNiAzOS44MDU2IDEzLjY2NUwzNS42MTExIDQuNDgwNzFMMzUuNTgxIDQuNDEyODhDMzUuMjM2NCAzLjczOTA5IDM0LjgwMTUgMy4xMTk1NyAzNC4yODkgMi41NzI0QzMzLjQ2NjUgMS42NTg5NSAzMi4zOTg1IDEuMDI1ODYgMzEuMjI3MSAwLjc2MzU3N0MzMC4wNTE1IDAuNTIzOTA4IDI4LjgzMjggMC43MjI4NzkgMjcuNzgyIDEuMzI0MzFDMjcuMjczOCAxLjYxMzczIDI2LjgwNDQgMS45NzU0OSAyNi4zOTEgMi40MDA1NkwyNi4zNTY1IDIuNDQxMjZMMjAuNzU4MiA4LjU0MTUzTDE4LjYwNDkgMTAuOTA2NkwxNC42NjQ1IDE1LjIwMjVMMTQuNjU1OSAxNS4yMjk3Wk0zNC4wODIzIDguNzE3ODlMMjcuMTkyIDE1LjYwMDVMMjkuMzc5NyAxNy45NDc0TDM1LjQ5NDggMTEuODE1NUwzNC4wNzM3IDguNjk5OEwzNC4wODIzIDguNzE3ODlaIiBmaWxsPSJ3aGl0ZSIgaWQ9InBhdGg0Ij48L3BhdGg+CiAgPC9tYXNrPgogIDxnIG1hc2s9InVybCgjbWFzazBfNjAzXzkwMzQpIiBpZD0iZzExIj4KICAgIDxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgY2xpcC1ydWxlPSJldmVub2RkIiBkPSJNMjUuMzc5IDIxLjg4NjFMMjMuMTY5OCAxOS40NzU5TDIyLjQzNzcgMTguNjhMMjIuNTE5NiAxOC41ODk2QzIyLjYzNTggMTguNDYyOSAyMi43NjkzIDE4LjM0MDggMjIuODgxMyAxOC4yMDk3TDIyLjkzMyAxOC4xNTU0TDIyLjkwMjggMTguMTkxNkwyMy4wNjY1IDE4LjA4NzZDMjMuMjQzIDE3Ljk3NDYgMjMuMzg5NSAxNy44MjA4IDIzLjQ5NzEgMTcuNjM1NEMyMy42MjYzIDE3LjU1ODUgMjMuNzQyNiAxNy40NTQ1IDIzLjgyODcgMTcuMzI3OUMyMy45NTc5IDE3LjIzMjkgMjQuMDY1NiAxNy4xMDE4IDI0LjEzNDUgMTYuOTUyNkwyNS4wMzQ1IDE3LjkyOTNMMjUuMjE1NCAxOC4xMzI4TDI3LjIwNSAyMC4yOTQ0TDI3Ljc4MiAyMC45Mjc1QzI3Ljc0MzMgMjAuOTU0NiAyNy43MDg4IDIwLjk4NjMgMjcuNjc0NCAyMS4wMjI0TDI3LjUxMDcgMjEuMTRDMjcuNDA3NCAyMS4yMDMzIDI3LjMwODMgMjEuMjgwMiAyNy4yMjY1IDIxLjM3NTJMMjYuOTgxIDIxLjU0N0MyNi44OTkyIDIxLjYxNDggMjYuODIxNyAyMS42ODI3IDI2Ljc0ODUgMjEuNzU5NUwyNi41MjAzIDIxLjk0OTVDMjYuMzkxMSAyMi4wNTggMjYuMjc0OCAyMi4xOTM2IDI2LjE0MTMgMjIuMjkzMUwyNS45MjE3IDIyLjQ1NTlMMjUuMzc5IDIxLjg4NjFaIiBmaWxsPSIjMDY4OTlDIiBpZD0icGF0aDciPjwvcGF0aD4KICAgIDxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgY2xpcC1ydWxlPSJldmVub2RkIiBkPSJNMTYuNTkzOSAyMS40MzM5TDE4LjgwMzEgMTkuMDI4MkwxOS41MzUyIDE4LjIyNzhMMTkuNDUzNCAxOC4xNDE5QzE5LjMzNzEgMTguMDEwNyAxOS4yMDM2IDE3Ljg5MzIgMTkuMDkxNyAxNy43NTc1TDE5LjA0IDE3LjcwNzhMMTkuMDcwMSAxNy43Mzk0TDE4LjkwNjUgMTcuNjM1NEMxOC43MzQyIDE3LjUxNzggMTguNTg3OCAxNy4zNjQxIDE4LjQ3NTggMTcuMTgzMkMxOC4zNDY2IDE3LjEwNjMgMTguMjM0NyAxNy4wMDIzIDE4LjE0NDIgMTYuODc1N0MxOC4wMTUgMTYuNzc2MiAxNy45MTE3IDE2LjY0NTEgMTcuODM4NSAxNi40OTU4TDE2LjkzODQgMTcuNDc3MUwxNi43NTc2IDE3LjY3NjFMMTQuNzY4IDE5Ljg0MjJMMTQuMTkwOSAyMC40NzA3QzE0LjIyOTcgMjAuNDk3OSAxNC4yNjQxIDIwLjUyOTUgMTQuMjk4NiAyMC41NjEyQzE0LjM1NDYgMjAuNjAxOSAxNC40MTA1IDIwLjYzODEgMTQuNDYyMiAyMC42ODMzQzE0LjU2OTkgMjAuNzQyMSAxNC42NjQ2IDIwLjgxODkgMTQuNzQ2NCAyMC45MTM5TDE0Ljk5MTkgMjEuMDg1N0MxNS4wODI0IDIxLjE0OTEgMTUuMTQyNiAyMS4yMzA1IDE1LjIyNDUgMjEuMjk4M0wxNS40NTI3IDIxLjQ5MjdDMTUuNTgxOSAyMS41OTY3IDE1LjY5ODIgMjEuNzMyNCAxNS44MzE3IDIxLjgzMTlMMTYuMDU1NiAyMS45OTkyTDE2LjU3NjcgMjEuNDI0OUwxNi41OTM5IDIxLjQzMzlaIiBmaWxsPSIjMDY4OTlDIiBpZD0icGF0aDkiPjwvcGF0aD4KICA8L2c+CiAgPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0xNC42NTE2IDE1LjIzODdMNy41MjQ0MiA4LjU4MjIxTDYuMTE2MjEgMTEuNjY2M0wxMi40NzY4IDE3LjYwODNMMTQuNjUxNiAxNS4yMzg3WiIgZmlsbD0iIzA2ODk5QyIgaWQ9InBhdGgxMyI+PC9wYXRoPgogIDxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgY2xpcC1ydWxlPSJldmVub2RkIiBkPSJNMzQuMDY4OCA4LjcxNzk2TDI3LjIxMjkgMTUuNjAwNUwyOS4zODMzIDE3Ljk2MTFMMzUuNDg5OSAxMS44MzM3TDM0LjA2ODggOC43MTc5NloiIGZpbGw9IiMwNjg5OUMiIGlkPSJwYXRoMTUiPjwvcGF0aD4KPC9zdmc+";
+const JOYSTICK_IMG = `<img src="${JOYSTICK_URI}" alt="Joystick.tv">`;
+const YOUTUBE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 20" fill="currentColor"><path d="M27.4,3.1c-0.3-1.2-1.3-2.1-2.5-2.4C22.7,0.2,14,0.2,14,0.2s-8.7,0-10.9,0.6C1.9,1.1,0.9,2,0.6,3.1 C0,5.4,0,10,0,10s0,4.6,0.6,6.9c0.3,1.2,1.3,2.1,2.5,2.4c2.2,0.6,10.9,0.6,10.9,0.6s8.7,0,10.9-0.6c1.2-0.3,2.2-1.2,2.5-2.4 C28,14.6,28,10,28,10S28,5.4,27.4,3.1z" fill="#FF0000"></path><path d="M11.2,14.2V5.8L18.5,10L11.2,14.2z" fill="#fff"></path></svg>`;
+
+// YouTube has no native connector (its OAuth setup was more friction than it
+// was worth — see prior session) — it only ever shows up via Streamer.bot,
+// same as an "improved Kick" transport. Still a real PLATFORMS entry so
+// messages get a proper icon/color and show up in the mute/focus toggle row.
+const PLATFORMS = [
+  { id: "twitch",   label: "Twitch",      initial: "T", icon: TWITCH_SVG },
+  { id: "kick",     label: "Kick",        initial: "K", icon: KICK_SVG },
+  { id: "joystick", label: "Joystick.tv", initial: "J", icon: JOYSTICK_IMG },
+  { id: "youtube",  label: "YouTube",     initial: "Y", icon: YOUTUBE_SVG },
+];
+const PLATFORM_MAP = Object.fromEntries(PLATFORMS.map(p => [p.id, p]));
+const ROLE_META = { mod: { label: "MOD", variant: "green" }, vip: { label: "VIP", variant: "amber" }, sub: { label: "SUB", variant: "ghost" }, host: { label: "HOST", variant: "accent" } };
+const MAX_MESSAGES = 400;
+
+/* ── State ──────────────────────────────────────────────────────────────── */
+const DEFAULT_SETTINGS = {
+  showPlatformIcon: true, showAvatar: true, showBadges: true, showTimestamps: false,
+  groupConsecutive: true, excludeCommands: false, ttsEnabled: false,
+  soundAlerts: true, visualAlerts: true, showPronouns: false, customEmotes: true,
+  embedsEnabled: true, embedAllowlist: "",
+  themePreset: "default", platformOrder: ["twitch", "kick", "joystick", "youtube"],
+  fontSize: 14, fontFamily: "", bgColor: "#050505", bgOpacity: 100, bgImage: "", bgBlur: 0,
+  glassBlur: 18, glassOpacity: 10, messageScale: 100, overlayAvatarDelay: 1200, avatarRenderDelay: 600, alertSoundUrl: "", narrowBubbles: false,
+  bottomPad: 140, hideAfter: "0", ignoreList: "",
+};
+const THEME_PRESETS = {
+  default:  { bgColor: "#050505", bgOpacity: 100, fontSize: 14, fontFamily: "" },
+  midnight: { bgColor: "#0a0f1e", bgOpacity: 100, fontSize: 14, fontFamily: "" },
+  neon:     { bgColor: "#120018", bgOpacity: 100, fontSize: 15, fontFamily: "" },
+  minimal:  { bgColor: "#000000", bgOpacity: 100, fontSize: 13, fontFamily: "" },
+  overlay:  { bgColor: "#050505", bgOpacity: 0,   fontSize: 15, fontFamily: "" },
+};
+// ponytail: local heuristic only — real auto-mod needs each platform's mod API
+const BANNED_PATTERNS = [/free\s*(v-?bucks|robux|followers|nitro)/i, /crypto\s*giveaway/i, /discord\.gg\/\S*free/i, /\bdm me\b.*\b(link|free)\b/i];
+const YT_RE = /(?:youtu\.be\/|youtube\.com\/watch\?v=)([\w-]{11})/;
+const SPOTIFY_RE = /open\.spotify\.com\/(track|album|playlist|episode|show)\/([a-zA-Z0-9]+)/;
+const TWITCH_CLIP_RE = /(?:clips\.twitch\.tv\/(?:embed\?clip=)?|twitch\.tv\/\w+\/clip\/)([A-Za-z0-9-]+)/i;
+const KICK_CLIP_RE = /kick\.com\/[\w-]+\/clips\/([A-Za-z0-9-]+)/i;
+function extractGiphyId(text) {
+  let m = /giphy\.com\/media\d?\/([a-zA-Z0-9]+)\//.exec(text);
+  if (m) return m[1];
+  m = /giphy\.com\/gifs\/([\w-]+)/.exec(text);
+  return m ? m[1].split("-").pop() : null;
+}
+const DEFAULT_CHANNELS = {
+  twitch: "", kick: "", kickChatroomId: "", joystick: "",
+  // YouTube has no "enabled" toggle of its own (no native card/connector) —
+  // checking "Handle YouTube chat" on the Streamer.bot card sets this too.
+  enabled: { twitch: false, kick: false, joystick: false, youtube: false },
+  // Streamer.bot is a transport, not a platform tile — it carries chat for
+  // whichever of Twitch/Kick/YouTube the user opts to route through it
+  // instead of their own direct connection (mainly to sidestep Kick's
+  // Cloudflare block, and to get YouTube without its OAuth setup friction).
+  streamerbotHost: "127.0.0.1", streamerbotPort: "8080",
+  streamerbotFor: { twitch: false, kick: false, youtube: false },
+};
+// OAuth client IDs/secrets are never stored here — Rust keeps them in the OS keychain.
+const oauthAccounts = { twitch: null, kick: null, joystick: null }; // { username, user_id } | null
+// Numeric broadcaster IDs for whichever single channel each platform is
+// currently connected to — moderation actions (delete/timeout/ban) need
+// these; set once resolved at connect time (see connectTwitch*/connectKick).
+let twitchBroadcasterId = null;
+let kickBroadcasterId = null;
+
+const store = {
+  load(key, fallback) { try { return { ...fallback, ...JSON.parse(localStorage.getItem(key) || "{}") }; } catch { return { ...fallback }; } },
+  save(key, val) { localStorage.setItem(key, JSON.stringify(val)); },
+};
+const settings = store.load("bd-mc-settings", DEFAULT_SETTINGS);
+const channels = store.load("bd-mc-channels", DEFAULT_CHANNELS);
+channels.enabled = { ...DEFAULT_CHANNELS.enabled, ...(channels.enabled || {}) };
+
+// Overlay mode (?overlay=1): this same page loaded in OBS/Meld as a Browser
+// Source instead of the Tauri window. It has no OS keyring / native-command
+// access, so it can't itself connect to chat — it just renders whatever the
+// real (already-connected) desktop window relays over a local WebSocket.
+// This separate browser origin has its own empty localStorage, so it never
+// touches the desktop app's saved settings — force a transparent background
+// here in-memory instead of using whatever solid color/opacity defaulted in.
+const isOverlay = new URLSearchParams(location.search).get("overlay") === "1";
+if (isOverlay) {
+  document.body.classList.add("cv-overlay");
+  settings.bgColor = "#000000"; settings.bgOpacity = 0; settings.bgImage = ""; settings.bgBlur = 0;
+}
+
+const state = {
+  view: localStorage.getItem("bd-mc-view") || "unified",
+  muted: new Set(),
+  focusPlatform: "twitch",
+  search: "",
+  messages: [],           // { id, platform, user, text, ts, role, pinned, system }
+  health: {},             // platform -> off | live | reconnecting | down
+  modes: {},              // platform -> "subs" | "emote" | null (twitch roomstate)
+  nextId: 1,
+};
+PLATFORMS.forEach(p => state.health[p.id] = "off");
+state.health.streamerbot = "off"; // transport, not a chat-feed platform tile — no PLATFORMS entry
+
+/* ── DOM helpers (all chat text goes through textContent — untrusted input) */
+const $ = id => document.getElementById(id);
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+function sectionHead(icon, label) {
+  const h = el("div", "cv-section-head");
+  h.append(el("span", "cv-section-icon", icon), document.createTextNode(label), el("span", "cv-section-chevron", "▾"));
+  return h;
+}
+const collapsedSections = new Set(JSON.parse(localStorage.getItem("bd-mc-collapsed-sections") || "[]"));
+function groupSettingsSections(body) {
+  [...body.querySelectorAll(":scope > .cv-section-head")].forEach(head => {
+    const wrap = el("div", "cv-section-content");
+    let sib = head.nextElementSibling;
+    while (sib && !sib.classList.contains("cv-section-head")) {
+      const next = sib.nextElementSibling;
+      wrap.append(sib);
+      sib = next;
+    }
+    head.after(wrap);
+    const key = head.textContent.trim();
+    const setCollapsed = (collapsed) => {
+      wrap.style.display = collapsed ? "none" : "";
+      head.classList.toggle("cv-collapsed", collapsed);
+    };
+    setCollapsed(collapsedSections.has(key));
+    head.onclick = () => {
+      const collapsed = wrap.style.display !== "none";
+      setCollapsed(collapsed);
+      if (collapsed) collapsedSections.add(key); else collapsedSections.delete(key);
+      localStorage.setItem("bd-mc-collapsed-sections", JSON.stringify([...collapsedSections]));
+    };
+  });
+}
+function fmtTime(ts) { return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+
+/* ── Emotes ────────────────────────────────────────────────────────────── */
+// Both CDN URL patterns are Twitch/Kick's own documented (Twitch) or
+// long-stable (Kick) emote image hosts — live-verified against real IDs.
+function twitchEmoteUrl(id) { return `https://static-cdn.jtvnw.net/emoticons/v2/${id}/default/dark/2.0`; }
+// Maps our coarse role label back to Twitch's actual chat-badge set_id, then
+// pulls that chatter's specific version out of the IRC badges tag — so a
+// mod/VIP/sub with a custom channel badge gets THEIR image, not a generic one.
+const TWITCH_ROLE_SET_ID = { host: "broadcaster", mod: "moderator", vip: "vip", sub: "subscriber" };
+function twitchRoleBadgeKey(role, badgesTag) {
+  const setId = TWITCH_ROLE_SET_ID[role];
+  if (!setId || !badgesTag) return null;
+  const m = new RegExp(setId + "/(\\d+)").exec(badgesTag);
+  return m ? m[0] : null;
+}
+function kickEmoteUrl(id) { return `https://files.kick.com/emotes/${id}/fullsize`; }
+
+// Twitch's IRC `emotes` tag: "<id>:<start>-<end>,<start>-<end>/<id2>:...",
+// end-inclusive, positions in the raw message string. Returns a list of
+// {type:"text"|"emote", text|url/alt} parts, or null if the message has none.
+function parseTwitchEmotes(text, emotesTag) {
+  if (!emotesTag) return null;
+  const ranges = [];
+  emotesTag.split("/").forEach(group => {
+    const [id, posList] = group.split(":");
+    if (!id || !posList) return;
+    posList.split(",").forEach(pos => {
+      const [start, end] = pos.split("-").map(Number);
+      if (Number.isFinite(start) && Number.isFinite(end)) ranges.push({ id, start, end });
+    });
+  });
+  if (!ranges.length) return null;
+  ranges.sort((a, b) => a.start - b.start);
+  const out = [];
+  let cursor = 0;
+  ranges.forEach(r => {
+    if (r.start > cursor) out.push({ type: "text", text: text.slice(cursor, r.start) });
+    out.push({ type: "emote", url: twitchEmoteUrl(r.id), alt: text.slice(r.start, r.end + 1) });
+    cursor = r.end + 1;
+  });
+  if (cursor < text.length) out.push({ type: "text", text: text.slice(cursor) });
+  return out;
+}
+
+// Joystick emotes appear inline as literal ":shortcode:" tokens (custom
+// channel emotes like ":BearOThisisFine:", and standard smileys like ":)").
+// Joystick's docs don't document the shape of the `emotesUsed` array or an
+// image CDN, so — unlike Twitch/Kick's verified CDN URLs — this matches
+// whatever `emotesUsed` actually contains against the literal text, trying
+// several plausible field-name conventions rather than guessing a URL host.
+function parseJoystickEmotes(text, emotesUsed) {
+  if (!Array.isArray(emotesUsed) || !emotesUsed.length) return null;
+  const urlKeys = ["url", "image_url", "imageUrl", "image", "src", "emote_url", "emoteUrl"];
+  const codeKeys = ["code", "name", "shortcode", "text", "emote", "token"];
+  const found = [];
+  emotesUsed.forEach(e => {
+    if (!e || typeof e !== "object") return;
+    const url = urlKeys.map(k => e[k]).find(v => typeof v === "string" && /^https?:\/\//.test(v));
+    const code = codeKeys.map(k => e[k]).find(v => typeof v === "string" && v);
+    if (!url || !code) return;
+    let idx = text.indexOf(code);
+    while (idx !== -1) { found.push({ start: idx, end: idx + code.length, url, alt: code }); idx = text.indexOf(code, idx + code.length); }
+  });
+  if (!found.length) return null;
+  found.sort((a, b) => a.start - b.start);
+  const ranges = [];
+  let lastEnd = -1;
+  found.forEach(r => { if (r.start >= lastEnd) { ranges.push(r); lastEnd = r.end; } }); // drop overlaps
+  const out = [];
+  let cursor = 0;
+  ranges.forEach(r => {
+    if (r.start > cursor) out.push({ type: "text", text: text.slice(cursor, r.start) });
+    out.push({ type: "emote", url: r.url, alt: r.alt });
+    cursor = r.end;
+  });
+  if (cursor < text.length) out.push({ type: "text", text: text.slice(cursor) });
+  return out;
+}
+
+// Kick inlines emotes as literal "[emote:ID:NAME]" tokens in the message text.
+function parseKickEmotes(content) {
+  const re = /\[emote:(\d+):([^\]]*)\]/g;
+  if (!re.test(content)) return null;
+  re.lastIndex = 0;
+  const out = [];
+  let cursor = 0, m;
+  while ((m = re.exec(content))) {
+    if (m.index > cursor) out.push({ type: "text", text: content.slice(cursor, m.index) });
+    out.push({ type: "emote", url: kickEmoteUrl(m[1]), alt: m[2] });
+    cursor = m.index + m[0].length;
+  }
+  if (cursor < content.length) out.push({ type: "text", text: content.slice(cursor) });
+  return out;
+}
+
+// Third-party emotes (BTTV/FFZ/7TV) — fetched per channel on connect, merged
+// into one code->url map, applied as a second pass after each platform's
+// native emote parser. Kick only gets 7TV (BTTV/FFZ have no Kick API).
+async function fetchBttvGlobal() {
+  try {
+    const list = await (await fetch("https://api.betterttv.net/3/cached/emotes/global")).json();
+    return Object.fromEntries(list.map(e => [e.code, `https://cdn.betterttv.net/emote/${e.id}/2x.webp`]));
+  } catch { return {}; }
+}
+async function fetchBttvChannel(twitchUserId) {
+  try {
+    const r = await fetch(`https://api.betterttv.net/3/cached/users/twitch/${twitchUserId}`);
+    if (!r.ok) return {};
+    const data = await r.json();
+    const all = [...(data.channelEmotes || []), ...(data.sharedEmotes || [])];
+    return Object.fromEntries(all.map(e => [e.code, `https://cdn.betterttv.net/emote/${e.id}/2x.webp`]));
+  } catch { return {}; }
+}
+async function fetchFfzGlobal() {
+  try {
+    const data = await (await fetch("https://api.frankerfacez.com/v1/set/global")).json();
+    const out = {};
+    (data.default_sets || []).forEach(setId => {
+      Object.values(data.sets?.[setId]?.emoticons || {}).forEach(e => {
+        const url = e.urls["2"] || e.urls["1"];
+        if (url) out[e.name] = url.startsWith("//") ? "https:" + url : url;
+      });
+    });
+    return out;
+  } catch { return {}; }
+}
+async function fetchFfzChannel(twitchLogin) {
+  try {
+    const r = await fetch(`https://api.frankerfacez.com/v1/room/${encodeURIComponent(twitchLogin)}`);
+    if (!r.ok) return {};
+    const data = await r.json();
+    const out = {};
+    Object.values(data.sets || {}).forEach(set => {
+      (set.emoticons || []).forEach(e => {
+        const url = e.urls["2"] || e.urls["1"];
+        if (url) out[e.name] = url.startsWith("//") ? "https:" + url : url;
+      });
+    });
+    return out;
+  } catch { return {}; }
+}
+async function fetch7tvSet(url) {
+  try {
+    const data = await (await fetch(url)).json();
+    const emotes = data.emote_set?.emotes || data.emotes || [];
+    return Object.fromEntries(emotes.map(e => [e.name, `https://cdn.7tv.app/emote/${e.id}/2x.webp`]));
+  } catch { return {}; }
+}
+const fetch7tvGlobal = () => fetch7tvSet("https://7tv.io/v3/emote-sets/global");
+const fetch7tvChannel = (platform, userId) => fetch7tvSet(`https://7tv.io/v3/users/${platform}/${userId}`);
+
+const thirdPartyEmoteMaps = new Map(); // "platform:channelKey" -> Map(code->url)
+const thirdPartyEmoteFetches = new Set(); // channel keys already fetched/fetching this session
+async function ensureThirdPartyEmotes(platform, channelKey, providerId) {
+  const mapKey = `${platform}:${channelKey.toLowerCase()}`;
+  if (!settings.customEmotes || thirdPartyEmoteFetches.has(mapKey)) return;
+  thirdPartyEmoteFetches.add(mapKey);
+  const layers = platform === "twitch"
+    ? await Promise.all([fetchFfzGlobal(), fetchBttvGlobal(), fetch7tvGlobal(), fetchFfzChannel(channelKey), fetchBttvChannel(providerId), fetch7tvChannel("twitch", providerId)])
+    : await Promise.all([fetch7tvGlobal(), fetch7tvChannel("kick", providerId)]);
+  const merged = new Map();
+  layers.forEach(layer => Object.entries(layer).forEach(([code, url]) => merged.set(code, url))); // later layers win — channel beats global, 7TV beats the rest
+  thirdPartyEmoteMaps.set(mapKey, merged);
+}
+function applyThirdPartyEmotes(platform, channelKey, text, existingParts) {
+  const map = thirdPartyEmoteMaps.get(`${platform}:${channelKey.toLowerCase()}`);
+  if (!map || !map.size) return existingParts;
+  const splitOnMap = str => {
+    const out = [];
+    str.split(/(\s+)/).forEach(tok => {
+      if (map.has(tok)) out.push({ type: "emote", url: map.get(tok), alt: tok });
+      else if (tok) out.push({ type: "text", text: tok });
+    });
+    return out;
+  };
+  if (!existingParts) {
+    const parts = splitOnMap(text);
+    return parts.some(p => p.type === "emote") ? parts : null; // stay null if nothing matched — keeps the plain-text fast path
+  }
+  return existingParts.flatMap(p => p.type === "text" ? splitOnMap(p.text) : [p]);
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.dataset.show = "true";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.dataset.show = "false", 2600);
+}
+
+/* ── Message pipeline ───────────────────────────────────────────────────── */
+function ignoreSet() { return new Set(settings.ignoreList.split(",").map(s => s.trim().toLowerCase()).filter(Boolean)); }
+function embedAllowSet() { return new Set(settings.embedAllowlist.split(",").map(s => s.trim().toLowerCase()).filter(Boolean)); }
+function canEmbed(m) {
+  if (m.role === "host" || m.role === "mod" || m.role === "vip") return true;
+  return embedAllowSet().has((m.login || m.user || "").toLowerCase());
+}
+
+// Link embeds (Giphy/YouTube/Spotify/clips) — gated to mods/VIPs/host + the
+// allowlist via canEmbed(). Twitch clips get a real thumbnail (Helix, only
+// once OAuth-connected); Kick clips have no public API for one, so both
+// unresolvable cases fall back to a plain clickable chip via [data-open-url].
+const twitchClipCache = new Map(); // slug -> {thumbnail_url, title} | null
+function twitchClipThumb(slug) {
+  if (twitchClipCache.has(slug)) return Promise.resolve(twitchClipCache.get(slug));
+  if (!tauriInvoke || !oauthAccounts.twitch) return Promise.resolve(null);
+  return tauriInvoke("twitch_resolve_clip", { slug }).then(c => { twitchClipCache.set(slug, c); return c; }).catch(() => null);
+}
+function firstUrl(text) { const m = /https?:\/\/\S+/.exec(text); return m ? m[0] : null; }
+function clipChip(label, url) {
+  const chip = el("a", "cv-embed-clip-chip", `▶ ${label} ↗`);
+  chip.href = url;
+  chip.dataset.openUrl = url;
+  return chip;
+}
+function buildEmbedNode(m) {
+  if (!settings.embedsEnabled || !canEmbed(m)) return null;
+  const text = m.text;
+  let match;
+  if ((match = YT_RE.exec(text))) {
+    const wrap = el("div", "cv-miniplayer-wrap");
+    wrap.append(el("div", "cv-miniplayer-tag", "▶ YouTube"));
+    const iframe = el("iframe");
+    iframe.src = "https://www.youtube.com/embed/" + match[1];
+    iframe.title = "YouTube embed";
+    iframe.allowFullscreen = true;
+    wrap.append(iframe);
+    return wrap;
+  }
+  if ((match = SPOTIFY_RE.exec(text))) {
+    const wrap = el("div", "cv-miniplayer-wrap cv-embed-spotify");
+    wrap.append(el("div", "cv-miniplayer-tag", "♫ Spotify"));
+    const iframe = el("iframe");
+    iframe.src = `https://open.spotify.com/embed/${match[1]}/${match[2]}`;
+    iframe.title = "Spotify embed";
+    iframe.allow = "encrypted-media";
+    wrap.append(iframe);
+    return wrap;
+  }
+  const giphyId = extractGiphyId(text);
+  if (giphyId) {
+    const wrap = el("div", "cv-miniplayer-wrap cv-embed-giphy");
+    wrap.append(el("div", "cv-miniplayer-tag", "GIF · Giphy"));
+    const img = el("img");
+    img.src = `https://media.giphy.com/media/${giphyId}/giphy.gif`;
+    img.alt = "Giphy GIF";
+    img.loading = "lazy";
+    wrap.append(img);
+    return wrap;
+  }
+  if ((match = TWITCH_CLIP_RE.exec(text))) {
+    const slug = match[1];
+    const wrap = el("div", "cv-miniplayer-wrap cv-embed-clip");
+    const chip = clipChip("Twitch Clip", firstUrl(text) || `https://clips.twitch.tv/${slug}`);
+    wrap.append(chip);
+    twitchClipThumb(slug).then(c => {
+      if (!c?.thumbnail_url) return;
+      const img = el("img", "cv-embed-clip-thumb");
+      img.src = c.thumbnail_url; img.alt = c.title || "Twitch clip"; img.loading = "lazy";
+      img.dataset.openUrl = chip.href;
+      wrap.prepend(img);
+    });
+    return wrap;
+  }
+  if ((match = KICK_CLIP_RE.exec(text))) {
+    const wrap = el("div", "cv-miniplayer-wrap cv-embed-clip");
+    wrap.append(clipChip("Kick Clip", firstUrl(text) || `https://kick.com/clips/${match[1]}`));
+    return wrap;
+  }
+  return null;
+}
+
+function passesFilters(m) {
+  if (m.deleted) return false;
+  if (state.muted.has(m.platform)) return false;
+  if (!m.system) {
+    if (settings.excludeCommands && m.text.trim().startsWith("!")) return false;
+    if (ignoreSet().has(m.user.toLowerCase())) return false;
+  }
+  const q = state.search.trim().toLowerCase();
+  if (q && !(m.user.toLowerCase().includes(q) || m.text.toLowerCase().includes(q))) return false;
+  const hideSec = Number(settings.hideAfter) || 0;
+  if (hideSec > 0 && Date.now() - m.ts > hideSec * 1000) return false;
+  return true;
+}
+
+function addMessage(m) {
+  const finish = () => {
+    m.id = state.nextId++;
+    m.ts = m.ts || Date.now();
+    if (!m.system && !m.event && BANNED_PATTERNS.some(re => re.test(m.text))) m.flagged = true;
+    state.messages.push(m);
+    if (state.messages.length > MAX_MESSAGES) state.messages.splice(0, state.messages.length - MAX_MESSAGES);
+    if (passesFilters(m) && !appendToView(m)) renderView();
+    if (m.event && settings.soundAlerts) playAlertBeep();
+    if (settings.ttsEnabled && !m.system && !m.event && !m.flagged && m.text) speak(`${m.user} says ${m.text}`);
+    if (settings.showPronouns && m.platform === "twitch" && m.login) fetchPronouns(m.login);
+    // Relay to any connected OBS/Meld overlay browser source — never in the
+    // overlay page itself, or a relayed message would just get re-relayed.
+    // Events/system messages are never relayed either — the overlay has no
+    // Events settings section (raids/subs banners, sound alerts), so there's
+    // no way to configure how they'd display there.
+    // The overlay's browser tab has no tauriInvoke, so it can never resolve
+    // Kick/Twitch avatars itself — wait briefly for OUR resolution here and
+    // attach the final URL before sending, so the overlay gets a real picture
+    // instead of permanently falling back to initials. Usually a no-op by
+    // this point since the local render wait below already attached one.
+    if (!isOverlay && !m.event && !m.system && tauriInvoke) {
+      const relay = () => tauriInvoke("overlay_broadcast", { json: JSON.stringify(m) }).catch(() => {});
+      const avatarWait = resolveAvatarUrl(m);
+      if (!m.avatar && avatarWait) {
+        const delayMs = Math.max(0, Number(settings.overlayAvatarDelay) || 0);
+        Promise.race([avatarWait, new Promise(r => setTimeout(r, delayMs))]).then(url => {
+          if (url) m.avatar = url;
+          relay();
+        });
+      } else relay();
+    }
+    // Feeds the Overlay Maker's live-data-bound fields (see overlay_manager.rs's
+    // /data-ws) — a separate, generic path from the overlay_broadcast relay
+    // above, which is specifically Multi-Chat's own dedicated chat overlay.
+    if (!isOverlay && !m.event && !m.system && tauriInvoke && m.text) {
+      tauriInvoke("overlay_publish_data", { key: "latest_chat", value: `${m.user}: ${m.text}` }).catch(() => {});
+    }
+  };
+  // Hold the message off-screen briefly so it never visually pops in from
+  // initials to a photo — same idea as the overlay relay delay, but for the
+  // desktop window's own feed. Only affects the FIRST message from a new
+  // chatter each session; repeat chatters resolve from cache instantly.
+  if (!isOverlay && !m.avatar) {
+    const p = resolveAvatarUrl(m);
+    if (p) {
+      const delayMs = Math.max(0, Number(settings.avatarRenderDelay) || 0);
+      Promise.race([p, new Promise(r => setTimeout(r, delayMs))]).then(url => {
+        if (url) m.avatar = url;
+        finish();
+      });
+      return;
+    }
+  }
+  finish();
+}
+let _audioCtx = null;
+function playAlertBeep() {
+  if (settings.alertSoundUrl) {
+    try { new Audio(settings.alertSoundUrl).play().catch(() => {}); return; } catch {}
+  }
+  try {
+    const ctx = _audioCtx || (_audioCtx = new (window.AudioContext || window.webkitAudioContext)());
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(720, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(420, ctx.currentTime + 0.25);
+    g.gain.setValueAtTime(0.15, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    o.connect(g).connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.3);
+  } catch {}
+}
+function addSystem(platform, text) {
+  addMessage({ platform, user: PLATFORM_MAP[platform].label, text, role: null, pinned: false, system: true });
+}
+function speak(text) {
+  try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(text)); } catch {}
+}
+
+/* ── Avatars ───────────────────────────────────────────────────────────── */
+// Joystick sends the real avatar URL in the message payload — no resolution
+// needed. Kick's live chat carries no avatar field at all (confirmed against
+// real traffic), so it's resolved natively per-username via the same public
+// channel-lookup endpoint used for chatroom resolution (Cloudflare/CORS
+// blocks this from a browser, so it's Tauri-app-only). Twitch uses real
+// Helix avatars once an account is connected (batched, since a busy chat can
+// have many unique chatters); unavatar.io remains the fallback for anonymous
+// Twitch viewing, since Helix has no anonymous access.
+const brokenAvatars = new Set(); // src that 404'd — don't retry, use initial
+
+// Every call to kick.com/api/v2/channels/* (chatroom resolve AND avatar
+// resolve both hit this same endpoint) goes through one serialized, throttled
+// queue. A burst of per-chatter avatar lookups in a busy chat tripped a
+// Cloudflare block that took the *chatroom resolve* down with it — so this
+// isn't just politeness, it's what keeps the connect feature itself alive.
+let kickApiQueue = [];
+let kickApiBusy = false;
+let kickApiCooldownUntil = 0;
+function kickApiCall(fn) {
+  return new Promise((resolve, reject) => {
+    kickApiQueue.push({ fn, resolve, reject });
+    pumpKickApiQueue();
+  });
+}
+function pumpKickApiQueue() {
+  if (kickApiBusy || !kickApiQueue.length) return;
+  const wait = kickApiCooldownUntil - Date.now();
+  if (wait > 0) { setTimeout(pumpKickApiQueue, wait); return; }
+  kickApiBusy = true;
+  const { fn, resolve, reject } = kickApiQueue.shift();
+  Promise.resolve().then(fn).then(resolve, e => {
+    if (String(e).includes("403")) kickApiCooldownUntil = Date.now() + 60000; // back off a full minute on a block
+    reject(e);
+  }).finally(() => {
+    setTimeout(() => { kickApiBusy = false; pumpKickApiQueue(); }, 1000); // ~1 req/sec, never bursts
+  });
+}
+
+const kickAvatarPromises = new Map(); // username(lower) -> Promise<url|null>
+const kickAvatarResolved = new Map(); // username(lower) -> url|null, once known — lets avatarSrc() skip initials entirely
+const KICK_AVATAR_CAP = 60; // bound worst-case request volume on a huge chat
+function kickAvatarFor(username) {
+  const key = username.toLowerCase();
+  if (!kickAvatarPromises.has(key)) {
+    const p = (tauriInvoke && kickAvatarPromises.size < KICK_AVATAR_CAP)
+      ? kickApiCall(() => tauriInvoke("resolve_kick_avatar", { username: key })).catch(() => null)
+      : Promise.resolve(null);
+    kickAvatarPromises.set(key, p.then(url => { kickAvatarResolved.set(key, url); return url; }));
+  }
+  return kickAvatarPromises.get(key);
+}
+kickAvatarFor.peek = username => kickAvatarResolved.get(username.toLowerCase());
+
+// Shared batched avatar resolver: collects userIds into a 150ms window, then
+// resolves them all in one backend call (one Helix/Kick-API request instead
+// of one per chatter). Each platform gets its own cache/queue via makeAvatarBatcher.
+function makeAvatarBatcher(command) {
+  const cache = new Map(); // userId -> url | null
+  const waiters = new Map(); // userId -> resolve fn array
+  let queue = new Set();
+  let flushTimer = null;
+  async function flush() {
+    const ids = [...queue];
+    queue.clear();
+    if (!ids.length) return;
+    let map = {};
+    if (tauriInvoke) { try { map = await tauriInvoke(command, { userIds: ids }); } catch { map = {}; } }
+    ids.forEach(id => {
+      const url = map[id] || null;
+      cache.set(id, url);
+      (waiters.get(id) || []).forEach(fn => fn(url));
+      waiters.delete(id);
+    });
+  }
+  function avatarFor(userId) {
+    if (cache.has(userId)) return Promise.resolve(cache.get(userId));
+    return new Promise(resolve => {
+      (waiters.get(userId) || waiters.set(userId, []).get(userId)).push(resolve);
+      queue.add(userId);
+      clearTimeout(flushTimer);
+      flushTimer = setTimeout(flush, 150);
+    });
+  }
+  avatarFor.peek = userId => cache.get(userId); // synchronous — lets avatarSrc() skip initials when already known
+  return avatarFor;
+}
+const twitchAvatarFor = makeAvatarBatcher("twitch_resolve_avatars");
+const kickOAuthAvatarFor = makeAvatarBatcher("kick_resolve_avatars");
+
+// Custom per-channel subscriber badge images (the ones from actually buying
+// a sub, not the generic "SUB" pill) — fetched once per channel on connect,
+// same cache-then-render-time-lookup pattern as everything else here.
+const kickSubBadgeTiers = new Map(); // slug(lower) -> [{months,url}] sorted desc, or [] once resolved-empty
+const kickSubBadgeFetches = new Set();
+function ensureKickSubBadges(slug) {
+  const key = slug.toLowerCase();
+  if (kickSubBadgeFetches.has(key) || !tauriInvoke) return;
+  kickSubBadgeFetches.add(key);
+  kickApiCall(() => tauriInvoke("kick_resolve_sub_badges", { slug: key }))
+    .then(tiers => kickSubBadgeTiers.set(key, tiers))
+    .catch(() => kickSubBadgeTiers.set(key, []));
+}
+function kickSubBadgeUrl(slug, months) {
+  if (months == null) return null;
+  const tiers = kickSubBadgeTiers.get(slug.toLowerCase());
+  const tier = tiers && tiers.find(t => months >= t.months);
+  return tier ? tier.url : null;
+}
+
+const twitchBadgeSets = new Map(); // channel login(lower) -> {"set_id/version_id": url}
+const twitchBadgeFetches = new Set();
+function ensureTwitchBadges(login, broadcasterId) {
+  const key = login.toLowerCase();
+  if (twitchBadgeFetches.has(key) || !tauriInvoke) return;
+  twitchBadgeFetches.add(key);
+  tauriInvoke("twitch_resolve_badges", { broadcasterId: String(broadcasterId) })
+    .then(map => twitchBadgeSets.set(key, map))
+    .catch(() => twitchBadgeSets.set(key, {}));
+}
+function twitchBadgeUrl(login, badgeKey) {
+  if (!badgeKey) return null;
+  const map = twitchBadgeSets.get(login.toLowerCase());
+  return map ? map[badgeKey] || null : null;
+}
+
+function avatarSrc(m) {
+  if (m.avatar) return m.avatar; // Joystick — real, from payload
+  if (m.platform === "twitch" && m.login && !oauthAccounts.twitch) return "https://unavatar.io/twitch/" + encodeURIComponent(m.login) + "?fallback=false";
+  // Already-resolved avatars (from an earlier message by the same user) render
+  // immediately — no initials placeholder for someone whose picture we already have.
+  if (m.platform === "kick" && oauthAccounts.kick && m.userId) return kickOAuthAvatarFor.peek(m.userId) || null;
+  if (m.platform === "kick" && m.user) return kickAvatarFor.peek(m.user) || null;
+  if (m.platform === "twitch" && m.userId && oauthAccounts.twitch) return twitchAvatarFor.peek(m.userId) || null;
+  return null; // not yet resolved — falls through to the async placeholder path below
+}
+// Picks the right async resolver for a message's avatar — shared by the
+// live-render swap-in below and by the overlay relay delay, which needs to
+// await the SAME promise so it can attach the final URL before broadcasting
+// (the overlay's own browser tab has no tauriInvoke, so it can never resolve
+// Kick/Twitch avatars itself — the desktop window has to do it first).
+function resolveAvatarUrl(m) {
+  if (m.platform === "kick" && oauthAccounts.kick && m.userId) return kickOAuthAvatarFor(m.userId);
+  if (m.platform === "kick" && m.user) return kickAvatarFor(m.user); // anonymous fallback — unofficial, Cloudflare-throttled endpoint
+  if (m.platform === "twitch" && m.userId && oauthAccounts.twitch) return twitchAvatarFor(m.userId);
+  return null;
+}
+function avatarNode(m) {
+  const initial = () => el("div", "cv-avatar", (m.user[0] || "?").toUpperCase());
+  const swapToImg = (placeholder, src) => {
+    const img = el("img", "cv-avatar");
+    img.src = src; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
+    img.onerror = () => brokenAvatars.add(src);
+    placeholder.replaceWith(img); // safe no-op if placeholder was already trimmed from the feed
+  };
+  const src = avatarSrc(m);
+  if (src && !brokenAvatars.has(src)) {
+    const img = el("img", "cv-avatar");
+    img.src = src;
+    img.alt = "";
+    img.loading = "lazy";
+    img.referrerPolicy = "no-referrer";
+    img.onerror = () => { brokenAvatars.add(src); img.replaceWith(initial()); };
+    return img;
+  }
+  const node = initial();
+  const p = resolveAvatarUrl(m);
+  if (p) p.then(url => { if (url) swapToImg(node, url); });
+  return node;
+}
+
+/* ── Pronouns (Twitch, via pronouns.alejo.community) ────────────────────── */
+const pronounsCache = new Map(); // login -> display string | null
+let pronounDefs = null;
+async function fetchPronouns(login) {
+  login = login.toLowerCase();
+  if (pronounsCache.has(login)) return;
+  pronounsCache.set(login, null); // in-flight marker
+  try {
+    if (!pronounDefs) {
+      const r = await fetch("https://api.pronouns.alejo.community/v1/pronouns");
+      pronounDefs = r.ok ? await r.json() : {};
+    }
+    const r = await fetch("https://api.pronouns.alejo.community/v1/users/" + encodeURIComponent(login));
+    if (!r.ok) return;
+    const d = await r.json();
+    const p = pronounDefs[d.pronoun_id];
+    if (p) pronounsCache.set(login, p.subject + "/" + (d.alt_pronoun_id ? (pronounDefs[d.alt_pronoun_id]?.subject || p.object) : p.object));
+  } catch {}
+}
+
+/* ── Dropdown menu ──────────────────────────────────────────────────────── */
+let _openMenu = null;
+function closeMenu() { if (_openMenu) { _openMenu.remove(); _openMenu = null; } }
+document.addEventListener("click", e => { if (_openMenu && !_openMenu.contains(e.target)) closeMenu(); }, true);
+function showMenu(anchor, items) {
+  closeMenu();
+  const menu = el("div", "cv-menu");
+  items.forEach(it => {
+    if (it.divider) { menu.append(el("div", "cv-menu-divider")); return; }
+    const row = el("div", "cv-menu-item");
+    if (it.danger) row.dataset.danger = "true";
+    row.append(el("span", "", it.icon || ""), el("span", "", it.label));
+    row.onclick = () => { closeMenu(); it.onClick(); };
+    menu.append(row);
+  });
+  document.body.append(menu);
+  const r = anchor.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(r.right - mw, window.innerWidth - mw - 8)) + "px";
+  menu.style.top = (r.bottom + mh + 8 > window.innerHeight ? r.top - mh - 4 : r.bottom + 4) + "px";
+  _openMenu = menu;
+}
+
+/* ── Message-level actions ──────────────────────────────────────────────── */
+function hideMessage(id) {
+  const m = state.messages.find(x => x.id === id);
+  if (m) { m.deleted = true; renderView(); renderPinned(); }
+}
+function ignoreUser(name) {
+  const list = settings.ignoreList.split(",").map(s => s.trim()).filter(Boolean);
+  if (!list.some(n => n.toLowerCase() === name.toLowerCase())) list.push(name);
+  settings.ignoreList = list.join(", ");
+  store.save("bd-mc-settings", settings);
+  buildSettingsDrawer();
+  renderView();
+  showToast(`Ignoring ${name}`);
+}
+function reviewFlagged(id, keep) {
+  const m = state.messages.find(x => x.id === id);
+  if (m) { m.reviewed = true; m.deleted = !keep; renderView(); }
+}
+// Real moderation actions — only meaningful when connected via OAuth to the
+// platform the message is on (the connected account must actually be the
+// broadcaster or a mod there; the API itself enforces that, we just gate on
+// having the pieces needed to even attempt the call).
+function canModerate(m) {
+  if (m.platform === "twitch") return !!(oauthAccounts.twitch && twitchBroadcasterId && m.userId);
+  if (m.platform === "kick") return !!(oauthAccounts.kick && kickBroadcasterId && m.userId);
+  // Joystick's moderation REST endpoints act on a message id directly (the
+  // author is implicit) — no separate broadcaster/user id needed.
+  if (m.platform === "joystick") return !!(oauthAccounts.joystick && m.msgId);
+  return false;
+}
+async function deleteMessage(m) {
+  if (!m.msgId) { showToast("Can't delete — no message ID for this one"); return; }
+  try {
+    if (m.platform === "twitch") await tauriInvoke("twitch_delete_message", { broadcasterId: twitchBroadcasterId, messageId: m.msgId });
+    else if (m.platform === "kick") await tauriInvoke("kick_delete_message", { messageId: m.msgId });
+    else if (m.platform === "joystick") await tauriInvoke("joystick_delete_message", { messageId: m.msgId });
+    hideMessage(m.id);
+    showToast("Message deleted");
+  } catch (e) { showToast(`Delete failed: ${e}`); }
+}
+async function timeoutUser(m, seconds) {
+  try {
+    if (m.platform === "twitch") await tauriInvoke("twitch_moderate_user", { broadcasterId: twitchBroadcasterId, userId: m.userId, durationSecs: seconds });
+    else if (m.platform === "kick") await tauriInvoke("kick_moderate_user", { broadcasterUserId: kickBroadcasterId, userId: m.userId, durationMinutes: Math.round(seconds / 60) });
+    // Joystick's mute endpoint has no duration parameter — whatever length
+    // it applies is fixed on Joystick's side, the "10m" label is a fib here.
+    else if (m.platform === "joystick") await tauriInvoke("joystick_moderate_user", { messageId: m.msgId, ban: false });
+    showToast(`${m.user} timed out`);
+  } catch (e) { showToast(`Timeout failed: ${e}`); }
+}
+async function banUser(m) {
+  if (!confirm(`Permanently ban ${m.user}? This can't be undone from here.`)) return;
+  try {
+    if (m.platform === "twitch") await tauriInvoke("twitch_moderate_user", { broadcasterId: twitchBroadcasterId, userId: m.userId });
+    else if (m.platform === "kick") await tauriInvoke("kick_moderate_user", { broadcasterUserId: kickBroadcasterId, userId: m.userId });
+    else if (m.platform === "joystick") await tauriInvoke("joystick_moderate_user", { messageId: m.msgId, ban: true });
+    showToast(`${m.user} banned`);
+  } catch (e) { showToast(`Ban failed: ${e}`); }
+}
+// Manual, on-demand only — never automatic, since a wrong auto-translation
+// showing as if it were certain is worse than just not having one.
+async function translateMessage(m) {
+  if (!tauriInvoke) { showToast("Translation requires the desktop app"); return; }
+  try {
+    m.translatedText = await tauriInvoke("translate_text", { text: m.text, target: "en" });
+    renderView();
+  } catch (e) { showToast(`Translation failed: ${e}`); }
+}
+function msgMenuItems(m) {
+  const items = [
+    { label: m.pinned ? "Unpin message" : "Pin message", icon: "📌", onClick: () => togglePin(m.id) },
+    { label: "Copy message", icon: "📋", onClick: () => { navigator.clipboard?.writeText(`${m.user}: ${m.text}`); showToast("Message copied"); } },
+    { label: "Translate", icon: "🌐", onClick: () => translateMessage(m) },
+    { divider: true },
+    { label: `Ignore ${m.user}`, icon: "🔇", onClick: () => ignoreUser(m.user) },
+    { label: "Hide message", icon: "🗑️", danger: true, onClick: () => hideMessage(m.id) },
+  ];
+  if (canModerate(m)) {
+    items.push(
+      { divider: true },
+      { label: "Delete message", icon: "🚫", danger: true, onClick: () => deleteMessage(m) },
+      { label: m.platform === "joystick" ? "Timeout" : "Timeout (10m)", icon: "⏱️", danger: true, onClick: () => timeoutUser(m, 600) },
+      { label: `Ban ${m.user}`, icon: "⛔", danger: true, onClick: () => banUser(m) },
+    );
+  }
+  return items;
+}
+
+/* ── Rendering ──────────────────────────────────────────────────────────── */
+const feedMeta = new Map(); // container -> { lastKey }
+
+/* ── Chat feed inline chips ────────────────────────────────────────────── */
+// Event-type chips (replace the generic gradient banner for kinds we can
+// actually detect from real platform data): raid, resub/sub, gift subs,
+// announcement. Anything else still falls back to the old banner.
+function renderEventChip(m) {
+  if (m.chip === "raid") {
+    const c = el("div", "cf-raid");
+    c.dataset.platform = m.platform;
+    c.append(el("span", "cf-raid-ico", "⚔️"));
+    const t = el("span", "cf-raid-text");
+    t.append(el("b", "", m.user), document.createTextNode(" raided with"));
+    c.append(t, el("span", "cf-raid-count", String(m.chipCount || "?")));
+    return c;
+  }
+  if (m.chip === "resub") {
+    const c = el("div", "cf-resub");
+    c.dataset.platform = m.platform;
+    c.append(el("span", "cf-resub-ico", "🌟"));
+    const t = el("span", "cf-resub-text");
+    t.append(el("b", "", m.user), document.createTextNode(" resubscribed"));
+    c.append(t);
+    if (m.chipMonths) c.append(el("span", "cf-resub-months", m.chipMonths + "mo"));
+    return c;
+  }
+  if (m.chip === "gift") {
+    const c = el("div", "cf-gift");
+    c.dataset.platform = m.platform;
+    c.append(el("span", "cf-gift-ico", "🎁"));
+    const t = el("span", "cf-gift-text");
+    t.append(el("b", "", m.user), document.createTextNode(" gifted subs"));
+    c.append(t, el("span", "cf-gift-count", "x" + String(m.chipCount || "1")));
+    return c;
+  }
+  if (m.chip === "announce") {
+    const c = el("div", "cf-announce");
+    c.dataset.platform = m.platform;
+    c.append(el("span", "cf-announce-ico", "📢"), el("span", "cf-announce-tag", "Announcement"), el("span", "cf-announce-text", m.text));
+    return c;
+  }
+  if (m.chip === "tip") {
+    const c = el("div", "tt-chip");
+    c.dataset.platform = m.platform;
+    const t = el("span", "tt-chip-text");
+    t.append(el("b", "", m.user));
+    c.append(t, el("span", "tt-chip-amt", "🪙 " + m.chipAmount + (m.chipReward ? " · " + m.chipReward : "")));
+    return c;
+  }
+  return null;
+}
+
+// Prefix chips sit above a normal message bubble rather than replacing it —
+// the underlying chat message (avatar, text, actions) still matters here.
+function renderPrefixChip(m) {
+  if (m.chip === "cheer") {
+    const c = el("div", "cf-cheer");
+    c.append(el("span", "cf-cheer-ico", "💎"));
+    const t = el("span", "cf-cheer-text");
+    t.append(el("b", "", m.user), document.createTextNode(" cheered"));
+    c.append(t, el("span", "cf-cheer-amt", String(m.chipCount || "0") + " bits"));
+    return c;
+  }
+  if (m.chip === "reply" && m.chipReplyTo) {
+    const tag = el("span", "cf-reply-tag");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("width", "12"); svg.setAttribute("height", "12"); svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none"); svg.setAttribute("stroke", "currentColor"); svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round"); svg.setAttribute("stroke-linejoin", "round");
+    const poly = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    poly.setAttribute("points", "9 10 4 15 9 20");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M20 4v7a4 4 0 0 1-4 4H4");
+    svg.append(poly, path);
+    tag.append(svg, document.createTextNode(" replying to " + m.chipReplyTo));
+    return tag;
+  }
+  return null;
+}
+
+// Does this message @-mention the account you're connected/viewing as?
+function isMention(m) {
+  const me = (oauthAccounts[m.platform]?.username || channels[m.platform] || "").trim().toLowerCase();
+  return !!me && m.text.toLowerCase().includes("@" + me);
+}
+
+// A message whose only content is one emote — the unit an emote-combo streak is built from.
+function singleEmoteAlt(m) {
+  if (!m.emoteParts) return null;
+  const meaningful = m.emoteParts.filter(p => p.type === "emote" || (p.type === "text" && p.text.trim()));
+  return meaningful.length === 1 && meaningful[0].type === "emote" ? meaningful[0] : null;
+}
+function comboChipNode(platform, emote) {
+  const c = el("div", "cf-combo");
+  c.dataset.platform = platform;
+  const wrap = el("span", "cf-combo-emote");
+  const img = el("img"); img.src = emote.url; img.alt = emote.alt; img.title = emote.alt;
+  wrap.append(img);
+  c.append(wrap, el("span", "cf-combo-count", "x2"), el("span", "cf-combo-tag", "Combo"));
+  return c;
+}
+
+function msgNode(m, small, isCont) {
+  if (m.system) {
+    const row = el("div", "cv-sys");
+    row.dataset.platform = m.platform;
+    const b = el("b", "", m.user + " ");
+    row.append(b, document.createTextNode(m.text));
+    return row;
+  }
+  if (m.event && settings.visualAlerts) {
+    const chip = renderEventChip(m);
+    if (chip) return chip;
+    const banner = el("div", "cv-event-banner");
+    banner.dataset.platform = m.platform;
+    const ic = el("span", "cv-platform-icon");
+    ic.innerHTML = PLATFORM_MAP[m.platform].icon; // trusted constant
+    banner.append(ic, el("span", "cv-event-text", "🎉 " + m.text));
+    return banner;
+  }
+  if (m.flagged && !m.reviewed) {
+    const card = el("div", "cv-flagged");
+    card.dataset.platform = m.platform;
+    card.append(el("div", "cv-flagged-head", `⚠️ Flagged a message from ${m.user}`));
+    card.append(el("div", "cv-flagged-text", `"${m.text}"`));
+    const acts = el("div", "cv-flagged-actions");
+    const ok = el("button", "cv-btn", "Approve");
+    ok.onclick = () => reviewFlagged(m.id, true);
+    const rm = el("button", "cv-btn danger", "Remove");
+    rm.onclick = () => reviewFlagged(m.id, false);
+    acts.append(ok, rm);
+    card.append(acts);
+    return card;
+  }
+  const row = el("div", "cv-msg-row");
+  row.dataset.platform = m.platform;
+  row.dataset.msgId = m.id;
+  if (isMention(m)) row.dataset.mention = "true";
+
+  if (settings.showAvatar && !isCont) {
+    row.append(avatarNode(m));
+  } else if (settings.showAvatar) {
+    const spacer = el("div"); spacer.style.width = "30px"; spacer.style.flexShrink = "0";
+    row.append(spacer);
+  }
+  const body = el("div", "cv-msg-body");
+  if (!isCont) {
+    const head = el("div", "cv-msg-head");
+    if (settings.showPlatformIcon && !small) {
+      const ic = el("span", "cv-platform-icon");
+      ic.innerHTML = PLATFORM_MAP[m.platform].icon; // trusted constant
+      head.append(ic);
+    }
+    if (settings.showBadges && m.role && ROLE_META[m.role]) {
+      const textBadge = () => { const b = el("span", "cv-badge", ROLE_META[m.role].label); b.dataset.variant = ROLE_META[m.role].variant; return b; };
+      if (m.roleBadgeUrl) {
+        const img = el("img", "cv-badge-img");
+        img.src = m.roleBadgeUrl; img.alt = ROLE_META[m.role].label; img.title = ROLE_META[m.role].label; img.loading = "lazy";
+        img.onerror = () => img.replaceWith(textBadge());
+        head.append(img);
+      } else {
+        head.append(textBadge());
+      }
+    }
+    const user = el("span", "cv-msg-user", m.user);
+    if (small) user.style.fontSize = "13px";
+    head.append(user);
+    if (settings.showPronouns && m.login) {
+      const p = pronounsCache.get(m.login.toLowerCase());
+      if (p) head.append(el("span", "cv-msg-pronouns", p));
+    }
+    if (settings.showTimestamps) head.append(el("span", "cv-msg-time", fmtTime(m.ts)));
+    body.append(head);
+  }
+  const text = el("div", "cv-msg-text");
+  if (small) text.style.fontSize = "13px";
+  if (m.emoteParts) {
+    m.emoteParts.forEach(p => {
+      if (p.type === "emote") {
+        const img = el("img", p.giant ? "cv-emote-img cv-emote-giant" : "cv-emote-img");
+        img.src = p.url; img.alt = p.alt; img.title = p.alt; img.loading = "lazy";
+        text.append(img);
+      } else if (p.text) {
+        text.append(document.createTextNode(p.text));
+      }
+    });
+  } else {
+    text.textContent = m.text;
+  }
+  body.append(text);
+  if (m.translatedText) {
+    const tr = el("div", "cv-translation");
+    tr.append(el("span", "cv-translation-label", "🌐 "), document.createTextNode(m.translatedText));
+    body.append(tr);
+  }
+  // Link embeds (Giphy/YouTube/Spotify/clips) — mods/VIPs/host + allowlist
+  const embedNode = !m.system && !m.event ? buildEmbedNode(m) : null;
+  if (embedNode) body.append(embedNode);
+  row.append(body);
+
+  const actions = el("div", "cv-msg-actions");
+  const pinBtn = el("button", "cv-msg-act", m.pinned ? "📌✕" : "📌");
+  pinBtn.title = m.pinned ? "Unpin" : "Pin message";
+  pinBtn.onclick = () => togglePin(m.id);
+  const menuBtn = el("button", "cv-msg-act", "⋯");
+  menuBtn.title = "Message actions";
+  menuBtn.onclick = e => { e.stopPropagation(); showMenu(menuBtn, msgMenuItems(m)); };
+  actions.append(pinBtn, menuBtn);
+  row.append(actions);
+
+  const prefix = !isCont ? renderPrefixChip(m) : null;
+  if (prefix) {
+    const wrap = el("div", "cf-prefix-wrap");
+    wrap.append(prefix, row);
+    return wrap;
+  }
+  return row;
+}
+
+function appendMsgTo(container, m, small) {
+  const meta = feedMeta.get(container) || { lastKey: null };
+
+  // Emote-combo streak: the 2nd+ consecutive lone-emote repeat collapses into
+  // one incrementing chip instead of piling up identical bubbles.
+  if (!m.system && !m.event) {
+    const emote = singleEmoteAlt(m);
+    // Keyed by emote, not user — a combo is many chatters spamming the same
+    // emote in a row, same as Twitch/Kick chat's own "spam it in unison" norm.
+    const comboKey = emote ? m.platform + "|" + emote.alt : null;
+    if (comboKey && meta.comboKey === comboKey && meta.comboEl) {
+      meta.comboCount++;
+      meta.comboEl.querySelector(".cf-combo-count").textContent = "x" + meta.comboCount;
+      feedMeta.set(container, meta);
+      const pinned = isPinnedToBottom(container);
+      if (pinned) container.scrollTop = container.scrollHeight;
+      return;
+    }
+    if (comboKey && meta.lastSingleEmoteKey === comboKey) {
+      const chip = comboChipNode(m.platform, emote);
+      const pinned = isPinnedToBottom(container);
+      container.append(chip);
+      meta.comboKey = comboKey; meta.comboCount = 2; meta.comboEl = chip;
+      meta.lastSingleEmoteKey = null; meta.lastKey = null;
+      feedMeta.set(container, meta);
+      if (pinned) container.scrollTop = container.scrollHeight;
+      else $("jumpBtn").dataset.show = "true";
+      return;
+    }
+    meta.comboKey = null; meta.comboEl = null;
+    meta.lastSingleEmoteKey = comboKey || null;
+  }
+
+  const key = (m.system || m.event || (m.flagged && !m.reviewed)) ? null : m.platform + "|" + m.user;
+  const isCont = settings.groupConsecutive && key && meta.lastKey === key;
+  const node = msgNode(m, small, isCont);
+  if (isCont) node.dataset.continuation = "true";
+  meta.lastKey = key;
+  feedMeta.set(container, meta);
+  const pinned = isPinnedToBottom(container);
+  container.append(node);
+  while (container.children.length > MAX_MESSAGES) container.firstChild.remove();
+  if (pinned) container.scrollTop = container.scrollHeight;
+  else $("jumpBtn").dataset.show = "true";
+}
+
+function isPinnedToBottom(c) { return c.scrollHeight - c.scrollTop - c.clientHeight < 60; }
+
+function appendToView(m) {
+  if (state.view === "unified") {
+    const feed = $("main").querySelector(".cv-feed");
+    if (!feed) return false;
+    appendMsgTo(feed, m, false);
+  } else if (state.view === "split") {
+    const col = $("main").querySelector(`.cv-col[data-platform="${m.platform}"] .cv-col-feed`);
+    if (!col) return false;
+    appendMsgTo(col, m, true);
+  } else if (state.view === "focus") {
+    if (m.platform !== state.focusPlatform) return true; // correctly not shown
+    const feed = $("main").querySelector(".cv-feed");
+    if (!feed) return false;
+    appendMsgTo(feed, m, false);
+  }
+  return true;
+}
+
+function renderView() {
+  const main = $("main");
+  main.innerHTML = "";
+  main.dataset.view = state.view;
+  feedMeta.clear();
+  const visible = state.messages.filter(passesFilters);
+  const activePlatforms = orderedPlatforms().filter(p => !state.muted.has(p.id));
+
+  if (!Object.values(state.health).some(h => h !== "off") && !state.messages.length) {
+    const empty = el("div", "cv-empty");
+    empty.append(el("div", "big", "💬"));
+    empty.append(el("div", "", "No channels connected yet."));
+    const btn = el("button", "cv-btn cta", "🔌 Connect channels");
+    btn.onclick = () => openDrawer("channels");
+    empty.append(btn);
+    main.append(empty);
+    return;
+  }
+
+  if (state.view === "unified") {
+    const feed = el("div", "cv-feed");
+    visible.forEach(m => appendMsgTo(feed, m, false));
+    main.append(feed);
+    feed.scrollTop = feed.scrollHeight;
+    watchScroll(feed);
+  } else if (state.view === "split") {
+    activePlatforms.forEach(p => {
+      const col = el("div", "cv-col");
+      col.dataset.platform = p.id;
+      const head = el("div", "cv-col-head");
+      head.append(el("span", "cv-dot"), el("span", "", p.label));
+      if (state.health[p.id] === "reconnecting") head.append(el("span", "cv-health-badge", "Reconnecting…"));
+      if (state.modes[p.id]) head.append(el("span", "cv-health-badge", state.modes[p.id] === "subs" ? "SUBS ONLY" : "EMOTE ONLY"));
+      col.append(head);
+      const feed = el("div", "cv-col-feed");
+      visible.filter(m => m.platform === p.id).forEach(m => appendMsgTo(feed, m, true));
+      col.append(feed);
+      main.append(col);
+      feed.scrollTop = feed.scrollHeight;
+      watchScroll(feed);
+    });
+  } else {
+    // Which platform to focus on is picked from the top Platforms bar itself
+    // (see renderPlatformToggles) — no separate rail duplicating those icons.
+    const feed = el("div", "cv-feed");
+    visible.filter(m => m.platform === state.focusPlatform).forEach(m => appendMsgTo(feed, m, false));
+    main.append(feed);
+    feed.scrollTop = feed.scrollHeight;
+    watchScroll(feed);
+  }
+  $("jumpBtn").dataset.show = "false";
+}
+
+function watchScroll(c) {
+  c.addEventListener("scroll", () => {
+    if (isPinnedToBottom(c)) $("jumpBtn").dataset.show = "false";
+  });
+}
+$("jumpBtn").onclick = () => {
+  $("main").querySelectorAll(".cv-feed, .cv-col-feed").forEach(c => c.scrollTop = c.scrollHeight);
+  $("jumpBtn").dataset.show = "false";
+};
+
+/* Pinned row */
+function togglePin(id) {
+  const m = state.messages.find(x => x.id === id);
+  if (m) { m.pinned = !m.pinned; renderPinned(); renderView(); }
+}
+function renderPinned() {
+  const row = $("pinnedRow");
+  row.innerHTML = "";
+  const pinned = state.messages.filter(m => m.pinned);
+  row.dataset.has = String(pinned.length > 0);
+  pinned.forEach(m => {
+    const card = el("div", "cv-pin-card");
+    card.dataset.platform = m.platform;
+    const head = el("div", "cv-pin-head");
+    head.append(el("span", "cv-pin-user", "📌 " + m.user));
+    const un = el("button", "cv-pin-unpin", "✕");
+    un.title = "Unpin";
+    un.onclick = () => togglePin(m.id);
+    head.append(un);
+    card.append(head, el("div", "cv-pin-text", m.text));
+    row.append(card);
+  });
+}
+
+/* Platform toggles + health */
+function orderedPlatforms() {
+  const order = (settings.platformOrder || []).filter(id => PLATFORM_MAP[id]);
+  PLATFORMS.forEach(p => { if (!order.includes(p.id)) order.push(p.id); });
+  return order.map(id => PLATFORM_MAP[id]);
+}
+let _dragId = null;
+function reorderPlatforms(dragId, dropId) {
+  if (!dragId || dragId === dropId) return;
+  const order = orderedPlatforms().map(p => p.id);
+  order.splice(order.indexOf(dropId), 0, order.splice(order.indexOf(dragId), 1)[0]);
+  settings.platformOrder = order;
+  store.save("bd-mc-settings", settings);
+  renderPlatformToggles(); renderView();
+}
+function renderPlatformToggles() {
+  const wrap = $("platformToggles");
+  wrap.innerHTML = "";
+  orderedPlatforms().forEach(p => {
+    const btn = el("button", "cv-platform-toggle");
+    btn.dataset.platform = p.id;
+    btn.dataset.active = String(!state.muted.has(p.id));
+    // In Focus view these icons pick which single platform to show instead
+    // of muting — no separate rail duplicating the same row (see renderView).
+    const isFocusPicker = state.view === "focus";
+    btn.dataset.focused = String(isFocusPicker && state.focusPlatform === p.id);
+    btn.title = isFocusPicker ? `Focus on ${p.label}` : p.label + (state.muted.has(p.id) ? " (muted)" : "") + " — drag to reorder";
+    btn.innerHTML = p.icon; // trusted constant
+    btn.draggable = true;
+    btn.ondragstart = () => { _dragId = p.id; btn.style.opacity = ".4"; };
+    btn.ondragend = () => { _dragId = null; btn.style.opacity = ""; };
+    btn.ondragover = e => e.preventDefault();
+    btn.ondrop = e => { e.preventDefault(); reorderPlatforms(_dragId, p.id); };
+    const dot = el("span", "cv-health-dot");
+    dot.dataset.status = state.health[p.id];
+    btn.append(dot);
+    if (state.modes[p.id]) {
+      const tag = el("span", "cv-mode-tag", state.modes[p.id] === "subs" ? "S" : "E");
+      tag.dataset.mode = state.modes[p.id];
+      btn.append(tag);
+    }
+    btn.onclick = () => {
+      if (isFocusPicker) {
+        state.focusPlatform = p.id;
+        renderPlatformToggles(); renderView();
+      } else {
+        state.muted.has(p.id) ? state.muted.delete(p.id) : state.muted.add(p.id);
+        renderPlatformToggles(); renderView();
+      }
+    };
+    wrap.append(btn);
+  });
+  const anyLive = Object.values(state.health).includes("live");
+  $("liveBadge").dataset.on = String(anyLive);
+  $("liveText").textContent = anyLive ? "LIVE" : "STANDBY";
+}
+function setHealth(platform, status) {
+  state.health[platform] = status;
+  renderPlatformToggles();
+  const s = document.querySelector(`.cv-conn-status[data-p="${platform}"]`);
+  if (s) { s.dataset.status = status; s.textContent = status.toUpperCase(); }
+  if (state.view === "split" || $("main").querySelector(".cv-empty")) renderView();
+}
+
+/* ── Connectors ─────────────────────────────────────────────────────────── */
+const sockets = {};   // platform -> WebSocket
+const retries = {};   // platform -> { timer, attempt }
+
+function disconnect(platform) {
+  clearTimeout(retries[platform]?.timer);
+  retries[platform] = null;
+  const ws = sockets[platform];
+  if (ws) { ws.onclose = null; try { ws.close(); } catch {} }
+  sockets[platform] = null;
+  state.modes[platform] = null;
+  setHealth(platform, "off");
+}
+
+function scheduleReconnect(platform, fn) {
+  if (!channels.enabled[platform]) return;
+  const r = retries[platform] || (retries[platform] = { attempt: 0 });
+  r.attempt++;
+  const delay = Math.min(30000, 1500 * Math.pow(2, r.attempt - 1)); // ponytail: capped exponential backoff
+  setHealth(platform, r.attempt > 4 ? "down" : "reconnecting");
+  r.timer = setTimeout(fn, delay);
+}
+function connected(platform) {
+  retries[platform] = { attempt: 0 };
+  setHealth(platform, "live");
+}
+
+/* Twitch — anonymous IRC over websocket */
+function connectTwitch() {
+  const chan = channels.twitch.trim().toLowerCase().replace(/^#/, "");
+  if (!chan) return;
+  const ws = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
+  sockets.twitch = ws;
+  setHealth("twitch", "reconnecting");
+  ws.onopen = () => {
+    ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
+    ws.send("PASS SCHMOOPIIE");
+    ws.send("NICK justinfan" + Math.floor(Math.random() * 90000 + 10000));
+    ws.send("JOIN #" + chan);
+  };
+  ws.onmessage = ev => {
+    for (const line of String(ev.data).split("\r\n")) {
+      if (!line) continue;
+      if (line.startsWith("PING")) { ws.send("PONG :tmi.twitch.tv"); continue; }
+      // @tags :nick!user@host CMD #chan :text
+      let rest = line, tags = {};
+      if (rest.startsWith("@")) {
+        const sp = rest.indexOf(" ");
+        rest.slice(1, sp).split(";").forEach(kv => { const i = kv.indexOf("="); tags[kv.slice(0, i)] = kv.slice(i + 1); });
+        rest = rest.slice(sp + 1);
+      }
+      // :prefix CMD param1 param2 :trailing
+      if (!rest.startsWith(":")) continue;
+      const trailIdx = rest.indexOf(" :");
+      const trailing = trailIdx === -1 ? "" : rest.slice(trailIdx + 2);
+      const parts = (trailIdx === -1 ? rest : rest.slice(0, trailIdx)).split(" ");
+      const prefix = parts[0].slice(1);
+      const cmd = parts[1];
+      if (cmd === "366") { connected("twitch"); addSystem("twitch", `joined #${chan}`); }
+      else if (cmd === "ROOMSTATE") {
+        if ("subs-only" in tags) state.modes.twitch = tags["subs-only"] === "1" ? "subs" : null;
+        if ("emote-only" in tags && tags["emote-only"] === "1") state.modes.twitch = "emote";
+        if (tags["room-id"]) { ensureThirdPartyEmotes("twitch", chan, tags["room-id"]); ensureTwitchBadges(chan, tags["room-id"]); twitchBroadcasterId = tags["room-id"]; }
+        renderPlatformToggles();
+      }
+      else if (cmd === "PRIVMSG") {
+        const badges = tags.badges || "";
+        const role = badges.includes("broadcaster") ? "host"
+          : tags.mod === "1" ? "mod"
+          : badges.includes("vip") ? "vip"
+          : tags.subscriber === "1" ? "sub" : null;
+        const roleBadgeKey = twitchRoleBadgeKey(role, badges);
+        const login = prefix.split("!")[0];
+        const user = tags["display-name"] || login;
+        const text = trailing || "";
+        const emoteParts = applyThirdPartyEmotes("twitch", chan, text, parseTwitchEmotes(text, tags.emotes));
+        const base = { platform: "twitch", user, login, userId: tags["user-id"], msgId: tags.id, text, emoteParts, role, roleBadgeUrl: roleBadgeKey ? twitchBadgeUrl(chan, roleBadgeKey) : null, pinned: false };
+        // Cheers (bits) and native-reply threads carry their own IRC tags —
+        // both still render as full messages, just with a small chip prefix.
+        if (tags.bits) addMessage({ ...base, chip: "cheer", chipCount: tags.bits });
+        else if (tags["reply-parent-display-name"]) addMessage({ ...base, chip: "reply", chipReplyTo: tags["reply-parent-display-name"] });
+        else addMessage(base);
+      }
+      else if (cmd === "USERNOTICE") {
+        // raids, subs, resubs, gifts, announcements — msg-id says which
+        const sysMsg = (tags["system-msg"] || "").replace(/\\s/g, " ").trim();
+        const msgId = tags["msg-id"] || "";
+        const user = tags["display-name"] || "Twitch";
+        if (msgId === "raid") {
+          addMessage({ platform: "twitch", user, text: sysMsg, chip: "raid", chipCount: tags["msg-param-viewerCount"] || "", pinned: false, event: true });
+        } else if (msgId === "sub" || msgId === "resub") {
+          addMessage({ platform: "twitch", user, text: sysMsg, chip: "resub", chipMonths: tags["msg-param-cumulative-months"] || tags["msg-param-months"] || "", pinned: false, event: true });
+        } else if (msgId === "subgift" || msgId === "submysterygift" || msgId === "anonsubgift" || msgId === "anonsubmysterygift") {
+          addMessage({ platform: "twitch", user, text: sysMsg, chip: "gift", chipCount: tags["msg-param-mass-gift-count"] || tags["msg-param-sender-count"] || "1", pinned: false, event: true });
+        } else if (msgId === "announcement") {
+          addMessage({ platform: "twitch", user, text: trailing || sysMsg || "Announcement", chip: "announce", pinned: false, event: true });
+        } else if (sysMsg) {
+          addMessage({ platform: "twitch", user, text: sysMsg, pinned: false, event: true }); // fallback: unmapped USERNOTICE kind, generic banner
+        }
+      }
+      else if (cmd === "CLEARCHAT" || cmd === "CLEARMSG") { /* moderation events ignored in read-only v1 */ }
+    }
+  };
+  ws.onclose = () => scheduleReconnect("twitch", connectTwitch);
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+
+/* Kick — public Pusher websocket (chatrooms.{id}.v2) */
+const tauriInvoke = window.__TAURI__?.core?.invoke || null;
+const OAUTH_PORT = 61823; // must match src-tauri/src/lib.rs OAUTH_PORT
+async function resolveKickChatroomId(slug) {
+  if (channels.kickChatroomId.trim()) return channels.kickChatroomId.trim();
+  // Native path: Rust command bypasses CORS/Cloudflare inside the Tauri app.
+  // Queued through kickApiCall — shares the same throttle/circuit-breaker as
+  // avatar resolution so a busy chat's avatar lookups can never crowd out or
+  // trip a block on the connection itself.
+  if (tauriInvoke) {
+    try { return String(await kickApiCall(() => tauriInvoke("resolve_kick_chatroom", { slug }))); } catch {}
+  }
+  // Browser path: direct fetch usually fails (CORS), but try before giving up.
+  try {
+    const r = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(slug)}`);
+    if (r.ok) { const d = await r.json(); if (d?.chatroom?.id) return String(d.chatroom.id); }
+  } catch {}
+  return null;
+}
+function connectKick() {
+  const slug = channels.kick.trim().toLowerCase();
+  if (!slug) return;
+  setHealth("kick", "reconnecting");
+  resolveKickChatroomId(slug).then(chatroomId => {
+    if (!channels.enabled.kick) return;
+    if (!chatroomId) {
+      setHealth("kick", "down");
+      addSystem("kick", `couldn't auto-resolve the chatroom ID for "${slug}" (browser blocks kick.com API). Open kick.com/api/v2/channels/${slug} in a tab and paste chatroom.id into Channels.`);
+      return;
+    }
+    const ws = new WebSocket("wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0-rc2&flash=false");
+    sockets.kick = ws;
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ event: "pusher:subscribe", data: { auth: "", channel: `chatrooms.${chatroomId}.v2` } }));
+    };
+    ws.onmessage = ev => {
+      let frame; try { frame = JSON.parse(ev.data); } catch { return; }
+      if (frame.event === "pusher:ping") { ws.send(JSON.stringify({ event: "pusher:pong", data: {} })); return; }
+      if (frame.event === "pusher_internal:subscription_succeeded") {
+        connected("kick"); addSystem("kick", `joined ${slug} (chatroom ${chatroomId})`);
+        kickApiCall(() => tauriInvoke("kick_resolve_broadcaster_id", { slug })).then(id => { ensureThirdPartyEmotes("kick", slug, id); kickBroadcasterId = id; }).catch(() => {});
+        ensureKickSubBadges(slug);
+        return;
+      }
+      if (frame.event === "App\\Events\\ChatMessageEvent") {
+        let d; try { d = JSON.parse(frame.data); } catch { return; }
+        const sender = d.sender || {};
+        const badgeObjs = sender.identity?.badges || sender.badges || [];
+        const badges = badgeObjs.map(b => b.type);
+        const role = badges.includes("broadcaster") ? "host"
+          : badges.includes("moderator") ? "mod"
+          : badges.includes("vip") ? "vip"
+          : badges.includes("subscriber") ? "sub" : null;
+        const subMonths = badgeObjs.find(b => b.type === "subscriber")?.count ?? null;
+        const raw = String(d.content || "");
+        const text = raw.replace(/\[emote:\d+:([^\]]*)\]/g, "$1"); // plain-text fallback for search/TTS/log
+        const emoteParts = applyThirdPartyEmotes("kick", slug, text, parseKickEmotes(raw));
+        // Kick only has custom per-channel images for the subscriber tier —
+        // mod/VIP are Kick's own fixed icons, no channel customization exists.
+        addMessage({ platform: "kick", user: sender.username || "unknown", userId: sender.id, msgId: d.id || d.message_id || null, text, emoteParts, role, roleBadgeUrl: role === "sub" ? kickSubBadgeUrl(slug, subMonths) : null, pinned: false });
+      }
+      else if (/SubscriptionEvent|GiftedSubscriptionsEvent|StreamHostEvent/.test(frame.event)) {
+        let d; try { d = JSON.parse(frame.data); } catch { return; }
+        if (frame.event.includes("GiftedSubscriptions")) {
+          const count = (d.gifted_usernames || []).length || d.gifted_quantity || 1;
+          addMessage({ platform: "kick", user: d.gifter_username || "Someone", text: `gifted ${count} subs!`, chip: "gift", chipCount: count, pinned: false, event: true });
+        } else if (frame.event.includes("Subscription")) {
+          addMessage({ platform: "kick", user: d.username || "Someone", text: "subscribed!", chip: "resub", chipMonths: d.months || "", pinned: false, event: true });
+        } else if (frame.event.includes("StreamHost")) {
+          addMessage({ platform: "kick", user: d.host_username || "Someone", text: "is hosting", chip: "raid", chipCount: d.number_viewers || "?", pinned: false, event: true });
+        }
+      }
+    };
+    ws.onclose = () => scheduleReconnect("kick", connectKick);
+    ws.onerror = () => { try { ws.close(); } catch {} };
+  });
+}
+
+/* Joystick.tv — ActionCable gateway. Auth is Base64(clientId:secret), the
+   same "basic key" the docs call it — computed here so nobody has to hand-
+   encode it themselves. */
+async function connectJoystick() {
+  const clientId = (await tauriInvoke("oauth_get_client_id", { platform: "joystick" }).catch(() => null) || "").trim();
+  const clientSecret = (await tauriInvoke("oauth_get_client_secret", { platform: "joystick" }).catch(() => null) || "").trim();
+  if (!clientId || !clientSecret) return;
+  const key = btoa(`${clientId}:${clientSecret}`);
+  setHealth("joystick", "reconnecting");
+  const ws = new WebSocket("wss://api.joystick.tv/cable?token=" + encodeURIComponent(key), "actioncable-v1-json");
+  sockets.joystick = ws;
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ command: "subscribe", identifier: JSON.stringify({ channel: "GatewayChannel" }) }));
+  };
+  ws.onmessage = ev => {
+    let d; try { d = JSON.parse(ev.data); } catch { return; }
+    if (d.type === "ping" || d.type === "welcome") return;
+    if (d.type === "confirm_subscription") { connected("joystick"); addSystem("joystick", "gateway subscribed"); return; }
+    if (d.type === "reject_subscription") { setHealth("joystick", "down"); addSystem("joystick", "subscription rejected — check your basic key"); return; }
+    const msg = d.message;
+    // The bot receives chat for every channel it's installed on — if a
+    // channel username was typed, lock onto that one specifically and ignore
+    // the rest; otherwise take whichever channel is heard from first.
+    if (msg && msg.channelId) {
+      if (!state.joystickChannelId) {
+        const wanted = channels.joystick.trim().toLowerCase();
+        const streamer = (msg.streamer?.username || msg.streamer?.slug || "").toLowerCase();
+        if (!wanted || streamer === wanted) { state.joystickChannelId = msg.channelId; buildComposeBar(); }
+        else return; // not our channel yet — StreamEvents carry no streamer field, so they can't match either
+      } else if (msg.channelId !== state.joystickChannelId) {
+        return;
+      }
+    }
+    if (msg && msg.event === "ChatMessage" && msg.type === "new_message") {
+      const a = msg.author || {};
+      const role = a.isStreamer ? "host" : a.isModerator ? "mod" : a.isSubscriber ? "sub" : null;
+      const avatar = a.signedPhotoThumbUrl || a.signedPhotoUrl || null;
+      const text = msg.text || "";
+      addMessage({ platform: "joystick", user: a.username || a.slug || "unknown", avatar, text, emoteParts: parseJoystickEmotes(text, msg.emotesUsed), role, msgId: msg.id || null, pinned: false });
+    }
+    else if (msg && msg.event === "StreamEvent" && msg.text) {
+      const text = String(msg.text).replace(/<[^>]*>/g, ""); // payload text carries HTML flair — strip it
+      // Joystick's only structured field for a tip is this pre-formatted
+      // sentence ("<user> tipped <n> tokens for <reward>") — no separate
+      // amount/user fields are documented, so parse it defensively.
+      const tipMatch = msg.type === "Tipped" ? /^(.+?)\s+tipped\s+(\d+)\s+tokens?(?:\s+for\s+(.+))?$/i.exec(text.trim()) : null;
+      if (tipMatch) {
+        addMessage({ platform: "joystick", user: tipMatch[1], text, chip: "tip", chipAmount: tipMatch[2], chipReward: tipMatch[3] || "", pinned: false, event: true });
+      } else {
+        addMessage({ platform: "joystick", user: "Joystick", text, role: null, pinned: false, event: true });
+      }
+    }
+  };
+  ws.onclose = () => scheduleReconnect("joystick", connectJoystick);
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+
+/* Twitch — EventSub over WebSocket (the real API): richer than anonymous IRC
+   (message IDs, structured emote fragments, cheer/reply/notice data) but
+   only available once an account is connected, since it's authenticated. */
+function connectTwitchEventSub(url) {
+  const chan = channels.twitch.trim().toLowerCase().replace(/^#/, "");
+  if (!chan) return;
+  setHealth("twitch", "reconnecting");
+  const ws = new WebSocket(url || "wss://eventsub.wss.twitch.tv/ws");
+  sockets.twitch = ws;
+  let keepaliveTimer = null;
+  const armKeepalive = seconds => {
+    clearTimeout(keepaliveTimer);
+    keepaliveTimer = setTimeout(() => { try { ws.close(); } catch {} }, (seconds + 10) * 1000);
+  };
+  ws.onmessage = async ev => {
+    let frame; try { frame = JSON.parse(ev.data); } catch { return; }
+    const meta = frame.metadata || {};
+    const payload = frame.payload || {};
+    if (meta.message_type === "session_welcome") {
+      armKeepalive(payload.session.keepalive_timeout_seconds || 10);
+      try {
+        await tauriInvoke("twitch_eventsub_subscribe", { sessionId: payload.session.id, channelLogin: chan, subType: "channel.chat.message" });
+        await tauriInvoke("twitch_eventsub_subscribe", { sessionId: payload.session.id, channelLogin: chan, subType: "channel.chat.notification" });
+        connected("twitch");
+        addSystem("twitch", `joined #${chan} via EventSub (API)`);
+      } catch (e) {
+        setHealth("twitch", "down");
+        addSystem("twitch", `EventSub subscribe failed: ${e}`);
+      }
+    } else if (meta.message_type === "session_keepalive") {
+      armKeepalive(10);
+    } else if (meta.message_type === "session_reconnect") {
+      // Twitch asks us to move to a new URL before it closes this one — hop
+      // over, then let the old socket's onclose fire naturally (no-op since
+      // sockets.twitch already points at the new one by then).
+      clearTimeout(keepaliveTimer);
+      connectTwitchEventSub(payload.session.reconnect_url);
+    } else if (meta.message_type === "notification") {
+      armKeepalive(10);
+      handleTwitchEventSubNotification(meta.subscription_type, payload.event);
+    } else if (meta.message_type === "revocation") {
+      setHealth("twitch", "down");
+      addSystem("twitch", `EventSub subscription revoked (${payload.subscription?.status || "unknown"})`);
+    }
+  };
+  ws.onclose = () => { clearTimeout(keepaliveTimer); if (sockets.twitch === ws) scheduleReconnect("twitch", connectTwitchDispatch); };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+
+function handleTwitchEventSubNotification(subType, event) {
+  if (subType === "channel.chat.message") {
+    const badgeSet = (event.badges || []).map(b => b.set_id);
+    const role = badgeSet.includes("broadcaster") ? "host"
+      : badgeSet.includes("moderator") ? "mod"
+      : badgeSet.includes("vip") ? "vip"
+      : badgeSet.includes("subscriber") ? "sub" : null;
+    const roleBadge = (event.badges || []).find(b => b.set_id === TWITCH_ROLE_SET_ID[role]);
+    if (event.broadcaster_user_login && event.broadcaster_user_id) {
+      ensureThirdPartyEmotes("twitch", event.broadcaster_user_login, event.broadcaster_user_id);
+      ensureTwitchBadges(event.broadcaster_user_login, event.broadcaster_user_id);
+      twitchBroadcasterId = event.broadcaster_user_id;
+    }
+    const fragments = event.message?.fragments;
+    // Twitch's paid "Gigantify an Emote" Power-up marks the whole message
+    // (always just the one emote) via message_type + power_up.emote.id.
+    const giantEmoteId = event.message_type === "power_ups_gigantified_emote" ? event.power_up?.emote?.id : null;
+    const nativeParts = fragments && fragments.length ? fragments.map(f =>
+      f.type === "emote" && f.emote ? { type: "emote", url: twitchEmoteUrl(f.emote.id), alt: f.text, giant: f.emote.id === giantEmoteId } : { type: "text", text: f.text }
+    ) : null;
+    const emoteParts = applyThirdPartyEmotes("twitch", event.broadcaster_user_login || "", event.message?.text || "", nativeParts);
+    const base = {
+      platform: "twitch", user: event.chatter_user_name, login: event.chatter_user_login, userId: event.chatter_user_id,
+      msgId: event.message_id,
+      text: event.message?.text || "", emoteParts, role,
+      roleBadgeUrl: roleBadge ? twitchBadgeUrl(event.broadcaster_user_login || "", `${roleBadge.set_id}/${roleBadge.id}`) : null,
+      pinned: false,
+    };
+    if (event.cheer && event.cheer.bits) addMessage({ ...base, chip: "cheer", chipCount: event.cheer.bits });
+    else if (event.reply && (event.reply.parent_user_name || event.reply.parent_user_login)) {
+      addMessage({ ...base, chip: "reply", chipReplyTo: event.reply.parent_user_name || event.reply.parent_user_login });
+    } else addMessage(base);
+  } else if (subType === "channel.chat.notification") {
+    const user = event.chatter_user_name || "Twitch";
+    const noticeType = event.notice_type;
+    const text = event.message?.text || event.system_message || "";
+    if (noticeType === "raid") {
+      addMessage({ platform: "twitch", user: event.raid?.user_name || user, text, chip: "raid", chipCount: event.raid?.viewers ?? "", pinned: false, event: true });
+    } else if (noticeType === "sub" || noticeType === "resub") {
+      const info = event[noticeType] || {};
+      addMessage({ platform: "twitch", user, text, chip: "resub", chipMonths: info.cumulative_months ?? "", pinned: false, event: true });
+    } else if (noticeType === "sub_gift" || noticeType === "community_sub_gift") {
+      const info = event[noticeType] || {};
+      const count = info.total ?? info.count ?? info.cumulative_total ?? "1";
+      addMessage({ platform: "twitch", user, text, chip: "gift", chipCount: count, pinned: false, event: true });
+    } else if (noticeType === "announcement") {
+      addMessage({ platform: "twitch", user, text, chip: "announce", pinned: false, event: true });
+    } else if (text) {
+      addMessage({ platform: "twitch", user, text, pinned: false, event: true }); // unmapped notice kind — generic banner
+    }
+  }
+}
+
+// Twitch reads via EventSub (real API, richer data) once an account is
+// connected; anonymous IRC is the automatic fallback when it isn't.
+function connectTwitchDispatch() {
+  if (tauriInvoke && oauthAccounts.twitch) connectTwitchEventSub();
+  else connectTwitch();
+}
+const CONNECTORS = { twitch: connectTwitchDispatch, kick: connectKick, joystick: connectJoystick };
+function applyConnections() {
+  PLATFORMS.forEach(p => {
+    // Streamer.bot substitutes for the native connector on whichever
+    // platforms it's set to handle — see the streamerbot block below.
+    if (channels.streamerbotFor[p.id]) return;
+    const want = channels.enabled[p.id];
+    const has = !!sockets[p.id] || state.health[p.id] === "reconnecting";
+    if (want && !has && CONNECTORS[p.id]) CONNECTORS[p.id]();
+    if (!want && (sockets[p.id] || state.health[p.id] !== "off")) { disconnect(p.id); buildComposeBar(); }
+  });
+  const sbotWant = (channels.streamerbotFor.kick && channels.enabled.kick) || (channels.streamerbotFor.twitch && channels.enabled.twitch) || (channels.streamerbotFor.youtube && channels.enabled.youtube);
+  const sbotHas = !!sockets.streamerbot || state.health.streamerbot === "reconnecting";
+  if (sbotWant && !sbotHas) connectStreamerbot();
+  if (!sbotWant && (sockets.streamerbot || state.health.streamerbot !== "off")) { disconnect("streamerbot"); buildComposeBar(); }
+}
+// Called after Twitch OAuth connects/disconnects — swap the live read
+// connection to/from EventSub without waiting for a manual toggle.
+function resyncTwitchConnection() {
+  if (!channels.enabled.twitch) return;
+  disconnect("twitch");
+  connectTwitchDispatch();
+}
+// Streamer.bot — a local automation tool's WebSocket relay, not a platform
+// of its own. When enabled for Kick and/or Twitch, it REPLACES that
+// platform's native connector as the read+send transport (still rendered
+// as platform:"kick"/"twitch" — same icon, badges, role colors). Point of
+// this: Streamer.bot's own Kick integration sidesteps the Cloudflare
+// blocking that hits our unofficial channel-lookup fallback, and its
+// SendMessage request works the same way across platforms.
+// Field names below follow Streamer.bot's published WebSocket API schema
+// (docs.streamer.bot/api/websocket) but haven't been verified against live
+// traffic the way the native Twitch/Kick paths were — flag it if something
+// doesn't line up once you've got a real instance running.
+let sbotNextId = 1;
+const sbotPending = new Map(); // request id -> {resolve, reject}
+function sbotSend(ws, payload) {
+  return new Promise((resolve, reject) => {
+    const id = String(sbotNextId++);
+    sbotPending.set(id, { resolve, reject });
+    ws.send(JSON.stringify({ ...payload, id }));
+  });
+}
+async function sha256Base64(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function sbotRoleFromBadges(names) {
+  return names.includes("broadcaster") ? "host"
+    : names.includes("moderator") ? "mod"
+    : names.includes("vip") ? "vip"
+    : names.includes("subscriber") ? "sub" : null;
+}
+async function connectStreamerbot() {
+  const host = channels.streamerbotHost.trim() || "127.0.0.1";
+  const port = channels.streamerbotPort.trim() || "8080";
+  const wantKick = channels.streamerbotFor.kick;
+  const wantTwitch = channels.streamerbotFor.twitch;
+  const wantYoutube = channels.streamerbotFor.youtube;
+  if (!wantKick && !wantTwitch && !wantYoutube) return;
+  setHealth("streamerbot", "reconnecting");
+  const ws = new WebSocket(`ws://${host}:${port}/`);
+  sockets.streamerbot = ws;
+
+  ws.onmessage = async ev => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+
+    // Correlate responses to pending requests first (Subscribe/Authenticate/SendMessage).
+    if (msg.id && sbotPending.has(msg.id)) {
+      const { resolve, reject } = sbotPending.get(msg.id);
+      sbotPending.delete(msg.id);
+      msg.status === "ok" ? resolve(msg) : reject(msg.error || "request failed");
+      return;
+    }
+
+    // Initial handshake — auth only matters for SendMessage, but doing it
+    // whenever a password is configured is harmless and avoids send-time surprises.
+    if (msg.authentication) {
+      try {
+        const password = await tauriInvoke("streamerbot_get_password").catch(() => null);
+        if (password) {
+          const secret = await sha256Base64(password + msg.authentication.salt);
+          const authentication = await sha256Base64(secret + msg.authentication.challenge);
+          await sbotSend(ws, { request: "Authenticate", authentication });
+        }
+      } catch (e) {
+        addSystem("streamerbot", `authentication failed: ${e} — chat reading still works, sending may not`);
+      }
+      const events = {};
+      if (wantKick) events.Kick = ["ChatMessage"];
+      if (wantTwitch) events.Twitch = ["ChatMessage"];
+      if (wantYoutube) events.YouTube = ["Message"];
+      try {
+        await sbotSend(ws, { request: "Subscribe", events });
+        connected("streamerbot");
+        addSystem("streamerbot", "connected" + (wantKick ? " — handling Kick chat" : "") + (wantTwitch ? " — handling Twitch chat" : "") + (wantYoutube ? " — handling YouTube chat" : ""));
+        if (wantKick && channels.kick.trim()) {
+          const slug = channels.kick.trim().toLowerCase();
+          kickApiCall(() => tauriInvoke("kick_resolve_broadcaster_id", { slug })).then(id => { ensureThirdPartyEmotes("kick", slug, id); kickBroadcasterId = id; }).catch(() => {});
+          ensureKickSubBadges(slug);
+        }
+      } catch (e) {
+        setHealth("streamerbot", "down");
+        addSystem("streamerbot", `subscribe failed: ${e}`);
+      }
+      return;
+    }
+
+    // Chat message events — {event: {source, type}, data: {...}}. Kick/Twitch
+    // call theirs "ChatMessage"; YouTube's is just "Message".
+    const src = msg.event?.source, type = msg.event?.type;
+    if ((type !== "ChatMessage" && type !== "Message") || !msg.data) return;
+    const d = msg.data;
+    if (src === "Kick" && wantKick) {
+      const u = d.user || {};
+      const badgeNames = (u.badges || []).map(b => b.name);
+      const role = sbotRoleFromBadges(badgeNames);
+      const slug = (channels.kick || "").trim().toLowerCase();
+      addMessage({
+        platform: "kick", user: u.name || u.login || "unknown", userId: u.id, msgId: d.messageId,
+        text: d.text || "", avatar: u.profilePicture || null, role,
+        roleBadgeUrl: role === "sub" ? kickSubBadgeUrl(slug, u.monthsSubscribed) : null,
+        pinned: false,
+      });
+    } else if (src === "Twitch" && wantTwitch) {
+      const u = d.user || {};
+      const badgeNames = (u.badges || []).map(b => b.name);
+      const role = sbotRoleFromBadges(badgeNames);
+      const login = u.login || "";
+      if (d.broadcaster?.id) {
+        ensureThirdPartyEmotes("twitch", d.broadcaster.login || login, d.broadcaster.id);
+        ensureTwitchBadges(d.broadcaster.login || login, d.broadcaster.id);
+        twitchBroadcasterId = d.broadcaster.id;
+      }
+      const roleBadge = (u.badges || []).find(b => b.name === TWITCH_ROLE_SET_ID[role]);
+      addMessage({
+        platform: "twitch", user: u.name || login || "unknown", login, userId: u.id, msgId: d.messageId,
+        text: d.text || "", role,
+        roleBadgeUrl: roleBadge ? twitchBadgeUrl(d.broadcaster?.login || login, `${roleBadge.name}/${roleBadge.version}`) : null,
+        pinned: false,
+      });
+    } else if (src === "YouTube" && wantYoutube) {
+      // Streamer.bot's own docs have no published schema for YouTube.Message
+      // yet ("check back soon") — field names below are a best-effort guess
+      // from YouTube's underlying Data API shape (authorDetails.*). Watch
+      // the first real message that comes through; if name/avatar/role look
+      // wrong, this is the block to fix.
+      const u = d.user || d.author || d.authorDetails || {};
+      const role = u.isChatOwner ? "host" : u.isChatModerator ? "mod" : (u.isChatSponsor || u.isSubscribed) ? "sub" : null;
+      addMessage({
+        platform: "youtube", user: u.name || u.displayName || u.login || "unknown", userId: u.channelId || u.id, msgId: d.messageId,
+        text: d.text || d.message || "", avatar: u.profilePicture || u.profileImageUrl || null, role,
+        pinned: false,
+      });
+    }
+  };
+  ws.onclose = () => {
+    // Any request still awaiting a response (Subscribe, Authenticate, a
+    // SendMessage) would otherwise hang forever and leak its entry here —
+    // the socket that would have answered it is gone.
+    sbotPending.forEach(({ reject }) => reject("Streamer.bot disconnected"));
+    sbotPending.clear();
+    if (sockets.streamerbot === ws) scheduleReconnect("streamerbot", connectStreamerbot);
+  };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+async function sbotSendMessage(platform, text) {
+  const ws = sockets.streamerbot;
+  if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("Streamer.bot not connected");
+  await sbotSend(ws, { request: "SendMessage", platform, message: text });
+}
+function sendJoystickMessage(text) {
+  const ws = sockets.joystick;
+  if (!ws || ws.readyState !== WebSocket.OPEN || !state.joystickChannelId) throw new Error("Joystick.tv not connected yet");
+  ws.send(JSON.stringify({
+    command: "message",
+    identifier: JSON.stringify({ channel: "GatewayChannel" }),
+    data: JSON.stringify({ action: "send_message", text, channelId: state.joystickChannelId }),
+  }));
+}
+
+/* ── Drawers ────────────────────────────────────────────────────────────── */
+function openDrawer(name) { $(name + "Drawer").dataset.open = "true"; $(name + "Backdrop").dataset.open = "true"; }
+function closeDrawer(name) { $(name + "Drawer").dataset.open = "false"; $(name + "Backdrop").dataset.open = "false"; }
+["channels", "settings"].forEach(n => {
+  $(n + "Backdrop").onclick = () => closeDrawer(n);
+  document.querySelector(`[data-close="${n}"]`).onclick = () => closeDrawer(n);
+});
+$("openChannels").onclick = () => openDrawer("channels");
+$("openSettings").onclick = () => openDrawer("settings");
+window.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer("channels"); closeDrawer("settings"); } });
+
+/* Channels drawer */
+/* Small collapsible section — used to tuck credential fields + setup
+   instructions out of the way once a platform is already connected. */
+function disclosure(label, content, defaultOpen) {
+  const wrap = el("div", "cv-disclosure");
+  wrap.dataset.open = String(!!defaultOpen);
+  const btn = el("button", "cv-disclosure-toggle");
+  btn.append(el("span", "cv-disclosure-arrow", "▸"), document.createTextNode(" " + label));
+  btn.onclick = () => { wrap.dataset.open = String(wrap.dataset.open !== "true"); };
+  const bodyEl = el("div", "cv-disclosure-body");
+  bodyEl.append(content);
+  wrap.append(btn, bodyEl);
+  return wrap;
+}
+
+/* Collapsible connection cards — click the title row to fold away everything
+   below it (channel fields, account section, setup info) for more room when
+   you've got several platforms configured. State persists per card. */
+const collapsedCards = new Set(JSON.parse(localStorage.getItem("bd-mc-collapsed-cards") || "[]"));
+function makeCardCollapsible(card, head, key) {
+  const content = el("div", "cv-conn-content");
+  let sib = head.nextElementSibling;
+  while (sib) { const next = sib.nextElementSibling; content.append(sib); sib = next; }
+  card.append(content);
+  head.append(el("span", "cv-conn-chevron", "▾"));
+  const setCollapsed = collapsed => {
+    content.style.display = collapsed ? "none" : "";
+    head.classList.toggle("cv-collapsed", collapsed);
+  };
+  setCollapsed(collapsedCards.has(key));
+  head.onclick = () => {
+    const collapsed = content.style.display !== "none";
+    setCollapsed(collapsed);
+    if (collapsed) collapsedCards.add(key); else collapsedCards.delete(key);
+    localStorage.setItem("bd-mc-collapsed-cards", JSON.stringify([...collapsedCards]));
+  };
+}
+
+function buildChannelsDrawer() {
+  const body = $("channelsBody");
+  body.innerHTML = "";
+  const saveCh = () => store.save("bd-mc-channels", channels);
+  const input = (val, placeholder, onchange, mono) => {
+    const i = el("input", "cv-input" + (mono ? " mono" : ""));
+    i.value = val; i.placeholder = placeholder;
+    i.onchange = () => { onchange(i.value); saveCh(); };
+    return i;
+  };
+  const hint = html => { const h = el("div", "cv-hint"); h.innerHTML = html; return h; }; // static strings only
+
+  // Client ID/Secret + "register an app" instructions + Connect button —
+  // shown directly while setting up, tucked into a closed disclosure once
+  // the account is already connected (see accountSection below).
+  function oauthSetupBlock(platform) {
+    const frag = document.createDocumentFragment();
+    const cid = el("input", "cv-input mono");
+    cid.placeholder = "Client ID";
+    const csec = el("input", "cv-input mono");
+    csec.placeholder = "Client Secret";
+    csec.type = "password";
+    frag.append(cid, csec);
+    const savedNote = el("div", "cv-hint");
+    tauriInvoke("oauth_get_client_id", { platform }).then(v => { if (v) cid.value = v; });
+    tauriInvoke("oauth_has_client_secret", { platform }).then(has => {
+      if (has) { csec.placeholder = "•••••••• (saved — leave blank to keep)"; savedNote.textContent = "Client ID and Secret are saved — only fill these in to replace them."; }
+    });
+    frag.append(savedNote);
+    const row = el("div", "cv-settings-row");
+    row.style.border = "none"; row.style.padding = "0";
+    const btn = el("button", "cv-btn cta", "🔑 Connect Account");
+    btn.onclick = () => connectOAuth(platform, cid.value.trim(), csec.value.trim(), btn);
+    row.append(btn);
+    frag.append(row);
+    const redirectHint = platform === "twitch"
+      ? `Register an app at <a href="#" data-open-url="https://dev.twitch.tv/console/apps">dev.twitch.tv/console/apps</a> with OAuth redirect URL <code>http://localhost:${OAUTH_PORT}/callback</code>.`
+      : `Register an app at <a href="#" data-open-url="https://kick.com/settings/developer">kick.com/settings/developer</a> with redirect URI <code>http://localhost:${OAUTH_PORT}/callback</code>.`;
+    frag.append(hint(redirectHint));
+    return frag;
+  }
+
+  // Connected status + Delete Connection when linked; setup fields directly
+  // visible (uncollapsed) when not — used for Twitch/Kick account login.
+  function accountSection(platform, connectedNote) {
+    const frag = document.createDocumentFragment();
+    const account = oauthAccounts[platform];
+    if (account) {
+      const row = el("div", "cv-settings-row");
+      row.style.border = "none"; row.style.padding = "0";
+      row.append(el("span", "cv-settings-label", "🟢 Connected as " + account.username));
+      const btn = el("button", "cv-btn danger", "Delete Connection");
+      btn.onclick = () => disconnectOAuth(platform);
+      row.append(btn);
+      frag.append(row);
+      if (connectedNote) frag.append(hint(connectedNote));
+      frag.append(disclosure("Setup info", oauthSetupBlock(platform), false));
+    } else {
+      frag.append(oauthSetupBlock(platform));
+    }
+    return frag;
+  }
+
+  // One card per platform: channel/view fields + View Chat toggle, then a
+  // divider, then whatever account/API section the platform needs.
+  function platformCard(platform, title, viewFields, accountFrag) {
+    const c = el("div", "cv-conn-card");
+    c.dataset.platform = platform;
+    const head = el("div", "cv-conn-title");
+    const ic = el("span", "cv-conn-icon"); ic.innerHTML = PLATFORM_MAP[platform].icon;
+    head.append(ic, el("span", "", title));
+    // Status reflects the real chat connection (state.health), never just
+    // whether an OAuth account is linked — a saved login with the toggle off,
+    // reconnecting, or dead shouldn't ever read as "CONNECTED".
+    const status = el("span", "cv-conn-status", state.health[platform].toUpperCase());
+    status.dataset.status = state.health[platform];
+    status.dataset.p = platform;
+    head.append(status);
+    c.append(head);
+    viewFields.forEach(f => c.append(f));
+    const viewRow = el("div", "cv-settings-row");
+    viewRow.style.border = "none"; viewRow.style.padding = "0";
+    viewRow.append(el("span", "cv-settings-label", "View Chat"));
+    const sw = el("input", "cv-switch");
+    sw.type = "checkbox";
+    sw.checked = channels.enabled[platform];
+    sw.onchange = () => { channels.enabled[platform] = sw.checked; saveCh(); applyConnections(); };
+    viewRow.append(sw);
+    c.append(viewRow);
+    if (accountFrag) {
+      const divider = el("div", "cv-divider");
+      divider.append(accountFrag);
+      c.append(divider);
+    }
+    makeCardCollapsible(c, head, platform);
+    return c;
+  }
+
+  if (!tauriInvoke) {
+    body.append(platformCard("twitch", "Twitch", [
+      input(channels.twitch, "channel name (e.g. beardds)", v => channels.twitch = v),
+      hint("Anonymous read-only — no login needed."),
+    ], null));
+    body.append(platformCard("kick", "Kick", [
+      input(channels.kick, "channel slug (e.g. beardds)", v => channels.kick = v),
+      input(channels.kickChatroomId, "chatroom ID (optional — auto-resolve tried first)", v => channels.kickChatroomId = v, true),
+      hint("If auto-resolve fails, open <code>kick.com/api/v2/channels/&lt;slug&gt;</code> in a browser tab and paste the <code>chatroom.id</code> number."),
+    ], null));
+    const note = el("div", "cv-hint");
+    note.style.margin = "16px 4px 0";
+    note.textContent = "Sending messages and account login require the Multi-Chat desktop app — this browser tab is read-only.";
+    body.append(note);
+    body.append(joystickCard(input, hint));
+    return;
+  }
+
+  body.append(platformCard("twitch", "Twitch", [
+    input(channels.twitch, "channel name (e.g. beardds)", v => channels.twitch = v),
+    hint("Used for anonymous read (no account) and to pick the channel once connected."),
+  ], accountSection("twitch", "Reading chat now uses Twitch's real API (EventSub) instead of anonymous IRC — richer data — and sending is enabled.")));
+
+  body.append(platformCard("kick", "Kick", [
+    input(channels.kick, "channel slug (e.g. beardds)", v => channels.kick = v),
+    input(channels.kickChatroomId, "chatroom ID (optional — auto-resolve tried first)", v => channels.kickChatroomId = v, true),
+    hint("If auto-resolve fails, open <code>kick.com/api/v2/channels/&lt;slug&gt;</code> in a browser tab and paste the <code>chatroom.id</code> number."),
+  ], accountSection("kick", null)));
+
+  body.append(joystickCard(input, hint));
+  body.append(streamerbotCard(input, hint));
+}
+
+/* Joystick's Client ID/Secret power BOTH the live chat connection and the
+   install button (unlike Twitch/Kick, where anonymous view and account
+   login are separate) — so those fields stay visible even once connected;
+   only the "how to create a bot" instructions collapse away. */
+function joystickCard(input, hint) {
+  const saveCh = () => store.save("bd-mc-channels", channels);
+  const c = el("div", "cv-conn-card");
+  c.dataset.platform = "joystick";
+  const head = el("div", "cv-conn-title");
+  const ic = el("span", "cv-conn-icon"); ic.innerHTML = PLATFORM_MAP.joystick.icon;
+  head.append(ic, el("span", "", "Joystick.tv"));
+  const connected = !!oauthAccounts.joystick; // account-linked, used below for install/setup UI — NOT the chat status pill
+  // Status reflects the real chat connection (state.health), same reasoning
+  // as Twitch/Kick's cards — a linked bot install with chat off/dead/
+  // reconnecting should never read as "CONNECTED".
+  const status = el("span", "cv-conn-status", state.health.joystick.toUpperCase());
+  status.dataset.status = state.health.joystick;
+  status.dataset.p = "joystick";
+  head.append(status);
+  c.append(head);
+
+  // Stored in the OS keyring, same as Twitch/Kick — never in localStorage.
+  // Blank on submit means "reuse what's already saved" (oauth_login's own
+  // convention), so a retry after restart doesn't force retyping either one.
+  const cid = el("input", "cv-input mono");
+  cid.placeholder = "Client ID";
+  const csec = el("input", "cv-input mono");
+  csec.placeholder = "Client Secret";
+  csec.type = "password";
+  tauriInvoke("oauth_get_client_id", { platform: "joystick" }).then(v => { if (v) cid.value = v; });
+  const savedNote = el("div", "cv-hint");
+  tauriInvoke("oauth_has_client_secret", { platform: "joystick" }).then(has => {
+    if (has) { csec.placeholder = "•••••••• (saved — leave blank to keep)"; savedNote.textContent = "Client ID and Secret are saved — only fill these in to replace them."; }
+  });
+  c.append(cid, csec, savedNote);
+  c.append(hint("From your Joystick.tv bot's settings page. The app combines these into the Base64 basic key itself — no manual encoding needed. <b>Never share these with anyone</b> — they identify your bot; whoever holds them can install it on a channel and act as it without your consent. Each person running Multi-Chat needs their own bot (see \"Don't have a bot yet?\" below), never a copy of someone else's."));
+
+  const viewRow = el("div", "cv-settings-row");
+  viewRow.style.border = "none"; viewRow.style.padding = "0";
+  viewRow.append(el("span", "cv-settings-label", "View Chat"));
+  const sw = el("input", "cv-switch");
+  sw.type = "checkbox";
+  sw.checked = channels.enabled.joystick;
+  sw.onchange = () => { channels.enabled.joystick = sw.checked; saveCh(); applyConnections(); };
+  viewRow.append(sw);
+  c.append(viewRow);
+
+  const divider = el("div", "cv-divider");
+  if (!tauriInvoke) {
+    divider.append(hint("Installing the bot requires the Multi-Chat desktop app."));
+    c.append(divider);
+    makeCardCollapsible(c, head, "joystick");
+    return c;
+  }
+  const row = el("div", "cv-settings-row");
+  row.style.border = "none"; row.style.padding = "0";
+  if (connected) {
+    row.append(el("span", "cv-settings-label", "🟢 Connected — bot installed on this channel"));
+    const btn = el("button", "cv-btn danger", "Delete Connection");
+    btn.onclick = () => disconnectOAuth("joystick");
+    row.append(btn);
+    divider.append(row);
+  } else {
+    row.append(el("span", "cv-settings-label", "Chat not flowing yet?"));
+    const btn = el("button", "cv-btn cta", "🔌 Install Bot on This Channel");
+    btn.onclick = () => connectOAuth("joystick", cid.value.trim(), csec.value.trim(), btn);
+    row.append(btn);
+    divider.append(row);
+  }
+
+  const botHelp = document.createDocumentFragment();
+  const helpRow = el("div", "cv-settings-row");
+  helpRow.style.border = "none"; helpRow.style.padding = "0";
+  helpRow.append(el("span", "cv-settings-label", "Don't have a bot yet?"));
+  const createBtn = el("button", "cv-btn", "🎮 Create a Bot");
+  const link = el("a"); link.href = "#"; link.dataset.openUrl = "https://joystick.tv/applications";
+  link.append(createBtn); // click handled by the delegated [data-open-url] listener
+  helpRow.append(link);
+  botHelp.append(helpRow);
+  const steps = el("div", "cv-hint");
+  steps.style.marginTop = "8px";
+  steps.innerHTML = `On joystick.tv/applications → New Chat Bot: pick a Name, set <b>OAuth redirect URL</b> to <code>http://localhost:${OAUTH_PORT}/callback</code> (required by the form even though this app doesn't use it yet), set <b>Client type</b> to <b>Confidential (server-side bot)</b>, and under Permissions check <b>SendMessage</b> and <b>ReadMessages</b> (add DeleteMessage/MuteUser/BlockUser too for future moderation — permissions can't be changed after creation). Create it, then paste the <b>Client ID</b> and <b>Client Secret</b> it shows you into the two fields above — the app encodes them for you.`; // static template, only OAUTH_PORT is interpolated (numeric constant)
+  botHelp.append(steps);
+
+  divider.append(connected ? disclosure("Bot setup info", botHelp, false) : botHelp);
+  c.append(divider);
+  makeCardCollapsible(c, head, "joystick");
+  return c;
+}
+
+/* Streamer.bot isn't a platform — it's an alternate transport for Kick/Twitch
+   chat (mainly to route around Kick's Cloudflare blocking). No "View Chat"
+   switch here; visibility stays governed by the Kick/Twitch cards' own
+   toggles above, these two switches just pick which transport carries them. */
+function streamerbotCard(input, hint) {
+  const saveCh = () => store.save("bd-mc-channels", channels);
+  const c = el("div", "cv-conn-card");
+  c.dataset.platform = "streamerbot";
+  const head = el("div", "cv-conn-title");
+  const ic = el("span", "cv-conn-icon", "🤖");
+  head.append(ic, el("span", "", "Streamer.bot"));
+  const status = el("span", "cv-conn-status", state.health.streamerbot.toUpperCase());
+  status.dataset.status = state.health.streamerbot;
+  status.dataset.p = "streamerbot";
+  head.append(status);
+  c.append(head);
+
+  const hostRow = el("div", "cv-settings-row");
+  hostRow.style.border = "none"; hostRow.style.padding = "0";
+  const hostInput = input(channels.streamerbotHost, "127.0.0.1", v => channels.streamerbotHost = v, true);
+  const portInput = input(channels.streamerbotPort, "8080", v => channels.streamerbotPort = v, true);
+  hostRow.append(hostInput, portInput);
+  c.append(hostRow);
+
+  const passInput = el("input", "cv-input mono");
+  passInput.type = "password";
+  passInput.placeholder = "WebSocket password (optional)";
+  if (tauriInvoke) {
+    tauriInvoke("streamerbot_has_password").then(has => {
+      if (has) passInput.placeholder = "•••••••• (saved — leave blank to keep)";
+    });
+  }
+  const passRow = el("div", "cv-settings-row");
+  passRow.style.border = "none"; passRow.style.padding = "0";
+  const passSave = el("button", "cv-btn", "Save");
+  passSave.onclick = async () => {
+    const val = passInput.value.trim();
+    if (!val) { showToast("Enter a password first"); return; }
+    await tauriInvoke("streamerbot_save_password", { password: val });
+    passInput.value = "";
+    passInput.placeholder = "•••••••• (saved — leave blank to keep)";
+    showToast("Streamer.bot password saved");
+  };
+  passRow.append(passInput, passSave);
+  c.append(passRow);
+  c.append(hint("Only needed if you've turned on authentication for the WebSocket Server in Streamer.bot's Servers/Clients tab — leave blank otherwise."));
+
+  const kickRow = el("div", "cv-settings-row");
+  kickRow.style.border = "none"; kickRow.style.padding = "0";
+  kickRow.append(el("span", "cv-settings-label", "Handle Kick chat"));
+  const kickSw = el("input", "cv-switch");
+  kickSw.type = "checkbox";
+  kickSw.checked = channels.streamerbotFor.kick;
+  kickSw.onchange = () => {
+    channels.streamerbotFor.kick = kickSw.checked;
+    saveCh();
+    disconnect("kick"); disconnect("streamerbot");
+    applyConnections();
+    buildComposeBar();
+  };
+  kickRow.append(kickSw);
+  c.append(kickRow);
+
+  const twitchRow = el("div", "cv-settings-row");
+  twitchRow.style.border = "none"; twitchRow.style.padding = "0";
+  twitchRow.append(el("span", "cv-settings-label", "Handle Twitch chat"));
+  const twitchSw = el("input", "cv-switch");
+  twitchSw.type = "checkbox";
+  twitchSw.checked = channels.streamerbotFor.twitch;
+  twitchSw.onchange = () => {
+    channels.streamerbotFor.twitch = twitchSw.checked;
+    saveCh();
+    disconnect("twitch"); disconnect("streamerbot");
+    applyConnections();
+    buildComposeBar();
+  };
+  twitchRow.append(twitchSw);
+  c.append(twitchRow);
+
+  // YouTube has no OAuth connector of its own (see PLATFORMS comment) — this
+  // switch is its only on/off, so it sets both streamerbotFor AND enabled.
+  const ytRow = el("div", "cv-settings-row");
+  ytRow.style.border = "none"; ytRow.style.padding = "0";
+  ytRow.append(el("span", "cv-settings-label", "Handle YouTube chat"));
+  const ytSw = el("input", "cv-switch");
+  ytSw.type = "checkbox";
+  ytSw.checked = channels.streamerbotFor.youtube;
+  ytSw.onchange = () => {
+    channels.streamerbotFor.youtube = ytSw.checked;
+    channels.enabled.youtube = ytSw.checked;
+    saveCh();
+    disconnect("streamerbot");
+    applyConnections();
+    buildComposeBar();
+    renderPlatformToggles();
+  };
+  ytRow.append(ytSw);
+  c.append(ytRow);
+
+  c.append(hint("Reads (and sends) chat through a running Streamer.bot instance instead of Multi-Chat's own connection — mainly useful for Kick, since Streamer.bot's integration sidesteps the Cloudflare blocking our own fallback hits, and for YouTube, which has no connection of its own here otherwise. Moderation (delete/timeout/ban) isn't available through Streamer.bot for any platform — Kick/Twitch still use your OAuth connection above for that; YouTube has none."));
+  makeCardCollapsible(c, head, "streamerbot");
+  return c;
+}
+
+async function connectOAuth(platform, clientId, clientSecret, btn) {
+  // Blank fields are valid here — Rust falls back to whatever's already
+  // saved in the keychain, so a retry after restart doesn't force retyping.
+  btn.disabled = true;
+  btn.textContent = "Waiting for browser login…";
+  try {
+    const account = await tauriInvoke("oauth_login", { platform, clientId, clientSecret });
+    oauthAccounts[platform] = account;
+    showToast(`Signed in to ${PLATFORM_MAP[platform].label} as ${account.username}`);
+    if (platform === "twitch") resyncTwitchConnection();
+  } catch (e) {
+    showToast(`${PLATFORM_MAP[platform].label} login failed: ${e}`);
+  }
+  buildChannelsDrawer();
+  buildComposeBar();
+}
+async function disconnectOAuth(platform) {
+  await tauriInvoke("oauth_logout", { platform });
+  oauthAccounts[platform] = null;
+  if (platform === "twitch") resyncTwitchConnection();
+  buildChannelsDrawer();
+  buildComposeBar();
+  showToast(`Disconnected ${PLATFORM_MAP[platform].label}`);
+}
+document.addEventListener("click", e => {
+  const link = e.target.closest("[data-open-url]");
+  if (!link) return;
+  e.preventDefault();
+  const url = link.dataset.openUrl;
+  if (tauriInvoke) tauriInvoke("plugin:shell|open", { path: url }).catch(() => window.open(url, "_blank", "noopener"));
+  else window.open(url, "_blank", "noopener");
+});
+
+/* Settings drawer */
+function buildSettingsDrawer() {
+  const body = $("settingsBody");
+  body.innerHTML = "";
+  const saveSet = () => { store.save("bd-mc-settings", settings); applyChatStyle(); renderView(); renderPlatformToggles(); };
+
+  const switchRow = (label, key, sub) => {
+    const row = el("div", "cv-settings-row");
+    const lab = el("div");
+    lab.append(el("div", "cv-settings-label", label));
+    if (sub) lab.append(el("div", "cv-settings-sub", sub));
+    row.append(lab);
+    const sw = el("input", "cv-switch");
+    sw.type = "checkbox";
+    sw.checked = settings[key];
+    sw.onchange = () => { settings[key] = sw.checked; saveSet(); };
+    row.append(sw);
+    return row;
+  };
+
+  // Overlay mode (OBS/Meld Browser Source) only gets appearance controls —
+  // nothing here should touch connections, moderation, or data it doesn't
+  // own; it's a passive display fed by the desktop window's message relay.
+  body.append(sectionHead("💬", "Messages"));
+  body.append(switchRow("Show Platform Icon", "showPlatformIcon"));
+  body.append(switchRow("Show Avatar", "showAvatar"));
+  if (!isOverlay) {
+    const arRow = el("div", "cv-settings-row");
+    const arLab = el("div");
+    arLab.append(el("div", "cv-settings-label", "Avatar Load Delay"));
+    arLab.append(el("div", "cv-settings-sub", "ms to hold a new message so its pic isn't visibly popping in"));
+    arRow.append(arLab);
+    const ar = el("input", "cv-num");
+    ar.type = "number"; ar.min = 0; ar.max = 5000; ar.step = 100; ar.value = settings.avatarRenderDelay;
+    ar.onchange = () => { settings.avatarRenderDelay = Math.max(0, Math.min(5000, Number(ar.value) || 0)); saveSet(); };
+    arRow.append(ar);
+    body.append(arRow);
+  }
+  body.append(switchRow("Show Badges", "showBadges"));
+  body.append(switchRow("Show Timestamps", "showTimestamps"));
+  body.append(switchRow("Group Consecutive Messages", "groupConsecutive"));
+  body.append(switchRow("Narrow Message Bubbles", "narrowBubbles", "wrap earlier so long messages grow taller instead of wider"));
+  body.append(switchRow("Exclude Commands", "excludeCommands", "hide messages starting with !"));
+  body.append(switchRow("Show Pronouns", "showPronouns", "Twitch, via pronouns.alejo.community"));
+  body.append(switchRow("Link Embeds", "embedsEnabled", "Giphy, YouTube, Spotify, clips — mods/VIPs/host + allowlist"));
+  body.append(switchRow("Custom Emotes", "customEmotes", "BTTV, FFZ, 7TV (Twitch); 7TV (Kick)"));
+  if (!isOverlay) {
+    body.append(switchRow("Read Chat Aloud (TTS)", "ttsEnabled"));
+
+    body.append(sectionHead("🔔", "Events"));
+    body.append(switchRow("Visual Event Banners", "visualAlerts", "raids, subs, tips as banners"));
+    body.append(switchRow("Sound Alerts", "soundAlerts", "beep on events"));
+
+    const asRow = el("div", "cv-settings-row");
+    const asLab = el("div");
+    asLab.append(el("div", "cv-settings-label", "Custom Alert Sound"));
+    asLab.append(el("div", "cv-settings-sub", settings.alertSoundUrl ? "custom sound set" : "default beep"));
+    asRow.append(asLab);
+    const asWrap = el("div", "cv-color-wrap");
+    const asFile = el("input");
+    asFile.type = "file"; asFile.accept = "audio/*"; asFile.style.display = "none";
+    asFile.onchange = () => {
+      const f = asFile.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => { settings.alertSoundUrl = reader.result; saveSet(); buildSettingsDrawer(); };
+      reader.readAsDataURL(f);
+    };
+    const asPick = el("button", "cv-btn", "Choose…");
+    asPick.type = "button";
+    asPick.onclick = () => asFile.click();
+    const asTest = el("button", "cv-btn", "▶ Test");
+    asTest.type = "button";
+    asTest.onclick = () => playAlertBeep();
+    asWrap.append(asPick, asFile, asTest);
+    if (settings.alertSoundUrl) {
+      const asClear = el("button", "cv-btn", "Clear");
+      asClear.type = "button";
+      asClear.onclick = () => { settings.alertSoundUrl = ""; saveSet(); buildSettingsDrawer(); };
+      asWrap.append(asClear);
+    }
+    asRow.append(asWrap);
+    body.append(asRow);
+  }
+
+  body.append(sectionHead("🎨", "Appearance"));
+  if (!isOverlay) {
+    const tpRow = el("div", "cv-settings-row");
+    tpRow.append(el("span", "cv-settings-label", "Theme Preset"));
+    const tp = el("select", "cv-select");
+    Object.keys(THEME_PRESETS).forEach(k => {
+      const o = el("option", "", k[0].toUpperCase() + k.slice(1)); o.value = k;
+      if (settings.themePreset === k) o.selected = true;
+      tp.append(o);
+    });
+    tp.onchange = () => {
+      settings.themePreset = tp.value;
+      Object.assign(settings, THEME_PRESETS[tp.value]);
+      store.save("bd-mc-settings", settings);
+      applyChatStyle();
+      buildSettingsDrawer();
+      renderView();
+    };
+    tpRow.append(tp);
+    body.append(tpRow);
+  }
+  const fsRow = el("div", "cv-settings-row");
+  fsRow.append(el("span", "cv-settings-label", "Font Size"));
+  const fs = el("input", "cv-num");
+  fs.type = "number"; fs.min = 11; fs.max = 24; fs.value = settings.fontSize;
+  fs.onchange = () => { settings.fontSize = Math.max(11, Math.min(24, Number(fs.value) || 14)); saveSet(); };
+  fsRow.append(fs);
+  body.append(fsRow);
+
+  const msRow = el("div", "cv-settings-row");
+  const msLab = el("div");
+  msLab.append(el("div", "cv-settings-label", "Message Size"));
+  msLab.append(el("div", "cv-settings-sub", "avatar + bubble spacing, %"));
+  msRow.append(msLab);
+  const ms = el("input", "cv-num");
+  ms.type = "number"; ms.min = 50; ms.max = 150; ms.value = settings.messageScale;
+  ms.onchange = () => { settings.messageScale = Math.max(50, Math.min(150, Number(ms.value) || 100)); saveSet(); };
+  msRow.append(ms);
+  body.append(msRow);
+
+  const ffRow = el("div", "cv-settings-row");
+  ffRow.append(el("span", "cv-settings-label", "Font Family"));
+  const ff = el("input", "cv-input");
+  ff.style.width = "150px"; ff.placeholder = "system default"; ff.value = settings.fontFamily;
+  ff.onchange = () => { settings.fontFamily = ff.value; saveSet(); };
+  ffRow.append(ff);
+  body.append(ffRow);
+
+  if (!isOverlay) {
+    const bgRow = el("div", "cv-settings-row");
+    bgRow.append(el("span", "cv-settings-label", "Background"));
+    const wrap = el("div", "cv-color-wrap");
+    const color = el("input", "cv-color");
+    color.type = "color"; color.value = settings.bgColor;
+    const hex = el("span", "cv-hex", settings.bgColor);
+    color.oninput = () => { settings.bgColor = color.value; hex.textContent = color.value; saveSet(); };
+    wrap.append(color, hex);
+    bgRow.append(wrap);
+    body.append(bgRow);
+
+    const biRow = el("div", "cv-settings-row");
+    const biLab = el("div");
+    biLab.append(el("div", "cv-settings-label", "Background Image"));
+    biLab.append(el("div", "cv-settings-sub", settings.bgImage ? "image set" : "none"));
+    biRow.append(biLab);
+    const biWrap = el("div", "cv-color-wrap");
+    const biFile = el("input");
+    biFile.type = "file"; biFile.accept = "image/*"; biFile.style.display = "none";
+    biFile.onchange = () => {
+      const f = biFile.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => { settings.bgImage = reader.result; saveSet(); buildSettingsDrawer(); };
+      reader.readAsDataURL(f);
+    };
+    const biPick = el("button", "cv-btn", "Choose…");
+    biPick.type = "button";
+    biPick.onclick = () => biFile.click();
+    biWrap.append(biPick, biFile);
+    if (settings.bgImage) {
+      const biClear = el("button", "cv-btn", "Clear");
+      biClear.type = "button";
+      biClear.onclick = () => { settings.bgImage = ""; saveSet(); buildSettingsDrawer(); };
+      biWrap.append(biClear);
+    }
+    biRow.append(biWrap);
+    body.append(biRow);
+
+    const bbRow = el("div", "cv-settings-row");
+    const bbLab = el("div");
+    bbLab.append(el("div", "cv-settings-label", "Background Blur"));
+    bbLab.append(el("div", "cv-settings-sub", "blurs the wallpaper, not the chat"));
+    bbRow.append(bbLab);
+    const bb = el("input", "cv-num");
+    bb.type = "number"; bb.min = 0; bb.max = 40; bb.value = settings.bgBlur;
+    bb.onchange = () => { settings.bgBlur = Math.max(0, Number(bb.value) || 0); saveSet(); };
+    bbRow.append(bb);
+    body.append(bbRow);
+  }
+
+  const gbRow = el("div", "cv-settings-row");
+  const gbLab = el("div");
+  gbLab.append(el("div", "cv-settings-label", "Bubble Blur"));
+  gbLab.append(el("div", "cv-settings-sub", "glass blur strength, px"));
+  gbRow.append(gbLab);
+  const gb = el("input", "cv-num");
+  gb.type = "number"; gb.min = 0; gb.max = 40; gb.value = settings.glassBlur;
+  gb.onchange = () => { settings.glassBlur = Math.max(0, Number(gb.value) || 0); saveSet(); };
+  gbRow.append(gb);
+  body.append(gbRow);
+
+  const goRow = el("div", "cv-settings-row");
+  const goLab = el("div");
+  goLab.append(el("div", "cv-settings-label", "Bubble Opacity"));
+  goLab.append(el("div", "cv-settings-sub", "glass tint strength, %"));
+  goRow.append(goLab);
+  const go = el("input", "cv-num");
+  go.type = "number"; go.min = 0; go.max = 100; go.value = settings.glassOpacity;
+  go.onchange = () => { settings.glassOpacity = Math.max(0, Math.min(100, Number(go.value) || 0)); saveSet(); };
+  goRow.append(go);
+  body.append(goRow);
+
+  const bpRow = el("div", "cv-settings-row");
+  const bpLab = el("div");
+  bpLab.append(el("div", "cv-settings-label", "Bottom Padding"));
+  bpLab.append(el("div", "cv-settings-sub", "clear space below chat (taskbar height)"));
+  bpRow.append(bpLab);
+  const bp = el("input", "cv-num");
+  bp.type = "number"; bp.min = 0; bp.max = 400; bp.value = settings.bottomPad;
+  bp.onchange = () => { settings.bottomPad = Math.max(0, Number(bp.value) || 0); saveSet(); };
+  bpRow.append(bp);
+  body.append(bpRow);
+
+  if (!isOverlay) {
+    const boRow = el("div", "cv-settings-row");
+    const boLab = el("div");
+    boLab.append(el("div", "cv-settings-label", "Background Opacity"));
+    boLab.append(el("div", "cv-settings-sub", "0 = transparent (OBS overlay)"));
+    boRow.append(boLab);
+    const bo = el("input", "cv-num");
+    bo.type = "number"; bo.min = 0; bo.max = 100; bo.value = settings.bgOpacity;
+    bo.onchange = () => { settings.bgOpacity = Math.max(0, Math.min(100, Number(bo.value) || 0)); saveSet(); };
+    boRow.append(bo);
+    body.append(boRow);
+  }
+
+  body.append(sectionHead("🔎", "Filtering"));
+  const haRow = el("div", "cv-settings-row");
+  const haLab = el("div");
+  haLab.append(el("div", "cv-settings-label", "Hide After"));
+  haLab.append(el("div", "cv-settings-sub", "seconds, 0 = never"));
+  haRow.append(haLab);
+  const ha = el("input", "cv-num");
+  ha.type = "number"; ha.min = 0; ha.max = 3600; ha.value = settings.hideAfter;
+  ha.onchange = () => { settings.hideAfter = String(Math.max(0, Number(ha.value) || 0)); saveSet(); };
+  haRow.append(ha);
+  body.append(haRow);
+
+  const igRow = el("div", "cv-settings-row");
+  igRow.append(el("span", "cv-settings-label", "Ignore Chatters"));
+  const ig = el("input", "cv-input");
+  ig.style.width = "150px"; ig.placeholder = "nightbot, streamelements"; ig.value = settings.ignoreList;
+  ig.onchange = () => { settings.ignoreList = ig.value; saveSet(); };
+  igRow.append(ig);
+  body.append(igRow);
+
+  const eaRow = el("div", "cv-settings-row");
+  eaRow.append(el("span", "cv-settings-label", "Embed Allowlist"));
+  const ea = el("input", "cv-input");
+  ea.style.width = "150px"; ea.placeholder = "username1, username2"; ea.value = settings.embedAllowlist;
+  ea.onchange = () => { settings.embedAllowlist = ea.value; saveSet(); };
+  eaRow.append(ea);
+  body.append(eaRow);
+
+  if (isOverlay) {
+    body.append(sectionHead("💾", "Data"));
+    const refRow = el("div", "cv-settings-row");
+    const refLab = el("div");
+    refLab.append(el("div", "cv-settings-label", "Overlay"));
+    refLab.append(el("div", "cv-settings-sub", "reload if it looks broken or stuck"));
+    refRow.append(refLab);
+    const refBtn = el("button", "cv-btn", "🔄 Refresh");
+    refBtn.onclick = () => location.reload();
+    refRow.append(refBtn);
+    body.append(refRow);
+  } else {
+    body.append(sectionHead("💾", "Data"));
+    const ovRow = el("div", "cv-settings-row");
+    const ovLab = el("div");
+    ovLab.append(el("div", "cv-settings-label", "OBS/Meld Overlay"));
+    ovLab.append(el("div", "cv-settings-sub", "Browser Source URL — transparent background, live chat"));
+    ovRow.append(ovLab);
+    const ovBtn = el("button", "cv-btn", "📋 Copy URL");
+    ovBtn.onclick = () => {
+      navigator.clipboard?.writeText(`http://localhost:${OVERLAY_PORT}/?overlay=1`);
+      showToast("Overlay URL copied — paste as a Browser Source in OBS/Meld");
+    };
+    ovRow.append(ovBtn);
+    body.append(ovRow);
+
+    const oaRow = el("div", "cv-settings-row");
+    const oaLab = el("div");
+    oaLab.append(el("div", "cv-settings-label", "Overlay Avatar Delay"));
+    oaLab.append(el("div", "cv-settings-sub", "ms to wait for Kick/Twitch pics before relaying"));
+    oaRow.append(oaLab);
+    const oa = el("input", "cv-num");
+    oa.type = "number"; oa.min = 0; oa.max = 5000; oa.step = 100; oa.value = settings.overlayAvatarDelay;
+    oa.onchange = () => { settings.overlayAvatarDelay = Math.max(0, Math.min(5000, Number(oa.value) || 0)); saveSet(); };
+    oaRow.append(oa);
+    body.append(oaRow);
+
+    const exRow = el("div", "cv-settings-row");
+    exRow.append(el("span", "cv-settings-label", "Chat Log"));
+    const exWrap = el("div", "cv-color-wrap");
+    const copyBtn = el("button", "cv-btn", "📋 Copy");
+    copyBtn.onclick = () => { navigator.clipboard?.writeText(chatLogText()); showToast("Chat log copied to clipboard"); };
+    const dlBtn = el("button", "cv-btn", "⬇️ Export");
+    dlBtn.onclick = () => {
+      const blob = new Blob([chatLogText()], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "chat-log.txt"; a.click();
+      URL.revokeObjectURL(url);
+      showToast("Chat log exported");
+    };
+    const refreshBtn = el("button", "cv-btn", "🔄 Refresh");
+    refreshBtn.title = "Reload the app if something looks broken";
+    refreshBtn.onclick = () => location.reload();
+    exWrap.append(copyBtn, dlBtn, refreshBtn);
+    exRow.append(exWrap);
+    body.append(exRow);
+
+    const clRow = el("div", "cv-settings-row");
+    clRow.append(el("span", "cv-settings-label", "Messages"));
+    const clWrap = el("div", "cv-color-wrap");
+    const clPin = el("button", "cv-btn", "📌 Clear pinned");
+    clPin.onclick = () => { state.messages.forEach(m => m.pinned = false); renderPinned(); renderView(); showToast("Pinned messages cleared"); };
+    const clAll = el("button", "cv-btn danger", "🗑️ Clear chat");
+    clAll.onclick = () => { state.messages = []; renderPinned(); renderView(); showToast("Chat cleared"); };
+    clWrap.append(clPin, clAll);
+    clRow.append(clWrap);
+    body.append(clRow);
+
+    const resetRow = el("div", "cv-settings-row");
+    const resetLab = el("div");
+    resetLab.append(el("div", "cv-settings-label", "Accounts"));
+    resetLab.append(el("div", "cv-settings-sub", "every saved Client ID/Secret and login token, for every platform"));
+    resetRow.append(resetLab);
+    const resetBtn = el("button", "cv-btn danger", "🧨 Reset all credentials");
+    resetBtn.onclick = async () => {
+      if (!tauriInvoke) { showToast("Requires the desktop app"); return; }
+      if (!confirm("Erase every saved Client ID/Secret and login token (Twitch, Kick, Joystick.tv, Streamer.bot)? You'll need to reconnect each one from scratch.")) return;
+      ["twitch", "kick", "joystick", "streamerbot"].forEach(p => disconnect(p));
+      oauthAccounts.twitch = oauthAccounts.kick = oauthAccounts.joystick = null;
+      await tauriInvoke("wipe_all_credentials_cmd");
+      buildChannelsDrawer();
+      buildComposeBar();
+      showToast("All saved credentials erased");
+    };
+    resetRow.append(resetBtn);
+    body.append(resetRow);
+  }
+
+  groupSettingsSections(body);
+}
+function chatLogText() {
+  return state.messages.filter(m => !m.system).map(m => `[${fmtTime(m.ts)}] ${PLATFORM_MAP[m.platform].label} ${m.user}: ${m.text}`).join("\n");
+}
+
+/* ── Style application ─────────────────────────────────────────────────── */
+function hexToRgba(hex, pct) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Math.max(0, Math.min(100, pct)) / 100})`;
+}
+function applyChatStyle() {
+  const shell = $("shell");
+  shell.style.setProperty("--chat-font-size", Math.max(11, Math.min(24, Number(settings.fontSize) || 14)) + "px");
+  const fam = (settings.fontFamily || "").trim();
+  shell.style.setProperty("--chat-font-family", fam ? `"${fam}", var(--font-ui)` : "var(--font-ui)");
+  shell.style.setProperty("--bottom-pad", (Number(settings.bottomPad) || 0) + "px");
+  shell.style.setProperty("--glass-blur", (Number(settings.glassBlur) || 0) + "px");
+  shell.style.setProperty("--glass-alpha", Math.max(0, Math.min(100, Number(settings.glassOpacity) || 0)) / 100);
+  shell.style.setProperty("--msg-scale", Math.max(50, Math.min(150, Number(settings.messageScale) || 100)) / 100);
+  shell.style.setProperty("--msg-max-width", settings.narrowBubbles ? "320px" : "560px");
+  document.documentElement.style.setProperty("--bg-blur", (Number(settings.bgBlur) || 0) + "px");
+  const bg = $("bg-layer");
+  bg.style.backgroundColor = hexToRgba(settings.bgColor, settings.bgOpacity);
+  if (settings.bgImage) {
+    bg.style.backgroundImage = `url("${settings.bgImage}")`;
+    bg.style.backgroundBlendMode = "overlay"; // the color+opacity above now tints the image instead of hiding it
+  } else {
+    bg.style.backgroundImage = "none";
+    bg.style.backgroundBlendMode = "normal";
+  }
+}
+
+/* ── View tabs / search wiring ─────────────────────────────────────────── */
+function renderTabs() {
+  document.querySelectorAll("#viewTabs .cv-tab").forEach(t => {
+    t.dataset.active = String(t.dataset.view === state.view);
+    t.onclick = () => { state.view = t.dataset.view; localStorage.setItem("bd-mc-view", state.view); renderTabs(); renderPlatformToggles(); renderView(); };
+  });
+}
+let searchTimer = null;
+$("search").oninput = e => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { state.search = e.target.value; renderView(); }, 200);
+};
+
+/* ── Command palette ("/") ─────────────────────────────────────────────── */
+function paletteCommands() {
+  return [
+    { label: "View: Unified", hint: "V", run: () => setView("unified") },
+    { label: "View: Split", hint: "V", run: () => setView("split") },
+    { label: "View: Focus", hint: "V", run: () => setView("focus") },
+    { label: "Open Display Settings", hint: "⚙", run: () => openDrawer("settings") },
+    { label: "Open Channels", hint: "🔌", run: () => openDrawer("channels") },
+    { label: "Clear pinned messages", hint: "📌", run: () => { state.messages.forEach(m => m.pinned = false); renderPinned(); renderView(); } },
+    { label: "Clear chat", hint: "🗑", run: () => { state.messages = []; renderPinned(); renderView(); } },
+    { label: "Copy chat log", hint: "📋", run: () => { navigator.clipboard?.writeText(chatLogText()); showToast("Chat log copied to clipboard"); } },
+    ...orderedPlatforms().map(p => ({
+      label: `${state.muted.has(p.id) ? "Unmute" : "Mute"}: ${p.label}`, hint: "M",
+      run: () => { state.muted.has(p.id) ? state.muted.delete(p.id) : state.muted.add(p.id); renderPlatformToggles(); renderView(); },
+    })),
+    ...orderedPlatforms().map(p => ({
+      label: `Jump to: ${p.label}`, hint: "J",
+      run: () => { state.focusPlatform = p.id; setView("focus"); },
+    })),
+  ];
+}
+function setView(v) { state.view = v; localStorage.setItem("bd-mc-view", v); renderTabs(); renderPlatformToggles(); renderView(); }
+function openPalette() {
+  $("paletteOverlay").dataset.open = "true";
+  $("paletteInput").value = "";
+  renderPaletteList("");
+  $("paletteInput").focus();
+}
+function closePalette() { $("paletteOverlay").dataset.open = "false"; }
+function renderPaletteList(q) {
+  const list = $("paletteList");
+  list.innerHTML = "";
+  q = q.trim().toLowerCase();
+  paletteCommands().filter(c => !q || c.label.toLowerCase().includes(q)).forEach((c, i) => {
+    const row = el("div", "cv-palette-item");
+    if (i === 0) row.dataset.sel = "true";
+    row.append(el("span", "", c.label), el("span", "cv-palette-hint", c.hint));
+    row.onclick = () => { closePalette(); c.run(); };
+    list.append(row);
+  });
+}
+$("paletteInput").oninput = e => renderPaletteList(e.target.value);
+$("paletteInput").onkeydown = e => {
+  if (e.key === "Enter") { const first = $("paletteList").firstElementChild; if (first) first.click(); }
+};
+$("paletteOverlay").onclick = e => { if (e.target === $("paletteOverlay")) closePalette(); };
+window.addEventListener("keydown", e => {
+  const tag = (document.activeElement && document.activeElement.tagName) || "";
+  const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  if (e.key === "/" && !typing && $("paletteOverlay").dataset.open !== "true") { e.preventDefault(); openPalette(); }
+  else if (e.key === "Escape") { closePalette(); closeMenu(); }
+});
+
+/* hide-after sweep */
+setInterval(() => { if (Number(settings.hideAfter) > 0) renderView(); }, 5000);
+
+/* ── Compose bar (send) — only shown once at least one account is connected */
+// You're sending as your own connected account, so the target channel
+// defaults to your own username — an unset "channel name" field (that's for
+// the separate anonymous read-only view) shouldn't hide the compose bar.
+function twitchSendTarget() { return channels.twitch.trim() || oauthAccounts.twitch?.username || ""; }
+function kickSendTarget() { return channels.kick.trim() || oauthAccounts.kick?.username || ""; }
+function shortTargetLabel(label) { return label.split(":")[0].split(" (")[0]; }
+let composeTargets = []; // last built list — "Send to all" replays over these, not a fresh recompute
+function buildComposeBar() {
+  const targets = [];
+  const sbotReady = sockets.streamerbot && sockets.streamerbot.readyState === WebSocket.OPEN;
+  // Streamer.bot handles its own platform auth — sending through it doesn't
+  // need Multichat's own OAuth connection for that platform at all.
+  if (channels.streamerbotFor.twitch && sbotReady) targets.push({ id: "twitch", label: "Twitch (via Streamer.bot)" });
+  else if (oauthAccounts.twitch) targets.push({ id: "twitch", label: "Twitch: " + twitchSendTarget() });
+  if (channels.streamerbotFor.kick && sbotReady) targets.push({ id: "kick", label: "Kick (via Streamer.bot)" });
+  else if (oauthAccounts.kick) targets.push({ id: "kick", label: "Kick: " + kickSendTarget() });
+  if (channels.streamerbotFor.youtube && sbotReady) targets.push({ id: "youtube", label: "YouTube (via Streamer.bot)" });
+  if (channels.enabled.joystick && sockets.joystick && state.joystickChannelId) targets.push({ id: "joystick", label: "Joystick.tv" });
+  composeTargets = targets;
+  $("compose").dataset.visible = String(targets.length > 0);
+  const sel = $("composeTarget");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  if (targets.length > 1) {
+    const allLabel = "📢 All (" + targets.map(t => shortTargetLabel(t.label)).join(", ") + ")";
+    const o = el("option", "", allLabel); o.value = "all"; sel.append(o);
+  }
+  targets.forEach(t => { const o = el("option", "", t.label); o.value = t.id; sel.append(o); });
+  if (targets.some(t => t.id === prev) || prev === "all") sel.value = prev;
+}
+async function sendToTarget(target, text) {
+  if (target === "twitch" && channels.streamerbotFor.twitch) await sbotSendMessage("twitch", text);
+  else if (target === "twitch") await tauriInvoke("send_twitch_message", { channelLogin: twitchSendTarget(), text });
+  else if (target === "kick" && channels.streamerbotFor.kick) await sbotSendMessage("kick", text);
+  else if (target === "kick") await tauriInvoke("send_kick_message", { channelSlug: kickSendTarget(), text });
+  else if (target === "youtube") await sbotSendMessage("youtube", text);
+  else if (target === "joystick") sendJoystickMessage(text);
+}
+async function sendComposeMessage() {
+  const target = $("composeTarget").value;
+  const text = $("composeText").value.trim();
+  if (!target || !text) return;
+  $("composeSend").disabled = true;
+  try {
+    if (target === "all") {
+      const results = await Promise.allSettled(composeTargets.map(t => sendToTarget(t.id, text)));
+      const failed = results.map((r, i) => ({ r, t: composeTargets[i] })).filter(x => x.r.status === "rejected");
+      if (failed.length) showToast(`Sent to ${composeTargets.length - failed.length}/${composeTargets.length} — failed: ${failed.map(f => shortTargetLabel(f.t.label)).join(", ")}`);
+    } else {
+      await sendToTarget(target, text);
+    }
+    $("composeText").value = "";
+  } catch (e) {
+    showToast(`Send failed: ${e}`);
+  }
+  $("composeSend").disabled = false;
+}
+$("composeSend").onclick = sendComposeMessage;
+$("composeText").onkeydown = e => { if (e.key === "Enter") sendComposeMessage(); };
+
+/* ── Overlay relay ─────────────────────────────────────────────────────── */
+// Overlay browser source: skip all real platform connections, just render
+// whatever the desktop window relays. Reconnects with backoff like the
+// platform sockets do, since OBS may load this before the app is running.
+function overlayStatusChip() {
+  let chip = $("overlayStatus");
+  if (!chip) {
+    chip = el("div", "cv-overlay-status", "⚠ Reconnecting…");
+    chip.id = "overlayStatus";
+    document.body.append(chip);
+  }
+  return chip;
+}
+function connectOverlayRelay() {
+  const ws = new WebSocket(`ws://localhost:${OVERLAY_PORT}`);
+  ws.onopen = () => { overlayStatusChip().style.display = "none"; };
+  ws.onmessage = ev => { try { addMessage(JSON.parse(ev.data)); } catch {} };
+  ws.onclose = () => { overlayStatusChip().style.display = "flex"; setTimeout(connectOverlayRelay, 2000); };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+const OVERLAY_PORT = 61826; // must match src-tauri/src/lib.rs OVERLAY_PORT
+
+/* ── Boot ──────────────────────────────────────────────────────────────── */
+// Settings/tabs/platform-mute UI stays available in BOTH modes — the overlay
+// page has its own localStorage (separate origin), so tuning its look here
+// never touches the desktop app's settings. Only connection-related setup
+// (Channels drawer, OAuth bootstrap, compose bar) is desktop-window-only;
+// the overlay never connects to anything itself, only relays messages.
+applyChatStyle();
+renderView();
+buildSettingsDrawer();
+renderTabs();
+renderPlatformToggles();
+renderPinned();
+if (isOverlay) {
+  connectOverlayRelay();
+} else {
+  buildChannelsDrawer();
+  applyConnections();
+  if (tauriInvoke) {
+    Promise.all(["twitch", "kick", "joystick"].map(p =>
+      tauriInvoke("oauth_get_account", { platform: p }).then(acc => { oauthAccounts[p] = acc; })
+    )).then(() => { buildChannelsDrawer(); buildComposeBar(); });
+  } else {
+    buildComposeBar();
+  }
+  if (!channels.twitch && !channels.kick) openDrawer("channels");
+}

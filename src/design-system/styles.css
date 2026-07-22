@@ -1,0 +1,14 @@
+/* ============================================================================
+   BearddOddity Design System — entry point for consumers of this foundation.
+   ----------------------------------------------------------------------------
+   NOT imported by the app yet — see src/design-system/README.md. This is an
+   @import manifest only; all declarations live in the token files below.
+   Source: https://claude.ai/design/p/7269176f-449a-43b0-9f64-2e9847fda49e
+   ============================================================================ */
+
+@import "./tokens/fonts.css";
+@import "./tokens/colors.css";
+@import "./tokens/typography.css";
+@import "./tokens/spacing.css";
+@import "./tokens/effects.css";
+@import "./tokens/components.css";

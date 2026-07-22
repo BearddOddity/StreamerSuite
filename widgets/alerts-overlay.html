@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>StreamerSuite Alerts Overlay</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    overflow: hidden;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  #stack {
+    position: fixed;
+    left: 50%;
+    top: 40px;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+  }
+  .alert-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 22px;
+    border-radius: 16px;
+    background: rgba(10, 10, 10, 0.88);
+    border: 2px solid var(--accent, #9146ff);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 24px var(--accent, #9146ff);
+    color: #fff;
+    min-width: 320px;
+    animation: pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards, fade-out 0.5s ease-in forwards var(--life, 6s);
+  }
+  .alert-icon { font-size: 34px; line-height: 1; }
+  .alert-text { display: flex; flex-direction: column; gap: 2px; }
+  .alert-user { font-size: 18px; font-weight: 800; }
+  .alert-message { font-size: 14px; opacity: 0.85; }
+  @keyframes pop-in {
+    from { opacity: 0; transform: scale(0.8) translateY(-20px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  @keyframes fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; transform: scale(0.95); }
+  }
+</style>
+</head>
+<body>
+<div id="stack"></div>
+<script>
+  // Only ever loaded via /forge-overlay/<token>/alerts-overlay.html (or
+  // /custom-overlay/<token>/... if a user copies it there) — same
+  // token-in-the-path convention as overlay-runtime.js, reused here for the
+  // /alerts-ws WebSocket.
+  function getOverlayToken() {
+    const parts = window.location.pathname.split("/");
+    for (const marker of ["forge-overlay", "forge-widget", "custom-overlay"]) {
+      const idx = parts.indexOf(marker);
+      if (idx >= 0 && parts[idx + 1]) return parts[idx + 1];
+    }
+    return "";
+  }
+
+  const KIND_STYLE = {
+    follow: { icon: "💜", accent: "#a970ff" },
+    sub: { icon: "⭐", accent: "#facc15" },
+    raid: { icon: "🚀", accent: "#22d3ee" },
+    cheer: { icon: "💎", accent: "#f472b6" },
+    tip: { icon: "💰", accent: "#4ade80" },
+  };
+
+  const LIFETIME_SECONDS = 6;
+  const stack = document.getElementById("stack");
+
+  function showAlert(event) {
+    const style = KIND_STYLE[event.kind] || { icon: "🔔", accent: "#9146ff" };
+    const card = document.createElement("div");
+    card.className = "alert-card";
+    card.style.setProperty("--accent", style.accent);
+    card.style.setProperty("--life", LIFETIME_SECONDS + "s");
+    card.innerHTML =
+      '<span class="alert-icon">' + style.icon + "</span>" +
+      '<span class="alert-text">' +
+        '<span class="alert-user"></span>' +
+        '<span class="alert-message"></span>' +
+      "</span>";
+    card.querySelector(".alert-user").textContent = event.user || "Someone";
+    card.querySelector(".alert-message").textContent = event.message || "";
+    stack.appendChild(card);
+    setTimeout(() => card.remove(), (LIFETIME_SECONDS + 0.5) * 1000);
+  }
+
+  function connect() {
+    const url = "ws://127.0.0.1:53735/alerts-ws?token=" + encodeURIComponent(getOverlayToken());
+    const ws = new WebSocket(url);
+    ws.onmessage = (ev) => {
+      try {
+        showAlert(JSON.parse(ev.data));
+      } catch (e) {}
+    };
+    ws.onclose = () => setTimeout(connect, 3000);
+    ws.onerror = () => ws.close();
+  }
+  connect();
+</script>
+</body>
+</html>
