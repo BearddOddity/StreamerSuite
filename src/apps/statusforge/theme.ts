@@ -112,12 +112,22 @@ function toThemePrefs(theme: ThemeConfig): ThemePrefs {
   };
 }
 
+// See the matching guard in SharedSettingsContext.tsx's load(): a
+// previously-stored oversized wallpaper must be stripped on read too, or
+// every write through this path re-inherits it and keeps failing the
+// localStorage quota forever.
+const MAX_BG_IMAGE_CHARS = 300_000;
+
 function readUnifiedTheme(): ThemeConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed?.theme) return { ...defaultSharedSettings.theme, ...parsed.theme };
+      if (parsed?.theme) {
+        const merged = { ...defaultSharedSettings.theme, ...parsed.theme };
+        if (merged.bgImage && merged.bgImage.length > MAX_BG_IMAGE_CHARS) merged.bgImage = "";
+        return merged;
+      }
     }
   } catch {
     /* ignore */
