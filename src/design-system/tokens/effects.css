@@ -26,11 +26,12 @@
   /* The white top-highlight that sells the "glass" edge */
   --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
-  /* ── Accent glows ────────────────────────────────────────────────────── */
-  --glow-accent: 0 0 20px rgba(145, 70, 255, 0.15);
-  --glow-accent-strong: 0 0 0 3px rgba(145, 70, 255, 0.10);   /* focus ring */
-  --glow-cta: 0 4px 12px rgba(145, 70, 255, 0.15);
-  --glow-cta-hover: 0 6px 20px rgba(145, 70, 255, 0.25);
+  /* ── Accent glows (derived from --bd-accent, so they follow the user's
+     chosen accent color) ─────────────────────────────────────────────── */
+  --glow-accent: 0 0 20px color-mix(in srgb, var(--bd-accent) 15%, transparent);
+  --glow-accent-strong: 0 0 0 3px color-mix(in srgb, var(--bd-accent) 10%, transparent);   /* focus ring */
+  --glow-cta: 0 4px 12px color-mix(in srgb, var(--bd-accent) 15%, transparent);
+  --glow-cta-hover: 0 6px 20px color-mix(in srgb, var(--bd-accent) 25%, transparent);
 
   /* ── Motion ──────────────────────────────────────────────────────────── */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */

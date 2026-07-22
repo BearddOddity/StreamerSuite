@@ -14,16 +14,19 @@
   --bd-black: #050505;          /* app background, all products */
   --bd-panel-solid: #111118;    /* native <option> dropdown background */
 
-  /* ── Accent (Twitch purple — the through-line of the brand) ───────────── */
-  --bd-accent: #9146ff;
-  --bd-accent-dark: #6b2cff;
-  --bd-accent-text: #c084fc;    /* purple text on dark */
-  --bd-accent-soft: #c4b5fd;    /* info toast text */
-  /* CTA gradient stops */
-  --bd-cta-from: #9333ea;
-  --bd-cta-to: #4f46e5;
-  --bd-cta-from-hover: #a855f7;
-  --bd-cta-to-hover: #6366f1;
+  /* ── Accent (Twitch purple by default — reads the user's chosen accent
+     color from Settings → Appearance via --user-accent, set on
+     document.documentElement by SharedSettingsContext; falls back to the
+     brand purple when unset, e.g. in a context with no settings provider) ── */
+  --bd-accent: var(--user-accent, #9146ff);
+  --bd-accent-dark: color-mix(in srgb, var(--bd-accent) 100%, black 25%);
+  --bd-accent-text: color-mix(in srgb, var(--bd-accent) 100%, white 30%);   /* accent text on dark */
+  --bd-accent-soft: color-mix(in srgb, var(--bd-accent) 100%, white 50%);  /* info toast text */
+  /* CTA gradient stops — two shades of the same accent, not a fixed second hue */
+  --bd-cta-from: color-mix(in srgb, var(--bd-accent) 100%, white 8%);
+  --bd-cta-to: color-mix(in srgb, var(--bd-accent) 100%, black 15%);
+  --bd-cta-from-hover: color-mix(in srgb, var(--bd-accent) 100%, white 18%);
+  --bd-cta-to-hover: color-mix(in srgb, var(--bd-accent) 100%, black 5%);
 
   /* ── Semantic status hues ────────────────────────────────────────────── */
   --bd-green: #4ade80;          /* success / on */
@@ -77,7 +80,7 @@
   /* ── Semantic aliases (use these in components) ──────────────────────── */
   --bg-app: var(--bd-black);
   --accent: var(--bd-accent);
-  --accent-glow: rgba(145, 70, 255, 0.15);
+  --accent-glow: color-mix(in srgb, var(--bd-accent) 15%, transparent);
   --surface-card: var(--surface-glass);
   --border-card: var(--line-2);
 }

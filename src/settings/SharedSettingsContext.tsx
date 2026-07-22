@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { emit } from "@tauri-apps/api/event";
 import { defaultSharedSettings, type SharedSettings, type ApiKeys, type RoutingConfig, type SystemConfig, type ThemeConfig, type DetectionConfig, type EngineSettings } from "./types";
 
 // ─── Context value ───────────────────────────────────────────────────────────
@@ -30,7 +31,18 @@ const SharedSettingsContext = createContext<SharedSettingsContextValue | null>(n
 
 // ─── Storage keys ────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = "streamersuite-unified-settings";
+// Exported so other in-SPA storage adapters (e.g. StatusForge's theme.ts,
+// which predates the unified store and used to keep its own parallel
+// "statusforge_theme_prefs" key) can read/write the exact same source of
+// truth instead of drifting out of sync with it.
+export const STORAGE_KEY = "streamersuite-unified-settings";
+/** Fired after every write to STORAGE_KEY — including writes from adapters
+ *  outside this context (theme.ts) — so this provider's React state stays
+ *  in sync with changes made through those other entry points. The native
+ *  `storage` event doesn't fire in the same document that made the change,
+ *  which is exactly the case here (StatusForge renders in the same SPA/
+ *  window), so a plain custom event does the job instead. */
+export const SETTINGS_CHANGED_EVENT = "streamersuite-settings-changed";
 const LEGACY_KEYS = [
   "streamersuite-shared-settings",
   "streamersuite-theme",
@@ -223,11 +235,33 @@ function deepMerge(target: Record<string, any>, source: Record<string, any>): Re
 
 export function SharedSettingsProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SharedSettings>(load);
+  // Tracks the JSON this provider itself last wrote, so its own
+  // SETTINGS_CHANGED_EVENT echo (below) can be told apart from a write made
+  // by another adapter (StatusForge's theme.ts) — otherwise every change
+  // would reload+rewrite+redispatch itself forever.
+  const lastWrittenRef = useRef<string | null>(null);
 
   // Persist on every change
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const json = JSON.stringify(state);
+    lastWrittenRef.current = json;
+    localStorage.setItem(STORAGE_KEY, json);
+    window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
   }, [state]);
+
+  // Pick up writes made through other adapters onto the same STORAGE_KEY
+  // (StatusForge's theme.ts) without requiring them to route through this
+  // context — otherwise this provider's in-memory state would silently
+  // fall behind whatever StatusForge's own Theme tab just saved.
+  useEffect(() => {
+    const onExternalChange = () => {
+      const current = localStorage.getItem(STORAGE_KEY);
+      if (current === lastWrittenRef.current) return; // our own echo
+      setState(load());
+    };
+    window.addEventListener(SETTINGS_CHANGED_EVENT, onExternalChange);
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, onExternalChange);
+  }, []);
 
   // Apply CSS custom properties for theme
   useEffect(() => {
@@ -254,9 +288,27 @@ export function SharedSettingsProvider({ children }: { children: ReactNode }) {
     root.style.setProperty("--user-cover-glint", t.coverGlint && !animOff ? "unset" : "none");
     root.style.setProperty("--user-card-lift", t.cardHoverLift && !animOff ? "unset" : "none");
     root.style.setProperty("--user-card-glint", t.cardGlint && !animOff ? "unset" : "none");
+    root.style.setProperty("--user-font-family", t.fontFamily);
+    root.style.setProperty("--user-font-weight", t.fontWeight);
+    root.style.setProperty("--user-chat-font-size", `${t.chatFontSize}px`);
+    root.style.setProperty("--user-chat-font-family", t.chatFontFamily);
+    root.style.setProperty("--user-chat-font-weight", t.chatFontWeight);
+    root.style.setProperty("--user-holo-opacity", t.holoEffects && !animOff ? "1" : "0");
+    root.style.setProperty("--user-status-pulse", t.statusPulse && !animOff ? "unset" : "none");
+    root.style.setProperty("--user-toast-anim", t.toastAnimations && !animOff ? "unset" : "none");
+    root.style.setProperty("--user-modal-anim", t.modalAnimations && !animOff ? "unset" : "none");
+    root.style.setProperty("--user-progress-anim", t.progressBarAnimation && !animOff ? "unset" : "none");
+    root.style.setProperty("--user-btn-hover", t.buttonHoverEffects && !animOff ? "unset" : "none");
     root.classList.toggle("light-mode", t.themeMode === "light");
     root.classList.toggle("no-animations", !t.animationsEnabled);
     root.classList.toggle("no-glow", !t.glowEffects);
+    root.classList.toggle("chat-bubbles", t.chatBubbles);
+    root.classList.toggle("no-platform-badges", !t.platformBadges);
+
+    // Multi-Chat runs in its own window/webview (separate localStorage), so
+    // it can't just read this window's settings — push the accent over a
+    // Tauri event instead. No-op there if the window doesn't exist yet.
+    emit("streamersuite://theme-accent", { accentColor: t.accentColor }).catch(() => {});
   }, [state.theme]);
 
   // Helpers

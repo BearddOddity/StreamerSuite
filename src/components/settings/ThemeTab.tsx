@@ -108,7 +108,7 @@ export default function ThemeTab(props: Props) {
                 className={`flex flex-col items-center gap-1.5 py-2.5 px-2 rounded-xl border transition-all cursor-pointer ${
                   props.accentColor === p.color ? "border-white/20 bg-white/[0.06]" : "border-white/[0.04] hover:border-white/[0.1] hover:bg-white/[0.03]"
                 }`}>
-                <span className="w-6 h-6 rounded-full border border-white/10" style={{ backgroundColor: p.color, boxShadow: `0 0 12px ${p.color}40` }} />
+                <span className="w-6 h-6 rounded-lg border border-white/10" style={{ backgroundColor: p.color, boxShadow: `0 0 12px ${p.color}40` }} />
                 <span className="text-[9px] text-white/30">{p.name}</span>
               </button>
             ))}
@@ -128,7 +128,7 @@ export default function ThemeTab(props: Props) {
                 className={`flex flex-col items-center gap-1.5 py-2 px-2 rounded-xl border transition-all cursor-pointer ${
                   props.bgColor === p.color ? "border-white/20 bg-white/[0.06]" : "border-white/[0.04] hover:border-white/[0.1] hover:bg-white/[0.03]"
                 }`}>
-                <span className="w-6 h-6 rounded-full border border-white/10" style={{ backgroundColor: p.color }} />
+                <span className="w-6 h-6 rounded-lg border border-white/10" style={{ backgroundColor: p.color }} />
                 <span className="text-[9px] text-white/30">{p.name}</span>
               </button>
             ))}
