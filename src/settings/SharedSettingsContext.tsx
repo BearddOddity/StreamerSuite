@@ -241,11 +241,24 @@ export function SharedSettingsProvider({ children }: { children: ReactNode }) {
   // would reload+rewrite+redispatch itself forever.
   const lastWrittenRef = useRef<string | null>(null);
 
-  // Persist on every change
+  // Persist on every change. A failed write here (almost always
+  // QuotaExceededError from an oversized bgImage data URI — see
+  // ThemeTab.tsx) must not be allowed to silently kill persistence for
+  // every *other* setting too: fall back to dropping the one field most
+  // likely responsible and retry, rather than losing the whole write.
   useEffect(() => {
     const json = JSON.stringify(state);
     lastWrittenRef.current = json;
-    localStorage.setItem(STORAGE_KEY, json);
+    try {
+      localStorage.setItem(STORAGE_KEY, json);
+    } catch (err) {
+      console.error("Failed to persist settings, retrying without background image:", err);
+      if (state.theme.bgImage) {
+        setState((s) => ({ ...s, theme: { ...s.theme, bgImage: "" } }));
+        return; // the state update above re-triggers this effect with a smaller payload
+      }
+      lastWrittenRef.current = null;
+    }
     window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
   }, [state]);
 
