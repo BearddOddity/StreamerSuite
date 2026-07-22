@@ -3,8 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { DEFAULT_TEMPLATE_PARAMS, TEMPLATES, type BoundField, type TemplateParams } from "./types";
 import { useLiveSources } from "./useLiveSources";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
+import { Select } from "../../design-system/components/forms";
 
 const FONT_PRESETS = ["", "Bebas Neue", "Anton", "Oswald", "Bungee", "Press Start 2P", "Poppins"];
+
+// The design system's Select defaults to a 16px web-form trigger font; this app's
+// chrome runs 11-13px everywhere else (see design-system/README.md), so every
+// Select in this dense modal opts into the smaller size to match its neighbors.
+const SELECT_COMPACT_STYLE = { fontSize: 12, padding: "10px 12px" };
 
 function FieldRow({
   label,
@@ -32,17 +38,14 @@ function FieldRow({
             className="flex-1 min-w-0 input-glass text-[12px]"
           />
         )}
-        <select
-          value={field.source}
-          onChange={(e) => onChange({ ...field, source: e.target.value })}
-          className={`select-glass text-[11px] shrink-0 ${sourceOnly ? "flex-1" : "w-44"}`}
-        >
-          {sources.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+        <div className={`shrink-0 ${sourceOnly ? "flex-1" : "w-44"}`}>
+          <Select
+            value={field.source}
+            onChange={(v) => onChange({ ...field, source: v })}
+            options={sources}
+            style={SELECT_COMPACT_STYLE}
+          />
+        </div>
       </div>
     </div>
   );
@@ -187,20 +190,13 @@ export default function OverlayMaker({
             )}
 
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">Position</label>
-                <select
-                  value={params.position}
-                  onChange={(e) => set("position", e.target.value)}
-                  className="w-full select-glass text-[11px]"
-                >
-                  {template.positions.map((p) => (
-                    <option key={p.value} value={p.value}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <Select
+                label="Position"
+                value={params.position}
+                onChange={(v) => set("position", v)}
+                options={template.positions}
+                style={SELECT_COMPACT_STYLE}
+              />
               {template.hasSpeed && (
                 <div>
                   <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
@@ -269,34 +265,24 @@ export default function OverlayMaker({
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">Font</label>
-                <select
-                  value={params.fontFamily}
-                  onChange={(e) => set("fontFamily", e.target.value)}
-                  className="w-full select-glass text-[11px]"
-                >
-                  {FONT_PRESETS.map((f) => (
-                    <option key={f} value={f}>
-                      {f || "System Default"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
-                  Corner Style
-                </label>
-                <select
-                  value={params.borderRadius}
-                  onChange={(e) => set("borderRadius", e.target.value as TemplateParams["borderRadius"])}
-                  className="w-full select-glass text-[11px]"
-                >
-                  <option value="sharp">Sharp</option>
-                  <option value="soft">Soft</option>
-                  <option value="rounded">Rounded</option>
-                </select>
-              </div>
+              <Select
+                label="Font"
+                value={params.fontFamily}
+                onChange={(v) => set("fontFamily", v)}
+                options={FONT_PRESETS.map((f) => ({ value: f, label: f || "System Default" }))}
+                style={SELECT_COMPACT_STYLE}
+              />
+              <Select
+                label="Corner Style"
+                value={params.borderRadius}
+                onChange={(v) => set("borderRadius", v as TemplateParams["borderRadius"])}
+                options={[
+                  { value: "sharp", label: "Sharp" },
+                  { value: "soft", label: "Soft" },
+                  { value: "rounded", label: "Rounded" },
+                ]}
+                style={SELECT_COMPACT_STYLE}
+              />
             </div>
 
             <div className="space-y-2">
