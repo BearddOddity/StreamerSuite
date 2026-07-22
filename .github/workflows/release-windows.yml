@@ -1,0 +1,36 @@
+name: Windows Release Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version/tag suffix for this build (e.g. 0.1.0)"
+        required: false
+        default: "0.1.0"
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: streamersuite-v${{ github.event.inputs.version }}-${{ github.run_number }}
+          releaseName: "StreamerSuite v${{ github.event.inputs.version }} (build ${{ github.run_number }})"
+          releaseBody: "Automated Windows build from branch `${{ github.ref_name }}` (commit ${{ github.sha }}). Draft release — not published until reviewed."
+          releaseDraft: true
+          prerelease: true
