@@ -3,7 +3,7 @@ import { getApps, getAppsByCategory, getApp } from "@/apps/registry";
 import Launcher from "./Launcher";
 import TopBar from "./TopBar";
 import MainSettingsPage from "@/components/settings/MainSettingsPage";
-import type { SettingsTabId } from "@/hooks/useAppState";
+import type { SettingsTabId } from "@/components/settings/MainSettingsPage";
 
 const MAIN_SETTINGS_ID = "__main-settings__";
 

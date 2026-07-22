@@ -32,7 +32,7 @@ async function openMultiChatWindow() {
   });
 }
 
-export default function ChatConfluenceApp() {
+export default function MultiChatApp() {
   const [opening, setOpening] = useState(false);
 
   useEffect(() => {

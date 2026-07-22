@@ -25,7 +25,7 @@ export default function AboutTab({ version }: Props) {
         </div>
         <p className="text-[11px] text-white/35 leading-relaxed">
           StreamerSuite is an all-in-one streaming toolkit. Unifying StatusForge game detection,
-          ChatConfluence multi-platform chat, and StreamerSuite core — manage API keys, route
+          Multi-Chat multi-platform chat, and StreamerSuite core — manage API keys, route
           channels, configure overlays, detect games, and monitor your stream from a single interface.
         </p>
       </div>
@@ -39,7 +39,7 @@ export default function AboutTab({ version }: Props) {
         <div className="space-y-2">
           {[
             { name: "StatusForge", desc: "Game detection engine — auto-detects what you're playing and updates your stream info.", version: "v1.0.8" },
-            { name: "ChatConfluence", desc: "Unified multi-platform chat — Twitch, Kick, Joystick in one view.", version: "v0.2.0" },
+            { name: "Multi-Chat", desc: "Unified multi-platform chat — Twitch, Kick, Joystick in one view.", version: "v0.2.0" },
           ].map((app) => (
             <div key={app.name} className="flex items-center gap-3 py-2">
               <div className="flex-1 min-w-0">

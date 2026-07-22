@@ -1,5 +1,5 @@
 // Import all apps to register them
-import "./chat-confluence";
+import "./multi-chat";
 import "./stream-timer";
 import "./scene-switcher";
 import "./stream-stats";
