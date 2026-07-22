@@ -5,7 +5,7 @@ registerApp({
   id: "alerts-hub",
   name: "Alerts & Events",
   icon: "🔔",
-  description: "Follow, sub, donation, raid, and host alerts. Test alerts and manage event sounds.",
+  description: "Live follow, sub, raid, cheer, and tip alerts across Twitch, Kick, and Joystick.tv.",
   category: "alerts",
   component: AlertsHubApp,
 });

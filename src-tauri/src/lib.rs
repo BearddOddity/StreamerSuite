@@ -1,4 +1,5 @@
 mod auth;
+pub mod alerts;
 pub mod config;
 pub mod feedback;
 pub mod pusher;
@@ -2579,6 +2580,12 @@ pub fn run() {
             multichat::joystick_delete_message,
             multichat::joystick_moderate_user,
             multichat::wipe_all_credentials_cmd,
+            alerts::alerts_oauth_login,
+            alerts::alerts_oauth_get_account,
+            alerts::alerts_oauth_logout,
+            alerts::alerts_oauth_get_client_id,
+            alerts::alerts_oauth_has_client_secret,
+            alerts::alerts_eventsub_subscribe,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
