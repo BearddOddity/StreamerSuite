@@ -758,20 +758,49 @@ fn overlay_data_watch() -> &'static tokio::sync::watch::Sender<serde_json::Value
 }
 
 /// Called by the `overlay_publish_data` Tauri command whenever a tool
-/// (Stream Stats, Stream Timer) has a fresh value to offer bound overlay
+/// (Stream Stats, Stream Timer, …) has a fresh value to offer bound overlay
 /// fields. Merges into the existing snapshot so one tool publishing doesn't
 /// clobber another's keys.
+///
+/// Uses `send_modify`, not a manual `borrow` + clone + `send`/`send_replace`
+/// — the manual version reads the current value, then separately writes a
+/// new one, which is two non-atomic steps. Two tools publishing at close to
+/// the same instant (plausible: Stream Stats and Stream Timer both tick
+/// independently) can interleave between that read and that write, and
+/// whichever write lands second silently overwrites the first's key with a
+/// snapshot that never saw it — a real lost update, not just a theoretical
+/// one (it's what made this function's own test flaky under the test
+/// runner's parallel threads before this fix). `send_modify` holds the
+/// channel's lock for the entire read-modify-write, so it can't interleave
+/// with another call. It also always stores the value regardless of
+/// receiver count, unlike plain `send` (which no-ops if nothing is
+/// currently subscribed — the common case before any overlay browser
+/// source has connected to `/data-ws` yet).
 pub(crate) fn publish_overlay_data(key: String, value: serde_json::Value) {
-    let tx = overlay_data_watch();
-    let mut current = tx.borrow().clone();
-    if !current.is_object() {
-        current = serde_json::json!({});
-    }
-    current
-        .as_object_mut()
-        .expect("just normalized to an object above")
-        .insert(key, value);
-    let _ = tx.send(current);
+    overlay_data_watch().send_modify(|current| {
+        if !current.is_object() {
+            *current = serde_json::json!({});
+        }
+        current
+            .as_object_mut()
+            .expect("just normalized to an object above")
+            .insert(key, value);
+    });
+}
+
+/// The keys currently held in the live-data snapshot — i.e. every source
+/// the Overlay Maker can offer to bind a field to right now, discovered
+/// from what's actually been published rather than a fixed list. A tool
+/// that starts publishing a new key shows up here (and so in the Maker's
+/// dropdown) the moment it does, with no changes needed anywhere else.
+pub(crate) fn overlay_data_keys() -> Vec<String> {
+    let mut keys: Vec<String> = overlay_data_watch()
+        .borrow()
+        .as_object()
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default();
+    keys.sort();
+    keys
 }
 
 async fn overlay_data_handler(
@@ -1300,5 +1329,26 @@ mod tests {
         assert!(!constant_time_eq(b"same-token", b"different"));
         assert!(!constant_time_eq(b"short", b"much-longer-value"));
         assert!(constant_time_eq(b"", b""));
+    }
+
+    // `overlay_data_watch` is a process-wide OnceLock, so this only asserts
+    // presence (never absence) of keys this test itself published — safe
+    // alongside any other test that might publish other keys.
+    #[test]
+    fn overlay_data_keys_reflects_published_keys() {
+        publish_overlay_data("scene".to_string(), serde_json::json!("Just Chatting"));
+        publish_overlay_data("now_playing_sound".to_string(), serde_json::json!("airhorn"));
+        let keys = overlay_data_keys();
+        assert!(keys.contains(&"scene".to_string()));
+        assert!(keys.contains(&"now_playing_sound".to_string()));
+    }
+
+    #[test]
+    fn publish_overlay_data_merges_without_clobbering_other_keys() {
+        publish_overlay_data("merge_test_a".to_string(), serde_json::json!(1));
+        publish_overlay_data("merge_test_b".to_string(), serde_json::json!(2));
+        let snapshot = overlay_data_watch().borrow().clone();
+        assert_eq!(snapshot["merge_test_a"], serde_json::json!(1));
+        assert_eq!(snapshot["merge_test_b"], serde_json::json!(2));
     }
 }

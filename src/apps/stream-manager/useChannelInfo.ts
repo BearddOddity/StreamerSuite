@@ -22,6 +22,16 @@ export function useTwitchChannelInfo() {
     loadTwitch();
   }, [loadTwitch]);
 
+  // Feeds the Overlay Maker's live-data-bound fields (see overlay_manager.rs's
+  // /data-ws). Kick's own load below publishes the same two keys — whichever
+  // platform's info loaded most recently wins, which is fine since both are
+  // "the stream's title/category" from the streamer's point of view.
+  useEffect(() => {
+    if (!twitch) return;
+    invoke("overlay_publish_data", { key: "stream_title", value: twitch.title }).catch(() => {});
+    invoke("overlay_publish_data", { key: "stream_category", value: twitch.game_name }).catch(() => {});
+  }, [twitch]);
+
   const updateTwitch = useCallback(
     async (patch: { title?: string; game_name?: string; tags?: string[] }) => {
       setTwitchSaving(true);
@@ -63,6 +73,13 @@ export function useKickChannelInfo() {
   useEffect(() => {
     loadKick();
   }, [loadKick]);
+
+  // Feeds the Overlay Maker's live-data-bound fields, same as Twitch's load above.
+  useEffect(() => {
+    if (!kick) return;
+    if (kick.stream_title) invoke("overlay_publish_data", { key: "stream_title", value: kick.stream_title }).catch(() => {});
+    if (kick.category?.name) invoke("overlay_publish_data", { key: "stream_category", value: kick.category.name }).catch(() => {});
+  }, [kick]);
 
   const updateKick = useCallback(
     async (patch: { title?: string; category_name?: string }) => {

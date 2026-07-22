@@ -2600,6 +2600,7 @@ pub fn run() {
             overlay_manager::overlay_remove_custom,
             overlay_manager::alerts_broadcast_to_overlay,
             overlay_manager::overlay_publish_data,
+            overlay_manager::overlay_list_data_keys,
             overlay_manager::overlay_preview_template,
             overlay_manager::overlay_create_from_template,
             overlay_manager::overlay_get_template_params,

@@ -90,15 +90,37 @@ export const TEMPLATES: TemplateDef[] = [
   },
 ];
 
-/** Live values other StreamerSuite tools publish via overlay_publish_data. */
-export const LIVE_SOURCES: { value: string; label: string }[] = [
+/**
+ * Live values StreamerSuite tools publish via overlay_publish_data, shown
+ * with a friendly label whether or not that tool has actually published
+ * yet this session (a Goal Bar should be buildable before Stream Stats has
+ * ever run). Any OTHER key a tool publishes — including a future tool this
+ * list has never heard of — still shows up too: see useLiveSources, which
+ * merges this list with whatever overlay_list_data_keys() reports live and
+ * humanizes any key not named here. Adding a source here is a labeling
+ * nicety, not a requirement for it to be usable.
+ */
+export const KNOWN_LIVE_SOURCES: { value: string; label: string }[] = [
   { value: "", label: "Static text" },
   { value: "viewers", label: "Viewers (Stream Stats)" },
   { value: "followers", label: "Followers (Stream Stats)" },
   { value: "subscribers", label: "Subscribers (Stream Stats)" },
   { value: "uptime", label: "Stream Uptime (Stream Stats)" },
   { value: "timer", label: "Timer (Stream Timer)" },
+  { value: "scene", label: "Current Scene (Scene Switcher)" },
+  { value: "latest_chat", label: "Latest Chat Message (Multi-Chat)" },
+  { value: "now_playing_sound", label: "Now Playing Sound (Sound Board)" },
+  { value: "stream_title", label: "Stream Title (Stream Manager)" },
+  { value: "stream_category", label: "Stream Category (Stream Manager)" },
+  { value: "latest_alert", label: "Latest Alert (Alerts Hub)" },
 ];
+
+/** Turns an unrecognized published key like "chat_count" into "Chat Count" for display. */
+export function humanizeSourceKey(key: string): string {
+  return key
+    .replace(/[_-]/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export interface BoundField {
   text: string;

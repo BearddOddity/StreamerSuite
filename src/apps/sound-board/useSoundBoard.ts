@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { HOTKEY_POOL, PAD_COLORS, type SoundPad } from "./types";
 
 const PADS_KEY = "streamersuite-soundboard-pads";
@@ -87,10 +87,15 @@ export function useSoundBoard() {
         audio = new Audio(convertFileSrc(pad.filePath));
         audioPool.current.set(pad.id, audio);
         audio.addEventListener("error", () => setBrokenPads((prev) => new Set(prev).add(pad.id)));
+        // Feeds the Overlay Maker's live-data-bound fields (see
+        // overlay_manager.rs's /data-ws) — cleared once this specific pad's
+        // playback actually ends, not the 300ms UI pulse below.
+        audio.addEventListener("ended", () => invoke("overlay_publish_data", { key: "now_playing_sound", value: "" }).catch(() => {}));
       }
       audio.currentTime = 0;
       audio.volume = Math.max(0, Math.min(1, (masterVolume / 100) * (pad.volume / 100)));
       audio.play().catch(() => setBrokenPads((prev) => new Set(prev).add(pad.id)));
+      invoke("overlay_publish_data", { key: "now_playing_sound", value: pad.name }).catch(() => {});
       setBrokenPads((prev) => {
         if (!prev.has(pad.id)) return prev;
         const next = new Set(prev);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { MeldClient } from "./meldClient";
 import type { MeldConnectionStatus, MeldScene, MeldTrack } from "./types";
 
@@ -92,6 +93,14 @@ export function useMeldConnection() {
     return cancel;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Feeds the Overlay Maker's live-data-bound fields (see overlay_manager.rs's
+  // /data-ws) so a "Now Playing" style overlay can show the current scene.
+  useEffect(() => {
+    const current = scenes.find((s) => s.current);
+    if (!current) return;
+    tauriInvoke("overlay_publish_data", { key: "scene", value: current.name }).catch(() => {});
+  }, [scenes]);
 
   // Detect a dropped connection (Meld closed) and flip status back.
   useEffect(() => {

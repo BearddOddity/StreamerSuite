@@ -471,6 +471,12 @@ function addMessage(m) {
         });
       } else relay();
     }
+    // Feeds the Overlay Maker's live-data-bound fields (see overlay_manager.rs's
+    // /data-ws) — a separate, generic path from the overlay_broadcast relay
+    // above, which is specifically Multi-Chat's own dedicated chat overlay.
+    if (!isOverlay && !m.event && !m.system && tauriInvoke && m.text) {
+      tauriInvoke("overlay_publish_data", { key: "latest_chat", value: `${m.user}: ${m.text}` }).catch(() => {});
+    }
   };
   // Hold the message off-screen briefly so it never visually pops in from
   // initials to a photo — same idea as the overlay relay delay, but for the

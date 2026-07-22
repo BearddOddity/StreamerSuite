@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { DEFAULT_TEMPLATE_PARAMS, LIVE_SOURCES, TEMPLATES, type BoundField, type TemplateParams } from "./types";
+import { DEFAULT_TEMPLATE_PARAMS, TEMPLATES, type BoundField, type TemplateParams } from "./types";
+import { useLiveSources } from "./useLiveSources";
 
 const FONT_PRESETS = ["", "Bebas Neue", "Anton", "Oswald", "Bungee", "Press Start 2P", "Poppins"];
 
@@ -9,12 +10,14 @@ function FieldRow({
   field,
   onChange,
   sourceOnly,
+  sources,
 }: {
   label: string;
   field: BoundField;
   onChange: (field: BoundField) => void;
   /** Goal Bar's "current value" field — only the live source matters, there's no visible text. */
   sourceOnly?: boolean;
+  sources: { value: string; label: string }[];
 }) {
   return (
     <div className="space-y-1.5">
@@ -33,7 +36,7 @@ function FieldRow({
           onChange={(e) => onChange({ ...field, source: e.target.value })}
           className={`select-glass text-[11px] shrink-0 ${sourceOnly ? "flex-1" : "w-44"}`}
         >
-          {LIVE_SOURCES.map((s) => (
+          {sources.map((s) => (
             <option key={s.value} value={s.value}>
               {s.label}
             </option>
@@ -67,6 +70,7 @@ export default function OverlayMaker({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const template = TEMPLATES.find((t) => t.id === params.template)!;
+  const liveSources = useLiveSources();
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -165,6 +169,7 @@ export default function OverlayMaker({
               label={template.id === "goal-bar" ? "Label" : template.id === "cam-frame" ? "Corner Label (optional)" : "Title"}
               field={params.title}
               onChange={(f) => set("title", f)}
+              sources={liveSources}
             />
             {template.id !== "cam-frame" && (
               <FieldRow
@@ -172,6 +177,7 @@ export default function OverlayMaker({
                 field={params.subtitle}
                 onChange={(f) => set("subtitle", f)}
                 sourceOnly={template.id === "goal-bar"}
+                sources={liveSources}
               />
             )}
 

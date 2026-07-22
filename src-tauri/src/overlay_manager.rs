@@ -123,6 +123,16 @@ pub(crate) fn overlay_publish_data(key: String, value: serde_json::Value) {
     crate::server::publish_overlay_data(key, value);
 }
 
+/// Every live-data key any tool has published so far this session — lets
+/// the Overlay Maker's "bind to a live source" dropdown discover sources
+/// from tools it doesn't know about in advance (see types.ts's
+/// `KNOWN_LIVE_SOURCES` for the small set of sources it also always shows,
+/// with a friendly label, whether or not they've published yet).
+#[tauri::command]
+pub(crate) fn overlay_list_data_keys() -> Vec<String> {
+    crate::server::overlay_data_keys()
+}
+
 // --- Overlay Maker: template-based overlay generation ---
 
 /// A field that's either static text or bound to a live value another tool

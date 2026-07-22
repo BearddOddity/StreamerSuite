@@ -48,6 +48,10 @@ export function useAlertsFeed(settings: AlertsSettings) {
     // Fan out to the /alerts-ws overlay (Overlay Library) too, so an OBS/Meld
     // browser source shows the same alert — a no-op if nothing's connected.
     invoke("alerts_broadcast_to_overlay", { event: alert }).catch(() => {});
+    // Also feeds the Overlay Maker's live-data-bound fields (a separate,
+    // generic "current value" path from the dedicated alerts-ws stream
+    // above) so e.g. a lower-third can show "Latest: X just followed!".
+    invoke("overlay_publish_data", { key: "latest_alert", value: `${alert.user} ${alert.message}` }).catch(() => {});
   }, []);
 
   const refreshTwitchAccount = useCallback(async () => {
