@@ -144,7 +144,22 @@ export function saveThemePrefs(prefs: ThemePrefs) {
     fontWeight: String(prefs.fontWeight),
   };
   const next = { ...unified, theme: nextTheme };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch (err) {
+    // Same failure mode as SharedSettingsContext's persist effect: an
+    // oversized bgImage data URI can blow the localStorage quota. Drop it
+    // and retry once so the rest of the theme still saves.
+    console.error("Failed to persist theme prefs, retrying without background image:", err);
+    if (nextTheme.bgImage) {
+      const fallback = { ...unified, theme: { ...nextTheme, bgImage: "" } };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback));
+      } catch {
+        /* give up — nothing more we can safely drop */
+      }
+    }
+  }
   window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
 }
 
