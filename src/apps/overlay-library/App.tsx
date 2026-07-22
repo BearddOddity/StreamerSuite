@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useOverlays } from "./useOverlays";
 import OverlayMaker from "./OverlayMaker";
 import type { TemplateParams } from "./types";
+import "../../design-system/styles.css";
+import { Button, Card, SectionHead, Badge } from "../../design-system/components/core";
 
 function OverlayPreview({ url }: { url: string }) {
   return (
@@ -38,19 +40,22 @@ export default function OverlayLibraryApp() {
     <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
       <div className="max-w-2xl mx-auto w-full">
         <div className="mb-6">
-          <h2 className="text-[18px] font-bold text-white/90">Overlay Library</h2>
-          <p className="text-[11px] text-white/30 mt-0.5">
-            Copy a URL below and paste it into an OBS/Meld Browser Source
-          </p>
+          <SectionHead
+            icon="🖼️"
+            title="Overlay Library"
+            desc="Copy a URL below and paste it into an OBS/Meld Browser Source"
+          />
         </div>
 
         {(error || loadError) && (
-          <div className="surface-glass p-3 mb-4">
-            <p className="text-[11px] text-red-400/70">{error || loadError}</p>
-          </div>
+          <Card padding={12} className="mb-4">
+            <p className="text-[11px]" style={{ color: "var(--bd-red-text)" }}>
+              {error || loadError}
+            </p>
+          </Card>
         )}
 
-        <section className="card-glass p-5 mb-4">
+        <Card padding={20} className="mb-4">
           <h3 className="text-[13px] font-semibold text-white/80 mb-3">Built-in</h3>
           {builtin.length === 0 ? (
             <p className="text-[11px] text-white/25">No built-in overlays found.</p>
@@ -61,32 +66,29 @@ export default function OverlayLibraryApp() {
                   <OverlayPreview url={builtinUrl(o.file)} />
                   <span className="text-[12px] text-white/70 flex-1 capitalize">{o.name}</span>
                   {o.file === "alerts-overlay.html" && (
-                    <button onClick={sendTestAlert} className="text-[10px] text-amber-300/80 hover:text-amber-200 px-2 py-1 rounded-lg border border-amber-500/20">
+                    <Button variant="ghost" size="sm" onClick={sendTestAlert}>
                       Send Test Alert
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    onClick={() => copyUrl(builtinUrl(o.file), o.file)}
-                    className="text-[11px] px-3 py-1.5 rounded-lg bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 transition-all"
-                  >
+                  <Button variant={copied === o.file ? "success" : "primary"} size="sm" onClick={() => copyUrl(builtinUrl(o.file), o.file)}>
                     {copied === o.file ? "Copied ✓" : "Copy URL"}
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
           )}
-        </section>
+        </Card>
 
-        <section className="card-glass p-5">
+        <Card padding={20}>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-[13px] font-semibold text-white/80">Custom</h3>
             <div className="flex gap-2">
-              <button onClick={() => setMaker({ mode: "create" })} className="text-[11px] px-3 py-1.5 rounded-lg bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 transition-all">
+              <Button variant="cta" size="sm" onClick={() => setMaker({ mode: "create" })}>
                 🎨 Build Overlay
-              </button>
-              <button onClick={addCustom} className="text-[11px] px-3 py-1.5 rounded-lg btn-ghost">
+              </Button>
+              <Button variant="ghost" size="sm" onClick={addCustom}>
                 + Add Overlay
-              </button>
+              </Button>
             </div>
           </div>
           {custom.length === 0 ? (
@@ -99,30 +101,20 @@ export default function OverlayLibraryApp() {
                 <div key={o.file} className="flex items-center gap-3 bg-white/[0.02] rounded-xl px-3 py-2">
                   <OverlayPreview url={customUrl(o.file)} />
                   <span className="text-[12px] text-white/70 flex-1 capitalize">{o.name}</span>
+                  {o.editable && <Badge variant="purple">Maker</Badge>}
                   {o.editable && (
                     <>
-                      <button
-                        onClick={() => openWithSavedParams(o.file, "edit")}
-                        className="text-[11px] text-white/40 hover:text-white/70 px-2"
-                        title="Edit"
-                      >
-                        ✏️
-                      </button>
-                      <button
-                        onClick={() => openWithSavedParams(o.file, "create")}
-                        className="text-[11px] text-white/40 hover:text-white/70 px-2"
-                        title="Duplicate as a new variant"
-                      >
-                        ⎘
-                      </button>
+                      <Button variant="ghost" size="sm" onClick={() => openWithSavedParams(o.file, "edit")}>
+                        ✏️ Edit
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => openWithSavedParams(o.file, "create")}>
+                        ⎘ Duplicate
+                      </Button>
                     </>
                   )}
-                  <button
-                    onClick={() => copyUrl(customUrl(o.file), o.file)}
-                    className="text-[11px] px-3 py-1.5 rounded-lg bg-green-500/15 text-green-300 border border-green-500/25 hover:bg-green-500/25 transition-all"
-                  >
+                  <Button variant={copied === o.file ? "success" : "primary"} size="sm" onClick={() => copyUrl(customUrl(o.file), o.file)}>
                     {copied === o.file ? "Copied ✓" : "Copy URL"}
-                  </button>
+                  </Button>
                   <button onClick={() => removeCustom(o.file)} className="text-[11px] text-white/25 hover:text-red-400 px-2">
                     ✕
                   </button>
@@ -130,7 +122,7 @@ export default function OverlayLibraryApp() {
               ))}
             </div>
           )}
-        </section>
+        </Card>
       </div>
 
       {maker && (

@@ -1,11 +1,11 @@
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 export interface CardProps {
   children: ReactNode;
   /** Inner padding in px. Default 20. */
   padding?: number;
   className?: string;
-  onClick?: () => void;
+  onClick?: (e: MouseEvent<HTMLDivElement>) => void;
 }
 
 /** Card — the glassmorphism surface shell (blurred black-alpha fill, hairline

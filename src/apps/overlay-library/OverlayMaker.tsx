@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DEFAULT_TEMPLATE_PARAMS, TEMPLATES, type BoundField, type TemplateParams } from "./types";
 import { useLiveSources } from "./useLiveSources";
+import { Button, Card, SectionHead } from "../../design-system/components/core";
 
 const FONT_PRESETS = ["", "Bebas Neue", "Anton", "Oswald", "Bungee", "Press Start 2P", "Poppins"];
 
@@ -119,26 +120,30 @@ export default function OverlayMaker({
     }
   };
 
-  const title =
-    mode === "edit" ? "✏️ Edit Overlay" : initialParams ? "⎘ Duplicate Overlay" : "🎨 Build an Overlay";
+  const icon = mode === "edit" ? "✏️" : initialParams ? "⎘" : "🎨";
+  const title = mode === "edit" ? "Edit Overlay" : initialParams ? "Duplicate Overlay" : "Build an Overlay";
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={onClose}>
-      <div
-        className="card-glass w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[15px] font-bold text-white/90">{title}</h3>
-          <button onClick={onClose} className="text-white/30 hover:text-white/60 text-[13px]">
-            ✕
-          </button>
+      <Card padding={24} className="w-full max-w-4xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4">
+          <SectionHead
+            icon={icon}
+            title={title}
+            right={
+              <Button variant="ghost" size="sm" onClick={onClose}>
+                ✕
+              </Button>
+            }
+          />
         </div>
 
         {error && (
-          <div className="surface-glass p-2.5 mb-3">
-            <p className="text-[11px] text-red-400/70">{error}</p>
-          </div>
+          <Card padding={10} className="mb-3">
+            <p className="text-[11px]" style={{ color: "var(--bd-red-text)" }}>
+              {error}
+            </p>
+          </Card>
         )}
 
         <div className="grid grid-cols-2 gap-6">
@@ -356,18 +361,14 @@ export default function OverlayMaker({
         </div>
 
         <div className="flex justify-end gap-2 mt-6">
-          <button onClick={onClose} className="btn-ghost text-[12px] px-4 py-2">
+          <Button variant="ghost" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            onClick={save}
-            disabled={saving}
-            className="text-[12px] px-4 py-2 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 hover:bg-purple-500/30 transition-all disabled:opacity-50"
-          >
+          </Button>
+          <Button variant="cta" onClick={save} disabled={saving}>
             {saving ? "Saving…" : mode === "edit" ? "Save Changes" : "Save Overlay"}
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }
