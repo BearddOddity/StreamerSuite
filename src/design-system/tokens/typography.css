@@ -1,0 +1,48 @@
+/* ============================================================================
+   TYPOGRAPHY — BearddOddity Design System
+   ----------------------------------------------------------------------------
+   The streamer tools render UI chrome in the native system stack for a true
+   "desktop app" feel; PanelForge uses Inter. Both share JetBrains Mono for
+   data/metadata rows. Type runs SMALL and dense (10–13px chrome) with heavy
+   use of uppercase micro-labels at wide tracking.
+   ============================================================================ */
+
+:root {
+  /* ── Families ────────────────────────────────────────────────────────── */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, sans-serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+    Consolas, monospace;
+  --font-heading: "Montserrat", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* website/web-app display font — headlines, nav wordmarks, hero type. Additive: does
+       not replace --font-ui (app chrome) or --font-sans (Inter, PanelForge body). */
+
+  /* ── Sizes (px — the real chrome scale) ──────────────────────────────── */
+  --fs-micro: 10px;    /* uppercase data labels, badges */
+  --fs-mini: 11px;     /* section descriptions, small buttons */
+  --fs-xs: 12px;       /* buttons, values, dense body */
+  --fs-sm: 13px;       /* default body / nav */
+  --fs-base: 16px;     /* 1rem root */
+  --fs-lg: 20px;
+  --fs-xl: 28px;
+  --fs-2xl: 40px;      /* hero / display */
+  --fs-3xl: 56px;
+
+  /* ── Weights ─────────────────────────────────────────────────────────── */
+  --fw-regular: 400; /* @kind font */
+  --fw-medium: 500; /* @kind font */
+  --fw-semibold: 600; /* @kind font */
+  --fw-bold: 700; /* @kind font */
+
+  /* ── Line heights ────────────────────────────────────────────────────── */
+  --lh-tight: 1.2; /* @kind font */
+  --lh-snug: 1.3; /* @kind font */
+  --lh-normal: 1.5; /* @kind font */
+
+  /* ── Tracking ────────────────────────────────────────────────────────── */
+  --tracking-tight: -0.01em;
+  --tracking-normal: 0.01em;
+  --tracking-wide: 0.04em;      /* badges */
+  --tracking-wider: 0.06em;     /* uppercase micro-labels */
+}

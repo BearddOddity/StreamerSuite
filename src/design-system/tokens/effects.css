@@ -1,0 +1,110 @@
+/* ============================================================================
+   EFFECTS — BearddOddity Design System
+   ----------------------------------------------------------------------------
+   The signature look is glassmorphism: black-alpha fills + backdrop-blur +
+   a 1px white top-inset highlight, layered shadows, and accent glows on
+   hover/focus. Motion is quick and eased (0.2s), with slide-in for toasts
+   and subtle "breathe"/"glint" loops on cover art.
+   ============================================================================ */
+
+:root {
+  /* ── Backdrop blur ───────────────────────────────────────────────────── */
+  --blur-sm: blur(6px); /* @kind other */
+  --blur-md: blur(10px); /* @kind other */
+  --blur-lg: blur(16px); /* @kind other */
+  --blur-xl: blur(20px) saturate(140%); /* @kind other */ /* PanelForge glass */
+
+  /* ── Shadows (elevation) ─────────────────────────────────────────────── */
+  --shadow-1: 0 4px 16px rgba(0, 0, 0, 0.20);
+  --shadow-2: 0 8px 32px rgba(0, 0, 0, 0.30);
+  --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.40);
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.50), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-menu: 0 12px 40px rgba(0, 0, 0, 0.60), 0 0 0 1px rgba(0, 0, 0, 0.30);
+
+  /* The white top-highlight that sells the "glass" edge */
+  --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  /* ── Accent glows ────────────────────────────────────────────────────── */
+  --glow-accent: 0 0 20px rgba(145, 70, 255, 0.15);
+  --glow-accent-strong: 0 0 0 3px rgba(145, 70, 255, 0.10);   /* focus ring */
+  --glow-cta: 0 4px 12px rgba(145, 70, 255, 0.15);
+  --glow-cta-hover: 0 6px 20px rgba(145, 70, 255, 0.25);
+
+  /* ── Motion ──────────────────────────────────────────────────────────── */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); /* @kind other */ /* float-card-in */
+  --dur-fast: 0.15s; /* @kind other */
+  --dur-base: 0.2s; /* @kind other */
+  --dur-slow: 0.3s; /* @kind other */
+  --transition-glass: border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease; /* @kind other */
+}
+
+/* ── Reusable glass surface classes (mirror the source utilities) ──────── */
+.bd-glass {
+  background: var(--surface-glass);
+  backdrop-filter: var(--blur-lg);
+  -webkit-backdrop-filter: var(--blur-lg);
+  border: 1px solid var(--line-3);
+  box-shadow: var(--shadow-2), var(--inset-highlight);
+}
+.bd-card {
+  background: var(--surface-card);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-card);
+  transition: var(--transition-glass);
+}
+.bd-card:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-card-hover);
+}
+
+@keyframes bd-slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes bd-cover-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.015); }
+}
+@keyframes bd-glint {
+  0%   { transform: translateX(-120%) skewX(-20deg); opacity: 0; }
+  40%  { opacity: 0.5; }
+  100% { transform: translateX(220%) skewX(-20deg); opacity: 0; }
+}
+@keyframes bd-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes bd-pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 var(--bd-pulse-color, rgba(74,222,128,0.45)); }
+  50%      { box-shadow: 0 0 0 6px transparent; }
+}
+
+/* ── Reusable motion utilities (breathe / glint / shimmer / pulse) ──────── */
+.bd-anim-breathe { animation: bd-cover-breathe 3s ease-in-out infinite; }
+.bd-anim-pulse   { animation: bd-pulse-glow 1.8s ease-in-out infinite; }
+/* Glint: wrap the art in this class (position:relative + overflow:hidden), the
+   sweep is drawn as a ::after so it never affects layout or hit-testing. */
+.bd-glint-overlay { position: relative; overflow: hidden; }
+.bd-glint-overlay::after {
+  content: ""; position: absolute; inset: 0; width: 40%; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.16), transparent);
+  animation: bd-glint 3.2s ease-in-out infinite;
+}
+.bd-shimmer-bg {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 37%, rgba(255,255,255,0.03) 63%);
+  background-size: 400% 100%; animation: bd-shimmer 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
