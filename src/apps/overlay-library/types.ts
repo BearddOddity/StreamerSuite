@@ -1,9 +1,11 @@
 export interface OverlayEntry {
   file: string;
   name: string;
+  /** True when this overlay was built with the Maker (has saved settings to reload for edit/duplicate). */
+  editable: boolean;
 }
 
-export type OverlayTemplateId = "lower-third" | "corner-badge" | "ticker" | "text-box";
+export type OverlayTemplateId = "lower-third" | "corner-badge" | "ticker" | "text-box" | "goal-bar" | "cam-frame";
 
 export interface TemplateDef {
   id: OverlayTemplateId;
@@ -12,6 +14,7 @@ export interface TemplateDef {
   description: string;
   positions: { value: string; label: string }[];
   hasSpeed?: boolean;
+  hasGoal?: boolean;
 }
 
 export const TEMPLATES: TemplateDef[] = [
@@ -30,7 +33,7 @@ export const TEMPLATES: TemplateDef[] = [
     id: "corner-badge",
     label: "Corner Badge",
     icon: "◆",
-    description: "Small pill badge, e.g. a follow goal or now-playing tag",
+    description: "Small pill badge, e.g. a now-playing tag",
     positions: [
       { value: "top-left", label: "Top Left" },
       { value: "top-right", label: "Top Right" },
@@ -56,6 +59,29 @@ export const TEMPLATES: TemplateDef[] = [
     description: "Static centered or corner panel, e.g. a BRB screen",
     positions: [
       { value: "center", label: "Center" },
+      { value: "top-left", label: "Top Left" },
+      { value: "top-right", label: "Top Right" },
+      { value: "bottom-left", label: "Bottom Left" },
+      { value: "bottom-right", label: "Bottom Right" },
+    ],
+  },
+  {
+    id: "goal-bar",
+    label: "Goal Bar",
+    icon: "▮",
+    description: "Progress bar toward a follower/sub goal, driven by a live source",
+    positions: [
+      { value: "bottom", label: "Bottom" },
+      { value: "top", label: "Top" },
+    ],
+    hasGoal: true,
+  },
+  {
+    id: "cam-frame",
+    label: "Webcam Frame",
+    icon: "▢",
+    description: "Decorative border around the canvas with an optional corner label",
+    positions: [
       { value: "top-left", label: "Top Left" },
       { value: "top-right", label: "Top Right" },
       { value: "bottom-left", label: "Bottom Left" },
@@ -92,6 +118,9 @@ export interface TemplateParams {
   fontFamily: string;
   borderRadius: "sharp" | "soft" | "rounded";
   animationsEnabled: boolean;
+  goal: number | null;
+  textShadow: boolean;
+  textStroke: boolean;
 }
 
 export const DEFAULT_TEMPLATE_PARAMS: TemplateParams = {
@@ -107,4 +136,7 @@ export const DEFAULT_TEMPLATE_PARAMS: TemplateParams = {
   fontFamily: "",
   borderRadius: "rounded",
   animationsEnabled: true,
+  goal: 1000,
+  textShadow: false,
+  textStroke: false,
 };

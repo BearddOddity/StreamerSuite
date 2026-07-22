@@ -8,25 +8,30 @@ function FieldRow({
   label,
   field,
   onChange,
+  sourceOnly,
 }: {
   label: string;
   field: BoundField;
   onChange: (field: BoundField) => void;
+  /** Goal Bar's "current value" field — only the live source matters, there's no visible text. */
+  sourceOnly?: boolean;
 }) {
   return (
     <div className="space-y-1.5">
       <label className="text-[10px] text-white/40 uppercase tracking-wide">{label}</label>
       <div className="flex gap-2">
-        <input
-          value={field.text}
-          onChange={(e) => onChange({ ...field, text: e.target.value })}
-          placeholder={field.source ? "Label prefix (optional)" : "Text"}
-          className="flex-1 min-w-0 input-glass text-[12px]"
-        />
+        {!sourceOnly && (
+          <input
+            value={field.text}
+            onChange={(e) => onChange({ ...field, text: e.target.value })}
+            placeholder={field.source ? "Label prefix (optional)" : "Text"}
+            className="flex-1 min-w-0 input-glass text-[12px]"
+          />
+        )}
         <select
           value={field.source}
           onChange={(e) => onChange({ ...field, source: e.target.value })}
-          className="select-glass text-[11px] w-44 shrink-0"
+          className={`select-glass text-[11px] shrink-0 ${sourceOnly ? "flex-1" : "w-44"}`}
         >
           {LIVE_SOURCES.map((s) => (
             <option key={s.value} value={s.value}>
@@ -42,11 +47,20 @@ function FieldRow({
 export default function OverlayMaker({
   onSaved,
   onClose,
+  mode = "create",
+  editFile,
+  initialParams,
 }: {
   onSaved: () => void;
   onClose: () => void;
+  /** "edit" overwrites editFile in place; "create" always writes a new, uniquely-named
+   *  file — used both for a from-scratch overlay and for "Duplicate" (same initialParams,
+   *  no editFile), so a duplicate can never collide with or modify the overlay it came from. */
+  mode?: "create" | "edit";
+  editFile?: string;
+  initialParams?: TemplateParams;
 }) {
-  const [params, setParams] = useState<TemplateParams>(DEFAULT_TEMPLATE_PARAMS);
+  const [params, setParams] = useState<TemplateParams>(initialParams ?? DEFAULT_TEMPLATE_PARAMS);
   const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -82,7 +96,17 @@ export default function OverlayMaker({
   const save = async () => {
     setSaving(true);
     try {
-      await invoke("overlay_create_from_template", { params });
+      // "edit" targets editFile exactly — it can only ever overwrite the
+      // overlay it was opened from. Every other path (new overlay, or a
+      // "Duplicate" that pre-fills initialParams but keeps mode "create")
+      // asks the backend for a fresh, guaranteed-unique file name instead,
+      // so it's structurally impossible for this Save to touch any overlay
+      // other than the one it's explicitly targeting.
+      if (mode === "edit" && editFile) {
+        await invoke("overlay_update_template", { file: editFile, params });
+      } else {
+        await invoke("overlay_create_from_template", { params });
+      }
       onSaved();
     } catch (e) {
       setError(String(e));
@@ -91,6 +115,9 @@ export default function OverlayMaker({
     }
   };
 
+  const title =
+    mode === "edit" ? "✏️ Edit Overlay" : initialParams ? "⎘ Duplicate Overlay" : "🎨 Build an Overlay";
+
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={onClose}>
       <div
@@ -98,7 +125,7 @@ export default function OverlayMaker({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[15px] font-bold text-white/90">🎨 Build an Overlay</h3>
+          <h3 className="text-[15px] font-bold text-white/90">{title}</h3>
           <button onClick={onClose} className="text-white/30 hover:text-white/60 text-[13px]">
             ✕
           </button>
@@ -134,8 +161,19 @@ export default function OverlayMaker({
               </div>
             </div>
 
-            <FieldRow label="Title" field={params.title} onChange={(f) => set("title", f)} />
-            <FieldRow label="Subtitle" field={params.subtitle} onChange={(f) => set("subtitle", f)} />
+            <FieldRow
+              label={template.id === "goal-bar" ? "Label" : template.id === "cam-frame" ? "Corner Label (optional)" : "Title"}
+              field={params.title}
+              onChange={(f) => set("title", f)}
+            />
+            {template.id !== "cam-frame" && (
+              <FieldRow
+                label={template.id === "goal-bar" ? "Current Value" : "Subtitle"}
+                field={params.subtitle}
+                onChange={(f) => set("subtitle", f)}
+                sourceOnly={template.id === "goal-bar"}
+              />
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -163,6 +201,18 @@ export default function OverlayMaker({
                     max={120}
                     value={params.speedSeconds ?? 18}
                     onChange={(e) => set("speedSeconds", Number(e.target.value))}
+                    className="w-full input-glass text-[11px]"
+                  />
+                </div>
+              )}
+              {template.hasGoal && (
+                <div>
+                  <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">Goal</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={params.goal ?? 1000}
+                    onChange={(e) => set("goal", Number(e.target.value))}
                     className="w-full input-glass text-[11px]"
                   />
                 </div>
@@ -238,13 +288,31 @@ export default function OverlayMaker({
               </div>
             </div>
 
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] text-white/60">Entrance animation</label>
-              <input
-                type="checkbox"
-                checked={params.animationsEnabled}
-                onChange={(e) => set("animationsEnabled", e.target.checked)}
-              />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] text-white/60">Entrance animation</label>
+                <input
+                  type="checkbox"
+                  checked={params.animationsEnabled}
+                  onChange={(e) => set("animationsEnabled", e.target.checked)}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] text-white/60">Text drop shadow</label>
+                <input
+                  type="checkbox"
+                  checked={params.textShadow}
+                  onChange={(e) => set("textShadow", e.target.checked)}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] text-white/60">Text outline</label>
+                <input
+                  type="checkbox"
+                  checked={params.textStroke}
+                  onChange={(e) => set("textStroke", e.target.checked)}
+                />
+              </div>
             </div>
 
             <div>
@@ -290,7 +358,7 @@ export default function OverlayMaker({
             disabled={saving}
             className="text-[12px] px-4 py-2 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 hover:bg-purple-500/30 transition-all disabled:opacity-50"
           >
-            {saving ? "Saving…" : "Save Overlay"}
+            {saving ? "Saving…" : mode === "edit" ? "Save Changes" : "Save Overlay"}
           </button>
         </div>
       </div>

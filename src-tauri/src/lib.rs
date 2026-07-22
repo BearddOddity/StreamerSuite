@@ -2602,6 +2602,8 @@ pub fn run() {
             overlay_manager::overlay_publish_data,
             overlay_manager::overlay_preview_template,
             overlay_manager::overlay_create_from_template,
+            overlay_manager::overlay_get_template_params,
+            overlay_manager::overlay_update_template,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -12,6 +12,20 @@ use serde::Serialize;
 pub struct OverlayEntry {
     file: String,
     name: String,
+    /// True when a `<stem>.overlay.json` sidecar exists next to this file —
+    /// i.e. it was built with the Overlay Maker (not a raw upload) and its
+    /// settings can be reloaded into the Maker for editing/duplicating.
+    editable: bool,
+}
+
+/// The sidecar file a Maker-built overlay's settings are saved to, next to
+/// its rendered HTML. Kept as a fully separate file (not a shared index or
+/// database) so each overlay's settings are self-contained: editing one
+/// overlay only ever reads/writes that one overlay's own pair of files and
+/// can never touch another overlay's saved state.
+fn params_sidecar_path(dir: &std::path::Path, html_file: &str) -> std::path::PathBuf {
+    let stem = html_file.strip_suffix(".html").unwrap_or(html_file);
+    dir.join(format!("{stem}.overlay.json"))
 }
 
 fn custom_overlays_dir() -> Result<std::path::PathBuf, String> {
@@ -33,7 +47,7 @@ pub(crate) fn overlay_list_builtin() -> Result<Vec<OverlayEntry>, String> {
     for entry in read.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_string();
         if file_name.ends_with(".html") {
-            entries.push(OverlayEntry { name: humanize(&file_name), file: file_name });
+            entries.push(OverlayEntry { name: humanize(&file_name), file: file_name, editable: false });
         }
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -47,7 +61,11 @@ pub(crate) fn overlay_list_custom() -> Result<Vec<OverlayEntry>, String> {
     let read = std::fs::read_dir(&dir).map_err(|e| format!("couldn't read overlays/custom: {e}"))?;
     for entry in read.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_string();
-        entries.push(OverlayEntry { name: humanize(&file_name), file: file_name });
+        if file_name.ends_with(".overlay.json") {
+            continue; // a settings sidecar, not an overlay file itself
+        }
+        let editable = file_name.ends_with(".html") && params_sidecar_path(&dir, &file_name).exists();
+        entries.push(OverlayEntry { name: humanize(&file_name), file: file_name, editable });
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)
@@ -83,7 +101,10 @@ pub(crate) fn overlay_remove_custom(file: String) -> Result<(), String> {
     let dir = custom_overlays_dir()?;
     let path = dir.join(&file);
     crate::assert_path_in_base(&path, &dir)?;
-    std::fs::remove_file(&path).map_err(|e| format!("couldn't remove file: {e}"))
+    std::fs::remove_file(&path).map_err(|e| format!("couldn't remove file: {e}"))?;
+    // Best-effort — a plain uploaded file (not Maker-built) never had one.
+    let _ = std::fs::remove_file(params_sidecar_path(&dir, &file));
+    Ok(())
 }
 
 /// Forwards a live (or test) alert from Alerts Hub to every connected
@@ -109,7 +130,7 @@ pub(crate) fn overlay_publish_data(key: String, value: serde_json::Value) {
 /// the keys the frontend offers). `label` is shown as a prefix — e.g. text
 /// "Followers" bound to `followers` renders as "Followers 1,234" and stays
 /// current as Stream Stats republishes it.
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
 pub(crate) struct BoundField {
     #[serde(default)]
     text: String,
@@ -117,7 +138,8 @@ pub(crate) struct BoundField {
     source: String,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct TemplateParams {
     template: String,
     #[serde(default)]
@@ -145,6 +167,14 @@ pub(crate) struct TemplateParams {
     border_radius: String,
     #[serde(default = "default_true")]
     animations_enabled: bool,
+    /// Goal Bar only — the target number the bound value is measured
+    /// against (e.g. a follower goal of 1000).
+    #[serde(default)]
+    goal: Option<f64>,
+    #[serde(default)]
+    text_shadow: bool,
+    #[serde(default)]
+    text_stroke: bool,
 }
 
 fn default_text_color() -> String {
@@ -261,6 +291,15 @@ const DATA_BIND_SCRIPT: &str = r#"<script>
     document.querySelectorAll("[data-bind]").forEach(function(el) {
       var key = el.getAttribute("data-bind");
       el.textContent = fmt(key, data[key]);
+    });
+    // Goal Bar's fill — width is a percentage of the value against a fixed
+    // goal baked in at save time, not something the server computes.
+    document.querySelectorAll("[data-bind-width]").forEach(function(el) {
+      var key = el.getAttribute("data-bind-width");
+      var goal = Number(el.getAttribute("data-goal")) || 0;
+      var value = Number(data[key]) || 0;
+      var pct = goal > 0 ? Math.max(0, Math.min(100, (value / goal) * 100)) : 0;
+      el.style.width = pct + "%";
     });
   }
   function connect() {
@@ -416,6 +455,70 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                 ),
             )
         }
+        "goal-bar" => {
+            let place_css = match params.position.as_str() {
+                "top" => "top: 40px; left: 50%; transform: translateX(-50%);",
+                _ => "bottom: 40px; left: 50%; transform: translateX(-50%);",
+            };
+            let goal_num = params.goal.filter(|g| *g > 0.0).unwrap_or(100.0);
+            let goal = if goal_num.fract() == 0.0 {
+                format!("{goal_num:.0}")
+            } else {
+                format!("{goal_num}")
+            };
+            let source = params.subtitle.source.trim();
+            let (current_html, fill_attrs) = if source.is_empty() {
+                ("<span class=\"goal-current\">0</span>".to_string(), String::new())
+            } else {
+                let source = escape_html(source);
+                (
+                    format!(r#"<span class="goal-current" data-bind="{source}">0</span>"#),
+                    format!(r#" data-bind-width="{source}" data-goal="{goal}""#),
+                )
+            };
+            (
+                format!("position: fixed; {place_css}"),
+                format!(
+                    r#"<div id="card"><div class="goal-label">{title_html}</div><div class="goal-row">{current_html}<span class="goal-sep"> / </span><span class="goal-total">{goal}</span></div><div class="goal-track"><div class="goal-fill"{fill_attrs}></div></div></div>"#
+                ),
+                format!(
+                    "#card {{ display: flex; flex-direction: column; gap: 8px; padding: 16px 22px; min-width: 280px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; {card_animation} }}\n\
+                     .goal-label {{ font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: {text_color}; opacity: 0.8; }}\n\
+                     .goal-row {{ font-size: 24px; font-weight: 800; color: {text_color}; }}\n\
+                     .goal-sep {{ opacity: 0.5; font-weight: 500; }}\n\
+                     .goal-total {{ opacity: 0.7; }}\n\
+                     .goal-track {{ height: 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }}\n\
+                     .goal-fill {{ height: 100%; width: 0%; border-radius: 999px; background: {accent}; transition: width 0.6s ease; }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
+        "cam-frame" => {
+            let corner_css = match params.position.as_str() {
+                "top-left" => "top: 30px; left: 30px;",
+                "top-right" => "top: 30px; right: 30px;",
+                "bottom-right" => "bottom: 30px; right: 30px;",
+                _ => "bottom: 30px; left: 30px;",
+            };
+            let has_label = !params.title.text.trim().is_empty() || !params.title.source.trim().is_empty();
+            let badge_html = if has_label {
+                format!(r#"<div id="card">{logo_html}{title_html}</div>"#)
+            } else {
+                String::new()
+            };
+            (
+                format!("position: fixed; {corner_css}"),
+                format!(r#"<div id="frame"></div>{badge_html}"#),
+                format!(
+                    "#frame {{ position: fixed; inset: 6px; border: 6px solid {accent}; border-radius: {radius}; box-shadow: inset 0 0 24px {accent}66; pointer-events: none; }}\n\
+                     #card {{ display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 999px; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; {card_animation} }}\n\
+                     .title {{ font-size: 14px; font-weight: 800; color: {text_color}; }}\n\
+                     .subtitle {{ font-size: 11px; color: {text_color}; opacity: 0.75; }}\n\
+                     .logo {{ height: 24px; width: 24px; border-radius: 50%; object-fit: cover; }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
         other => return Err(format!("unknown template: {other}")),
     };
 
@@ -423,6 +526,21 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
         format!("<script>{TOKEN_FROM_PATH_JS}</script>{DATA_BIND_SCRIPT}")
     } else {
         String::new()
+    };
+
+    // Applied globally (harmless no-op for classes the current template
+    // doesn't use) rather than threaded through every template arm above.
+    let mut text_effects = String::new();
+    if params.text_shadow {
+        text_effects.push_str("text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), 0 0 16px rgba(0, 0, 0, 0.4);");
+    }
+    if params.text_stroke {
+        text_effects.push_str("-webkit-text-stroke: 1px rgba(0, 0, 0, 0.7);");
+    }
+    let text_effects_css = if text_effects.is_empty() {
+        String::new()
+    } else {
+        format!(".title, .subtitle, .goal-row, .goal-label {{ {text_effects} }}")
     };
 
     Ok(format!(
@@ -436,6 +554,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
   html, body {{ margin: 0; padding: 0; background: transparent; overflow: hidden; font-family: {font_css}; }}
   #card, #bar {{ {position_css} }}
   {extra_style}
+  {text_effects_css}
 </style>
 </head>
 <body>
@@ -483,6 +602,15 @@ fn unique_file_name(dir: &std::path::Path, slug: &str) -> String {
     candidate
 }
 
+fn write_params_sidecar(dir: &std::path::Path, html_file: &str, params: &TemplateParams) -> Result<(), String> {
+    let json = serde_json::to_string(params).map_err(|e| format!("couldn't serialize overlay settings: {e}"))?;
+    std::fs::write(params_sidecar_path(dir, html_file), json)
+        .map_err(|e| format!("couldn't write overlay settings: {e}"))
+}
+
+/// Creates a brand-new overlay file with a freshly allocated (guaranteed
+/// unique) name — never reuses or touches an existing file, so this can't
+/// collide with or overwrite another overlay no matter what title is typed.
 #[tauri::command]
 pub(crate) fn overlay_create_from_template(params: TemplateParams) -> Result<String, String> {
     let html = render_template(&params)?;
@@ -492,7 +620,50 @@ pub(crate) fn overlay_create_from_template(params: TemplateParams) -> Result<Str
     let dest = dir.join(&file_name);
     crate::assert_path_in_base(&dest, &dir)?;
     std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
+    write_params_sidecar(&dir, &file_name, &params)?;
     Ok(file_name)
+}
+
+/// Loads a Maker-built overlay's saved settings back for editing. Returns
+/// `Ok(None)` for a plain uploaded file (no sidecar) rather than an error —
+/// that's just "not editable", not a failure.
+#[tauri::command]
+pub(crate) fn overlay_get_template_params(file: String) -> Result<Option<TemplateParams>, String> {
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err("invalid file name".into());
+    }
+    let dir = custom_overlays_dir()?;
+    let sidecar = params_sidecar_path(&dir, &file);
+    crate::assert_path_in_base(&dir.join(&file), &dir)?;
+    if !sidecar.exists() {
+        return Ok(None);
+    }
+    let json = std::fs::read_to_string(&sidecar).map_err(|e| format!("couldn't read overlay settings: {e}"))?;
+    serde_json::from_str(&json)
+        .map(Some)
+        .map_err(|e| format!("couldn't parse overlay settings: {e}"))
+}
+
+/// Re-renders and overwrites one specific, already-existing overlay file —
+/// `file` is never re-derived from the title, so an edit always lands on
+/// exactly the file it was opened from and can never rename itself into (or
+/// collide with) a different overlay. To make a variant instead of
+/// overwriting the original, the frontend calls `overlay_create_from_template`
+/// with a loaded overlay's settings rather than this command.
+#[tauri::command]
+pub(crate) fn overlay_update_template(file: String, params: TemplateParams) -> Result<(), String> {
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err("invalid file name".into());
+    }
+    let dir = custom_overlays_dir()?;
+    let dest = dir.join(&file);
+    crate::assert_path_in_base(&dest, &dir)?;
+    if !dest.exists() {
+        return Err("overlay not found".into());
+    }
+    let html = render_template(&params)?;
+    std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
+    write_params_sidecar(&dir, &file, &params)
 }
 
 #[cfg(test)]
@@ -513,12 +684,15 @@ mod tests {
             font_family: String::new(),
             border_radius: default_border_radius(),
             animations_enabled: true,
+            goal: None,
+            text_shadow: false,
+            text_stroke: false,
         }
     }
 
     #[test]
     fn renders_all_templates_and_escapes_text() {
-        for t in ["lower-third", "corner-badge", "ticker", "text-box"] {
+        for t in ["lower-third", "corner-badge", "ticker", "text-box", "goal-bar", "cam-frame"] {
             let html = render_template(&params(t)).unwrap();
             assert!(html.contains("Hello &lt;World&gt;"), "template {t} should escape title text");
             assert!(!html.contains("Hello <World>"), "template {t} should not contain raw unescaped text");
@@ -623,5 +797,109 @@ mod tests {
         p.animations_enabled = false;
         let html = render_template(&p).unwrap();
         assert!(!html.contains("overlay-pop-in"));
+    }
+
+    #[test]
+    fn goal_bar_renders_fill_and_current_bound_to_source() {
+        let mut p = params("goal-bar");
+        p.goal = Some(1000.0);
+        p.subtitle = BoundField { text: String::new(), source: "followers".to_string() };
+        let html = render_template(&p).unwrap();
+        assert!(html.contains(r#"data-bind-width="followers""#));
+        assert!(html.contains(r#"data-goal="1000""#));
+        assert!(html.contains(r#"data-bind="followers""#));
+        assert!(html.contains(">1000</span>"), "should show the goal total as a whole number");
+    }
+
+    #[test]
+    fn goal_bar_without_binding_still_renders_safely() {
+        let mut p = params("goal-bar");
+        p.goal = None;
+        p.subtitle = BoundField::default();
+        let html = render_template(&p).unwrap();
+        assert!(!html.contains("data-bind-width"));
+        assert!(html.contains(">100</span>"), "should fall back to a default goal of 100");
+    }
+
+    #[test]
+    fn cam_frame_renders_border_and_hides_badge_without_a_label() {
+        let mut p = params("cam-frame");
+        p.title = BoundField::default();
+        let html = render_template(&p).unwrap();
+        assert!(html.contains("id=\"frame\""));
+        assert!(!html.contains("id=\"card\""), "no label text/binding means no badge");
+    }
+
+    #[test]
+    fn cam_frame_shows_badge_when_label_present() {
+        let p = params("cam-frame"); // default title text is "Hello <World>"
+        let html = render_template(&p).unwrap();
+        assert!(html.contains("id=\"card\""));
+    }
+
+    #[test]
+    fn text_shadow_and_stroke_are_opt_in() {
+        let mut p = params("lower-third");
+        let plain = render_template(&p).unwrap();
+        assert!(!plain.contains("text-shadow"));
+        assert!(!plain.contains("text-stroke"));
+
+        p.text_shadow = true;
+        p.text_stroke = true;
+        let styled = render_template(&p).unwrap();
+        assert!(styled.contains("text-shadow"));
+        assert!(styled.contains("-webkit-text-stroke"));
+    }
+
+    #[test]
+    fn create_then_load_then_update_round_trips_without_touching_other_overlays() {
+        let dir = std::env::temp_dir().join(format!("sf-overlay-roundtrip-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Two independent overlays, saved side by side.
+        let a = params("lower-third");
+        let html_a = render_template(&a).unwrap();
+        std::fs::write(dir.join("overlay-a.html"), &html_a).unwrap();
+        write_params_sidecar(&dir, "overlay-a.html", &a).unwrap();
+
+        let mut b = params("corner-badge");
+        b.title = BoundField { text: "Overlay B".to_string(), source: String::new() };
+        let html_b = render_template(&b).unwrap();
+        std::fs::write(dir.join("overlay-b.html"), &html_b).unwrap();
+        write_params_sidecar(&dir, "overlay-b.html", &b).unwrap();
+
+        // Loading A's sidecar back gives A's own settings, not B's.
+        let loaded_json = std::fs::read_to_string(params_sidecar_path(&dir, "overlay-a.html")).unwrap();
+        let loaded: TemplateParams = serde_json::from_str(&loaded_json).unwrap();
+        assert_eq!(loaded.template, "lower-third");
+
+        // "Editing" A (re-render + overwrite the sidecar for A specifically)
+        // must never touch B's files on disk.
+        let b_html_before = std::fs::read_to_string(dir.join("overlay-b.html")).unwrap();
+        let mut edited_a = loaded;
+        edited_a.text_color = "#00ff00".to_string();
+        let new_html_a = render_template(&edited_a).unwrap();
+        std::fs::write(dir.join("overlay-a.html"), &new_html_a).unwrap();
+        write_params_sidecar(&dir, "overlay-a.html", &edited_a).unwrap();
+
+        let b_html_after = std::fs::read_to_string(dir.join("overlay-b.html")).unwrap();
+        assert_eq!(b_html_before, b_html_after, "editing overlay A must not change overlay B's file");
+        assert!(new_html_a.contains("#00ff00"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn list_marks_maker_built_overlays_editable_and_uploads_not() {
+        let dir = std::env::temp_dir().join(format!("sf-overlay-editable-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("made.html"), "<html></html>").unwrap();
+        write_params_sidecar(&dir, "made.html", &params("lower-third")).unwrap();
+        std::fs::write(dir.join("uploaded.png"), [0u8; 4]).unwrap();
+
+        assert!(params_sidecar_path(&dir, "made.html").exists());
+        assert!(!params_sidecar_path(&dir, "uploaded.png").exists());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

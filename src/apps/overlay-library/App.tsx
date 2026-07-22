@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useOverlays } from "./useOverlays";
 import OverlayMaker from "./OverlayMaker";
+import type { TemplateParams } from "./types";
 
 function OverlayPreview({ url }: { url: string }) {
   return (
@@ -10,9 +12,27 @@ function OverlayPreview({ url }: { url: string }) {
   );
 }
 
+type MakerState = { mode: "create" | "edit"; editFile?: string; initialParams?: TemplateParams };
+
 export default function OverlayLibraryApp() {
   const { builtin, custom, error, copied, builtinUrl, customUrl, copyUrl, addCustom, removeCustom, sendTestAlert, refresh } = useOverlays();
-  const [makerOpen, setMakerOpen] = useState(false);
+  const [maker, setMaker] = useState<MakerState | null>(null);
+  const [loadError, setLoadError] = useState("");
+
+  // Loads a Maker-built overlay's own saved settings before opening it —
+  // each overlay's settings live only in its own sidecar file, so this
+  // always loads exactly the one overlay being edited/duplicated, never
+  // anything shared across overlays.
+  const openWithSavedParams = async (file: string, mode: "create" | "edit") => {
+    try {
+      const params = await invoke<TemplateParams | null>("overlay_get_template_params", { file });
+      if (!params) return;
+      setLoadError("");
+      setMaker(mode === "edit" ? { mode: "edit", editFile: file, initialParams: params } : { mode: "create", initialParams: params });
+    } catch (e) {
+      setLoadError(String(e));
+    }
+  };
 
   return (
     <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
@@ -24,9 +44,9 @@ export default function OverlayLibraryApp() {
           </p>
         </div>
 
-        {error && (
+        {(error || loadError) && (
           <div className="surface-glass p-3 mb-4">
-            <p className="text-[11px] text-red-400/70">{error}</p>
+            <p className="text-[11px] text-red-400/70">{error || loadError}</p>
           </div>
         )}
 
@@ -61,7 +81,7 @@ export default function OverlayLibraryApp() {
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-[13px] font-semibold text-white/80">Custom</h3>
             <div className="flex gap-2">
-              <button onClick={() => setMakerOpen(true)} className="text-[11px] px-3 py-1.5 rounded-lg bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 transition-all">
+              <button onClick={() => setMaker({ mode: "create" })} className="text-[11px] px-3 py-1.5 rounded-lg bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 transition-all">
                 🎨 Build Overlay
               </button>
               <button onClick={addCustom} className="text-[11px] px-3 py-1.5 rounded-lg btn-ghost">
@@ -79,6 +99,24 @@ export default function OverlayLibraryApp() {
                 <div key={o.file} className="flex items-center gap-3 bg-white/[0.02] rounded-xl px-3 py-2">
                   <OverlayPreview url={customUrl(o.file)} />
                   <span className="text-[12px] text-white/70 flex-1 capitalize">{o.name}</span>
+                  {o.editable && (
+                    <>
+                      <button
+                        onClick={() => openWithSavedParams(o.file, "edit")}
+                        className="text-[11px] text-white/40 hover:text-white/70 px-2"
+                        title="Edit"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => openWithSavedParams(o.file, "create")}
+                        className="text-[11px] text-white/40 hover:text-white/70 px-2"
+                        title="Duplicate as a new variant"
+                      >
+                        ⎘
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={() => copyUrl(customUrl(o.file), o.file)}
                     className="text-[11px] px-3 py-1.5 rounded-lg bg-green-500/15 text-green-300 border border-green-500/25 hover:bg-green-500/25 transition-all"
@@ -95,11 +133,14 @@ export default function OverlayLibraryApp() {
         </section>
       </div>
 
-      {makerOpen && (
+      {maker && (
         <OverlayMaker
-          onClose={() => setMakerOpen(false)}
+          mode={maker.mode}
+          editFile={maker.editFile}
+          initialParams={maker.initialParams}
+          onClose={() => setMaker(null)}
           onSaved={() => {
-            setMakerOpen(false);
+            setMaker(null);
             refresh();
           }}
         />
