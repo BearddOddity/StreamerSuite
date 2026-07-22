@@ -4,6 +4,8 @@ import { useAlertsSettings } from "./useAlertsSettings";
 import { useAlertsFeed } from "./useAlertsFeed";
 import { SettingsPanel } from "./SettingsPanel";
 import type { AlertEvent, AlertKind } from "./types";
+import "../../design-system/styles.css";
+import { Button, Card, SectionHead, StatusDot } from "../../design-system/components/core";
 
 const KIND_STYLE: Record<AlertKind, { icon: string; color: string }> = {
   follow: { icon: "💜", color: "border-purple-500/25 bg-purple-500/10" },
@@ -22,6 +24,14 @@ const TEST_EVENTS: Omit<AlertEvent, "id" | "timestamp">[] = [
   { platform: "joystick", kind: "tip", user: "BigFan", message: "sent a tip!", amount: "100" },
 ];
 
+/** Maps the feed's 4-state connection status onto StatusDot's 3 visual states —
+ *  "error" reads as "warn" since the shared dot has no red variant. */
+function toDotStatus(status: "disconnected" | "connecting" | "live" | "error"): "on" | "off" | "warn" {
+  if (status === "live") return "on";
+  if (status === "connecting" || status === "error") return "warn";
+  return "off";
+}
+
 export default function AlertsHubApp() {
   const { settings, update, toggle } = useAlertsSettings();
   const { alerts, push, clear, twitchAccount, refreshTwitchAccount, twitchStatus, kickStatus, joystickStatus } = useAlertsFeed(settings);
@@ -32,33 +42,28 @@ export default function AlertsHubApp() {
   return (
     <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
       <div className="max-w-2xl mx-auto w-full">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-[18px] font-bold text-white/90">Alerts & Events</h2>
-            <p className="text-[11px] text-white/30 mt-0.5">
-              {anyLive ? "🟢 Live — " : ""}Follows, subs, raids, cheers, and tips across Twitch, Kick, and Joystick.tv
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => update({ soundEnabled: !settings.soundEnabled })}
-              className="px-3 py-2 rounded-xl text-xs font-medium transition-all border bg-white/[0.04] text-white/50 border-white/[0.08]"
-            >
-              {settings.soundEnabled ? "🔊" : "🔇"}
-            </button>
-            <button
-              onClick={() => setShowSettings(true)}
-              className="px-4 py-2 rounded-xl text-xs font-semibold transition-all border bg-white/[0.04] text-white/60 border-white/[0.08] hover:bg-white/[0.08]"
-            >
-              ⚙ Settings
-            </button>
-          </div>
+        <div className="mb-6">
+          <SectionHead
+            icon="🔔"
+            title="Alerts & Events"
+            desc={`${anyLive ? "🟢 Live — " : ""}Follows, subs, raids, cheers, and tips across Twitch, Kick, and Joystick.tv`}
+            right={
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => update({ soundEnabled: !settings.soundEnabled })}>
+                  {settings.soundEnabled ? "🔊" : "🔇"}
+                </Button>
+                <Button variant="primary" size="sm" onClick={() => setShowSettings(true)}>
+                  ⚙ Settings
+                </Button>
+              </div>
+            }
+          />
         </div>
 
-        <div className="flex items-center gap-3 mb-6 text-[10px] text-white/30">
-          <span className="flex items-center gap-1"><PlatformIcon platform="twitch" size="xs" /> {twitchStatus}</span>
-          <span className="flex items-center gap-1"><PlatformIcon platform="kick" size="xs" /> {kickStatus}</span>
-          <span className="flex items-center gap-1"><PlatformIcon platform="joystick" size="xs" /> {joystickStatus}</span>
+        <div className="flex items-center gap-4 mb-6">
+          <span className="flex items-center gap-1.5"><PlatformIcon platform="twitch" size="xs" /><StatusDot status={toDotStatus(twitchStatus)} label={twitchStatus} /></span>
+          <span className="flex items-center gap-1.5"><PlatformIcon platform="kick" size="xs" /><StatusDot status={toDotStatus(kickStatus)} label={kickStatus} /></span>
+          <span className="flex items-center gap-1.5"><PlatformIcon platform="joystick" size="xs" /><StatusDot status={toDotStatus(joystickStatus)} label={joystickStatus} /></span>
         </div>
 
         {/* Quick trigger — local test alerts, doesn't touch any platform */}
@@ -73,17 +78,17 @@ export default function AlertsHubApp() {
             </button>
           ))}
           {alerts.length > 0 && (
-            <button onClick={clear} className="px-3 py-2 rounded-xl text-[11px] font-medium border border-white/[0.08] text-white/40 hover:text-white/70">
+            <Button variant="ghost" size="sm" onClick={clear}>
               Clear
-            </button>
+            </Button>
           )}
         </div>
 
         <div className="space-y-2">
           {alerts.length === 0 ? (
-            <div className="text-center py-12 text-white/20 text-sm">
+            <Card padding={24} className="text-center text-white/20 text-sm">
               No alerts yet. Connect a platform in Settings, or try a test alert above.
-            </div>
+            </Card>
           ) : (
             alerts.map((alert) => {
               const style = KIND_STYLE[alert.kind];
