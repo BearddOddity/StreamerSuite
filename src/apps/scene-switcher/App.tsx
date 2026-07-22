@@ -1,4 +1,6 @@
 import { useMeldConnection } from "./useMeldConnection";
+import "../../design-system/styles.css";
+import { Button, Card, SectionHead } from "../../design-system/components/core";
 
 const SCENE_COLORS = [
   "border-amber-500/25 bg-amber-500/10",
@@ -18,30 +20,27 @@ export default function SceneSwitcherApp() {
     <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
       <div className="max-w-2xl mx-auto w-full">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-[18px] font-bold text-white/90">Scene Switcher</h2>
-            <p className="text-[11px] text-white/30 mt-0.5">Control Meld Studio scenes remotely</p>
-          </div>
-          <button
-            onClick={connect}
-            disabled={status === "connecting"}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all border ${
-              connected ? "bg-green-500/10 text-green-400 border-green-500/25" : "btn-ghost"
-            }`}
-          >
-            {connected ? "🟢 Connected" : status === "connecting" ? "Connecting…" : "⚪ Connect to Meld"}
-          </button>
+        <div className="mb-6">
+          <SectionHead
+            icon="🔀"
+            title="Scene Switcher"
+            desc="Control Meld Studio scenes remotely"
+            right={
+              <Button variant={connected ? "success" : "ghost"} disabled={status === "connecting"} onClick={connect}>
+                {connected ? "🟢 Connected" : status === "connecting" ? "Connecting…" : "⚪ Connect to Meld"}
+              </Button>
+            }
+          />
         </div>
 
         {/* Connection info */}
         {!connected && (
-          <div className="surface-glass p-4 mb-6">
+          <Card padding={16} className="mb-6">
             <p className="text-[11px] text-amber-400/70 leading-relaxed">
               ⚠️ Meld Studio needs to be running with its API server enabled (Settings → Integrations → API) on{" "}
               <code>ws://127.0.0.1:13376</code>.{error && <span className="block mt-1 text-red-400/70">{error}</span>}
             </p>
-          </div>
+          </Card>
         )}
 
         {/* Scene grid */}
@@ -54,7 +53,7 @@ export default function SceneSwitcherApp() {
                 key={scene.id}
                 onClick={() => showScene(scene.id)}
                 className={`relative p-5 rounded-2xl border text-left transition-all ${
-                  scene.current ? `${SCENE_COLORS[i % SCENE_COLORS.length]} border-2 shadow-lg` : "card-glass hover:-translate-y-0.5"
+                  scene.current ? `${SCENE_COLORS[i % SCENE_COLORS.length]} border-2 shadow-lg` : "bd-card hover:-translate-y-0.5"
                 }`}
               >
                 {scene.current && <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-green-400 status-dot-pulse" />}
@@ -69,7 +68,7 @@ export default function SceneSwitcherApp() {
 
         {/* Audio tracks */}
         {connected && tracks.length > 0 && (
-          <div className="mt-6 surface-glass p-4">
+          <Card padding={16} className="mt-6">
             <h4 className="text-[12px] font-semibold text-white/70 mb-3">Audio</h4>
             <div className="flex flex-wrap gap-2">
               {tracks.map((track) => (
@@ -84,12 +83,12 @@ export default function SceneSwitcherApp() {
                 </button>
               ))}
             </div>
-          </div>
+          </Card>
         )}
 
         {/* Stream / record controls */}
         {connected && (
-          <div className="mt-6 surface-glass p-4">
+          <Card padding={16} className="mt-6">
             <h4 className="text-[12px] font-semibold text-white/70 mb-3">Broadcast</h4>
             <div className="flex gap-2">
               <button
@@ -109,7 +108,7 @@ export default function SceneSwitcherApp() {
                 {isRecording ? "⏹ Stop Recording" : "⏺ Start Recording"}
               </button>
             </div>
-          </div>
+          </Card>
         )}
       </div>
     </div>
