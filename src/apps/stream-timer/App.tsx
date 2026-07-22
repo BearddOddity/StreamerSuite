@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import "../../design-system/styles.css";
+import { Button, Chip } from "../../design-system/components/core";
 
 type TimerMode = "stopwatch" | "countdown";
 
@@ -65,14 +67,9 @@ export default function StreamTimerApp() {
         {/* Mode toggle */}
         <div className="flex items-center justify-center gap-2 mb-8">
           {(["stopwatch", "countdown"] as const).map((m) => (
-            <button key={m} onClick={() => setMode(m)}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all border ${
-                mode === m
-                  ? "toggle-active"
-                  : "bg-white/[0.03] text-white/30 border-white/[0.06] hover:text-white/50"
-              }`}>
+            <Chip key={m} selected={mode === m} onClick={() => setMode(m)}>
               {m === "stopwatch" ? "⏱️ Stopwatch" : "⏳ Countdown"}
-            </button>
+            </Chip>
           ))}
         </div>
 
@@ -88,18 +85,19 @@ export default function StreamTimerApp() {
 
             {/* Stopwatch controls */}
             <div className="flex items-center justify-center gap-3">
-              <button onClick={() => setRunning(!running)}
-                className={`px-6 py-3 rounded-xl text-sm font-semibold transition-all ${
-                  running
-                    ? "bg-red-500/15 text-red-400 border border-red-500/25 hover:bg-red-500/25"
-                    : "btn-cta"
-                }`}>
-                {running ? "⏸ Pause" : "▶ Start"}
-              </button>
-              <button onClick={() => { setRunning(false); setElapsed(0); }}
-                className="btn-ghost">
+              {running ? (
+                <button onClick={() => setRunning(false)}
+                  className="px-6 py-3 rounded-xl text-sm font-semibold transition-all bg-red-500/15 text-red-400 border border-red-500/25 hover:bg-red-500/25">
+                  ⏸ Pause
+                </button>
+              ) : (
+                <Button variant="cta" onClick={() => setRunning(true)}>
+                  ▶ Start
+                </Button>
+              )}
+              <Button variant="ghost" onClick={() => { setRunning(false); setElapsed(0); }}>
                 ↺ Reset
-              </button>
+              </Button>
             </div>
 
             {/* Session presets */}
@@ -161,25 +159,22 @@ export default function StreamTimerApp() {
             {/* Countdown controls */}
             <div className="flex items-center justify-center gap-3">
               {!countdownRunning && countdownRemaining > 0 ? (
-                <button onClick={() => setCountdownRunning(true)}
-                  className="btn-cta">
+                <Button variant="cta" onClick={() => setCountdownRunning(true)}>
                   ▶ Resume
-                </button>
+                </Button>
               ) : countdownRemaining === 0 && !countdownRunning ? (
-                <button onClick={startCountdown}
-                  className="btn-cta">
+                <Button variant="cta" onClick={startCountdown}>
                   ▶ Start Countdown
-                </button>
+                </Button>
               ) : (
                 <button onClick={() => setCountdownRunning(false)}
                   className="px-6 py-3 rounded-xl text-sm font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/25 hover:bg-amber-500/25 transition-all">
                   ⏸ Pause
                 </button>
               )}
-              <button onClick={() => { setCountdownRunning(false); setCountdownRemaining(0); }}
-                className="btn-ghost">
+              <Button variant="ghost" onClick={() => { setCountdownRunning(false); setCountdownRemaining(0); }}>
                 ↺ Reset
-              </button>
+              </Button>
             </div>
           </>
         )}
