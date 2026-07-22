@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https: asset: http://asset.localhost; connect-src 'self' ws: wss: https:; font-src 'self' https://fonts.gstatic.com; frame-src https://127.0.0.1:53735 http://127.0.0.1:53735 https://www.youtube.com https://open.spotify.com",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https: asset: http://asset.localhost; media-src 'self' asset: http://asset.localhost; connect-src 'self' ws: wss: https:; font-src 'self' https://fonts.gstatic.com; frame-src https://127.0.0.1:53735 http://127.0.0.1:53735 https://www.youtube.com https://open.spotify.com",
       "assetProtocol": {
         "enable": true,
         "scope": ["**/*"]
