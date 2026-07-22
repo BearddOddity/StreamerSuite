@@ -1,41 +1,42 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { PlatformIcon } from "@/components/common/PlatformIcon";
+import { useStreamStats } from "./useStreamStats";
 
-interface StatCard {
-  label: string;
-  value: string;
-  change: string;
-  positive: boolean;
-  icon: string;
+function formatUptime(startedAt: string | undefined): string {
+  if (!startedAt) return "—";
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+function StatCard({ icon, label, value, sub }: { icon: string; label: string; value: string; sub?: string }) {
+  return (
+    <div className="card-glass p-4">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-base">{icon}</span>
+        <span className="text-[10px] text-white/25 uppercase tracking-wider font-semibold">{label}</span>
+      </div>
+      <div className="text-[22px] font-bold text-white/90">{value}</div>
+      {sub && <div className="text-[10px] mt-1 text-white/30">{sub}</div>}
+    </div>
+  );
 }
 
 export default function StreamStatsApp() {
-  const [isLive, setIsLive] = useState(true);
-  const [viewerCount, setViewerCount] = useState(1247);
-  const [uptime, setUptime] = useState(7200);
+  const { twitchConnected, twitch, twitchError, kickSlug, setKickSlug, kick, kickError, history, peak, refresh } = useStreamStats();
+  const [editingSlug, setEditingSlug] = useState(false);
+  const [slugDraft, setSlugDraft] = useState(kickSlug);
 
-  useEffect(() => {
-    if (!isLive) return;
-    const interval = setInterval(() => {
-      setViewerCount((v) => Math.max(0, v + Math.floor(Math.random() * 20 - 8)));
-      setUptime((u) => u + 1);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [isLive]);
+  const twitchViewers = twitch?.is_live ? twitch.viewer_count ?? 0 : 0;
+  const kickViewers = kick?.is_live ? kick.viewer_count ?? 0 : 0;
+  const totalViewers = twitchViewers + kickViewers;
+  const anyLive = !!twitch?.is_live || !!kick?.is_live;
 
-  const formatUptime = (s: number) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    return `${h}h ${m}m`;
-  };
-
-  const stats: StatCard[] = [
-    { label: "Current Viewers", value: viewerCount.toLocaleString(), change: "+12%", positive: true, icon: "👥" },
-    { label: "Peak Viewers", value: "1,847", change: "Today", positive: true, icon: "📈" },
-    { label: "Stream Uptime", value: formatUptime(uptime), change: "Live", positive: true, icon: "⏱️" },
-    { label: "New Followers", value: "23", change: "+5", positive: true, icon: "💜" },
-    { label: "Chat Messages", value: "4,382", change: "This stream", positive: true, icon: "💬" },
-    { label: "Avg. Watch Time", value: "18m", change: "+2m", positive: true, icon: "⏰" },
-  ];
+  const platforms = [
+    twitch ? { platform: "twitch" as const, viewers: twitchViewers, live: twitch.is_live, color: "bg-[#9146ff]" } : null,
+    kick ? { platform: "kick" as const, viewers: kickViewers, live: kick.is_live, color: "bg-[#53fc18]" } : null,
+  ].filter((p): p is NonNullable<typeof p> => p !== null && p.live);
 
   return (
     <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
@@ -44,75 +45,119 @@ export default function StreamStatsApp() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-[18px] font-bold text-white/90">Stream Stats</h2>
-            <p className="text-[11px] text-white/30 mt-0.5">Real-time stream analytics</p>
+            <p className="text-[11px] text-white/30 mt-0.5">Real-time viewers, followers, and uptime</p>
           </div>
-          <button onClick={() => setIsLive(!isLive)}
+          <button
+            onClick={refresh}
             className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all border ${
-              isLive
-                ? "bg-red-500/10 text-red-400 border-red-500/25"
-                : "btn-ghost"
-            }`}>
-            {isLive ? "🔴 Live" : "⚪ Offline"}
+              anyLive ? "bg-red-500/10 text-red-400 border-red-500/25" : "btn-ghost"
+            }`}
+          >
+            {anyLive ? "🔴 Live" : "⚪ Offline"}
           </button>
+        </div>
+
+        {/* Connection hints */}
+        {!twitchConnected && (
+          <div className="surface-glass p-3 mb-3">
+            <p className="text-[11px] text-amber-400/70">⚠️ Connect Twitch in Alerts Hub to see Twitch stats.</p>
+          </div>
+        )}
+        {twitchError && <div className="surface-glass p-3 mb-3"><p className="text-[11px] text-red-400/70">{twitchError}</p></div>}
+        {kickError && <div className="surface-glass p-3 mb-3"><p className="text-[11px] text-red-400/70">{kickError}</p></div>}
+
+        <div className="surface-glass p-3 mb-6 flex items-center gap-2">
+          <PlatformIcon platform="kick" size="sm" />
+          {editingSlug ? (
+            <>
+              <input
+                value={slugDraft}
+                onChange={(e) => setSlugDraft(e.target.value)}
+                placeholder="Kick channel slug"
+                className="flex-1 bg-white/[0.03] border border-white/[0.08] rounded-lg px-2 py-1 text-[11px] text-white/80"
+              />
+              <button
+                onClick={() => {
+                  setKickSlug(slugDraft.trim());
+                  setEditingSlug(false);
+                }}
+                className="text-[11px] text-green-400"
+              >
+                Save
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-[11px] text-white/50 flex-1">
+                {kickSlug ? `Tracking Kick: ${kickSlug}` : "No Kick channel set — Kick stats need a connected account (Multi-Chat) and a channel slug."}
+              </span>
+              <button onClick={() => setEditingSlug(true)} className="text-[11px] text-white/40 hover:text-white/70">
+                {kickSlug ? "Change" : "Set"}
+              </button>
+            </>
+          )}
         </div>
 
         {/* Stats grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-          {stats.map((stat) => (
-            <div key={stat.label} className="card-glass p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-base">{stat.icon}</span>
-                <span className="text-[10px] text-white/25 uppercase tracking-wider font-semibold">{stat.label}</span>
-              </div>
-              <div className="text-[22px] font-bold text-white/90">{stat.value}</div>
-              <div className={`text-[10px] mt-1 ${stat.positive ? "text-green-400/60" : "text-red-400/60"}`}>
-                {stat.change}
-              </div>
-            </div>
-          ))}
+          <StatCard icon="👥" label="Current Viewers" value={anyLive ? totalViewers.toLocaleString() : "—"} sub={anyLive ? "across live platforms" : undefined} />
+          <StatCard icon="📈" label="Peak Viewers" value={peak > 0 ? peak.toLocaleString() : "—"} sub="this session" />
+          <StatCard icon="⏱️" label="Twitch Uptime" value={twitch?.is_live ? formatUptime(twitch.started_at) : "—"} />
+          <StatCard icon="💜" label="Twitch Followers" value={twitch?.follower_total !== undefined ? twitch.follower_total.toLocaleString() : "—"} />
+          <StatCard icon="⭐" label="Twitch Subscribers" value={twitch?.subscriber_total !== undefined ? twitch.subscriber_total.toLocaleString() : "—"} />
+          <StatCard icon="🎮" label="Category" value={twitch?.game_name || kick?.category_name || "—"} />
         </div>
 
-        {/* Chart placeholder */}
+        {/* Viewer history — real polled samples, not synthesized */}
         <div className="card-glass p-5">
-          <h4 className="text-[12px] font-semibold text-white/70 mb-4">Viewer History</h4>
-          <div className="flex items-end gap-1 h-32">
-            {Array.from({ length: 48 }, (_, i) => {
-              const height = 20 + Math.sin(i * 0.3) * 30 + Math.random() * 30;
-              return (
-                <div key={i} className="flex-1 rounded-t-sm bg-[var(--accent-system)]/30 hover:bg-[var(--accent-system)]/60 transition-colors cursor-pointer"
-                  style={{ height: `${height}%` }}
-                  title={`${Math.floor(height * 20)} viewers`}
-                />
-              );
-            })}
-          </div>
-          <div className="flex justify-between mt-2">
-            <span className="text-[9px] text-white/15">2h ago</span>
-            <span className="text-[9px] text-white/15">Now</span>
-          </div>
+          <h4 className="text-[12px] font-semibold text-white/70 mb-4">Viewer History (this session)</h4>
+          {history.length < 2 ? (
+            <div className="text-center py-10 text-white/20 text-sm">Collecting data — checks every 20s while a platform is connected.</div>
+          ) : (
+            <>
+              <div className="flex items-end gap-1 h-32">
+                {history.map((sample) => {
+                  const height = peak > 0 ? Math.max(4, (sample.total / peak) * 100) : 4;
+                  return (
+                    <div
+                      key={sample.timestamp}
+                      className="flex-1 rounded-t-sm bg-[var(--accent-system)]/30 hover:bg-[var(--accent-system)]/60 transition-colors cursor-pointer"
+                      style={{ height: `${height}%` }}
+                      title={`${sample.total} viewers at ${new Date(sample.timestamp).toLocaleTimeString()}`}
+                    />
+                  );
+                })}
+              </div>
+              <div className="flex justify-between mt-2">
+                <span className="text-[9px] text-white/15">{new Date(history[0]!.timestamp).toLocaleTimeString()}</span>
+                <span className="text-[9px] text-white/15">Now</span>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Platform breakdown */}
-        <div className="mt-4 card-glass p-5">
-          <h4 className="text-[12px] font-semibold text-white/70 mb-3">Platform Breakdown</h4>
-          <div className="space-y-3">
-            {[
-              { platform: "Twitch", icon: "🟣", viewers: 892, pct: 71, color: "bg-[#9146ff]" },
-              { platform: "Kick", icon: "🟢", viewers: 231, pct: 19, color: "bg-[#53fc18]" },
-              { platform: "YouTube", icon: "🔴", viewers: 124, pct: 10, color: "bg-red-500" },
-            ].map((p) => (
-              <div key={p.platform} className="flex items-center gap-3">
-                <span className="text-sm w-5">{p.icon}</span>
-                <span className="text-[11px] text-white/50 w-16">{p.platform}</span>
-                <div className="flex-1 h-2 rounded-full bg-white/[0.04] overflow-hidden">
-                  <div className={`h-full rounded-full ${p.color}`} style={{ width: `${p.pct}%` }} />
-                </div>
-                <span className="text-[11px] text-white/40 w-12 text-right">{p.viewers}</span>
-                <span className="text-[10px] text-white/20 w-8 text-right">{p.pct}%</span>
-              </div>
-            ))}
+        {platforms.length > 0 && (
+          <div className="mt-4 card-glass p-5">
+            <h4 className="text-[12px] font-semibold text-white/70 mb-3">Platform Breakdown</h4>
+            <div className="space-y-3">
+              {platforms.map((p) => {
+                const pct = totalViewers > 0 ? Math.round((p.viewers / totalViewers) * 100) : 0;
+                return (
+                  <div key={p.platform} className="flex items-center gap-3">
+                    <PlatformIcon platform={p.platform} size="sm" />
+                    <span className="text-[11px] text-white/50 w-16 capitalize">{p.platform}</span>
+                    <div className="flex-1 h-2 rounded-full bg-white/[0.04] overflow-hidden">
+                      <div className={`h-full rounded-full ${p.color}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-[11px] text-white/40 w-12 text-right">{p.viewers}</span>
+                    <span className="text-[10px] text-white/20 w-8 text-right">{pct}%</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

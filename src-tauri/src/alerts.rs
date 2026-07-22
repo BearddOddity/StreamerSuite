@@ -386,3 +386,66 @@ pub(crate) async fn alerts_eventsub_subscribe(
     }
     resp.json().await.map_err(|e| e.to_string())
 }
+
+/// Combined live status/viewer count, follower total, and subscriber total
+/// for Stream Stats — one round trip (3 concurrent requests) rather than
+/// three separate commands. Reuses this module's existing Twitch connection
+/// (Alerts Hub's own OAuth) rather than a fourth Twitch login: `streams` and
+/// `channels/followers` work with any valid token, and `channel:read:subscriptions`
+/// (needed for `subscriptions`) is already one of the scopes Alerts Hub asks for.
+#[tauri::command]
+pub(crate) async fn twitch_stream_stats() -> Result<Value, String> {
+    let access_token = kr_get("twitch.access_token").ok_or("Twitch not connected — connect it in Alerts Hub first")?;
+    let client_id = kr_get("twitch.client_id").ok_or("Twitch not connected — connect it in Alerts Hub first")?;
+    let user_id = kr_get("twitch.user_id").ok_or("Twitch not connected — connect it in Alerts Hub first")?;
+
+    async fn get(client: &reqwest::Client, url: &str, params: &[(&str, &str)], access_token: &str, client_id: &str) -> Result<Value, String> {
+        let mut resp = client
+            .get(url)
+            .query(params)
+            .bearer_auth(access_token)
+            .header("Client-Id", client_id)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            let fresh = refresh_access_token().await?;
+            resp = client
+                .get(url)
+                .query(params)
+                .bearer_auth(&fresh)
+                .header("Client-Id", client_id)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    let client = reqwest::Client::new();
+    let stream_params = [("user_id", user_id.as_str())];
+    let follower_params = [("broadcaster_id", user_id.as_str())];
+    let sub_params = [("broadcaster_id", user_id.as_str())];
+    let (stream_resp, followers_resp, subs_resp) = tokio::join!(
+        get(&client, "https://api.twitch.tv/helix/streams", &stream_params, &access_token, &client_id),
+        get(&client, "https://api.twitch.tv/helix/channels/followers", &follower_params, &access_token, &client_id),
+        get(&client, "https://api.twitch.tv/helix/subscriptions", &sub_params, &access_token, &client_id),
+    );
+
+    let stream = stream_resp.ok().and_then(|v| v.pointer("/data/0").cloned());
+    let follower_total = followers_resp.ok().and_then(|v| v.get("total").and_then(|t| t.as_i64()));
+    // A stream not run by a Partner/Affiliate 400s on /subscriptions — that's
+    // not a real error for stats purposes, just "no sub program", so it's
+    // folded into `null` rather than failing the whole combined response.
+    let subscriber_total = subs_resp.ok().and_then(|v| v.get("total").and_then(|t| t.as_i64()));
+
+    Ok(serde_json::json!({
+        "is_live": stream.is_some(),
+        "viewer_count": stream.as_ref().and_then(|s| s.get("viewer_count")),
+        "title": stream.as_ref().and_then(|s| s.get("title")),
+        "game_name": stream.as_ref().and_then(|s| s.get("game_name")),
+        "started_at": stream.as_ref().and_then(|s| s.get("started_at")),
+        "follower_total": follower_total,
+        "subscriber_total": subscriber_total,
+    }))
+}

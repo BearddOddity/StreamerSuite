@@ -2586,6 +2586,8 @@ pub fn run() {
             alerts::alerts_oauth_get_client_id,
             alerts::alerts_oauth_has_client_secret,
             alerts::alerts_eventsub_subscribe,
+            alerts::twitch_stream_stats,
+            multichat::kick_channel_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -133,6 +133,50 @@ pub(crate) async fn kick_resolve_broadcaster_id(slug: String) -> Result<i64, Str
         .ok_or_else(|| "no user_id in response".into())
 }
 
+/// Live status/viewer count/category for Stream Stats, via Kick's official
+/// public API (`stream.is_live`, `stream.viewer_count`, `stream.start_time`,
+/// `category.name`) — unlike the unofficial `kick.com/api/v2` endpoint this
+/// doesn't need Cloudflare-bypass headers, but it does need a connected Kick
+/// account (reuses Multi-Chat's own, same as chat/moderation already do).
+/// Kick's public API has no follower-count field, so that's left out rather
+/// than guessed at.
+#[tauri::command]
+pub(crate) async fn kick_channel_stats(slug: String) -> Result<Value, String> {
+    let access_token = kr_get("kick.access_token").ok_or("Kick not connected — connect it in Multi-Chat first")?;
+
+    async fn get(client: &reqwest::Client, slug: &str, access_token: &str) -> Result<reqwest::Response, String> {
+        client
+            .get("https://api.kick.com/public/v1/channels")
+            .query(&[("slug", slug)])
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    let client = reqwest::Client::new();
+    let mut resp = get(&client, &slug, &access_token).await?;
+    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let fresh = refresh_token("kick", "https://id.kick.com/oauth/token").await?;
+        resp = get(&client, &slug, &fresh).await?;
+    }
+    if !resp.status().is_success() {
+        return Err(format!("Kick returned {}", resp.status()));
+    }
+    let body: Value = resp.json().await.map_err(|e| e.to_string())?;
+    let channel = body
+        .pointer("/data/0")
+        .ok_or_else(|| format!("couldn't find Kick channel \"{slug}\""))?;
+
+    Ok(serde_json::json!({
+        "is_live": channel.pointer("/stream/is_live").and_then(|v| v.as_bool()).unwrap_or(false),
+        "viewer_count": channel.pointer("/stream/viewer_count"),
+        "title": channel.get("stream_title"),
+        "category_name": channel.pointer("/category/name"),
+        "started_at": channel.pointer("/stream/start_time"),
+    }))
+}
+
 /// The channel's custom per-tier subscriber badge images — only available
 /// via the unofficial channel endpoint (Kick's official public API has no
 /// equivalent). Returns [{months, url}], sorted by months descending so the
