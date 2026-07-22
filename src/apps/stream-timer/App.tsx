@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 type TimerMode = "stopwatch" | "countdown";
 
@@ -34,6 +35,13 @@ export default function StreamTimerApp() {
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [countdownRunning, countdownRemaining]);
+
+  // Feeds the Overlay Maker's live-data-bound fields (see overlay_manager.rs's
+  // /data-ws) — whichever mode is actually running is "the" timer value.
+  useEffect(() => {
+    const value = mode === "stopwatch" ? elapsed : countdownRemaining;
+    invoke("overlay_publish_data", { key: "timer", value }).catch(() => {});
+  }, [mode, elapsed, countdownRemaining]);
 
   const formatTime = useCallback((seconds: number) => {
     const h = Math.floor(seconds / 3600);

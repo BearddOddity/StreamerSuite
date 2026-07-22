@@ -56,6 +56,26 @@ export function useStreamStats() {
     }
   }, []);
 
+  // Feeds the Overlay Maker's live-data-bound fields (see overlay_manager.rs's
+  // /data-ws) so a "Followers" or "Viewers" field built there stays current
+  // without Stream Stats needing to be the focused tool.
+  useEffect(() => {
+    const publish = (key: string, value: number | undefined) => {
+      if (value === undefined) return;
+      invoke("overlay_publish_data", { key, value }).catch(() => {});
+    };
+    const twitchViewers = twitch?.is_live ? twitch.viewer_count ?? 0 : 0;
+    const kickViewers = kick?.is_live ? kick.viewer_count ?? 0 : 0;
+    if (twitch || kick) publish("viewers", twitchViewers + kickViewers);
+    publish("followers", twitch?.follower_total);
+    publish("subscribers", twitch?.subscriber_total);
+    const startedAt = twitch?.is_live ? twitch.started_at : kick?.is_live ? kick.started_at : undefined;
+    if (startedAt) {
+      const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+      publish("uptime", seconds);
+    }
+  }, [twitch, kick]);
+
   useEffect(() => {
     poll();
     const id = setInterval(poll, POLL_INTERVAL_MS);

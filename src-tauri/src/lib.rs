@@ -2599,6 +2599,9 @@ pub fn run() {
             overlay_manager::overlay_add_custom,
             overlay_manager::overlay_remove_custom,
             overlay_manager::alerts_broadcast_to_overlay,
+            overlay_manager::overlay_publish_data,
+            overlay_manager::overlay_preview_template,
+            overlay_manager::overlay_create_from_template,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

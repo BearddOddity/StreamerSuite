@@ -92,3 +92,536 @@ pub(crate) fn overlay_remove_custom(file: String) -> Result<(), String> {
 pub(crate) fn alerts_broadcast_to_overlay(event: serde_json::Value) {
     crate::server::push_alert_event(event);
 }
+
+/// Published by Stream Stats/Stream Timer whenever they have a fresh value
+/// (viewers, followers, subscribers, uptime, the timer display, …) so any
+/// overlay built with a data-bound field can show it live. See
+/// `server.rs`'s `/overlay-data` + `/data-ws`.
+#[tauri::command]
+pub(crate) fn overlay_publish_data(key: String, value: serde_json::Value) {
+    crate::server::publish_overlay_data(key, value);
+}
+
+// --- Overlay Maker: template-based overlay generation ---
+
+/// A field that's either static text or bound to a live value another tool
+/// publishes via `overlay_publish_data` (see `LIVE_SOURCES` in types.ts for
+/// the keys the frontend offers). `label` is shown as a prefix — e.g. text
+/// "Followers" bound to `followers` renders as "Followers 1,234" and stays
+/// current as Stream Stats republishes it.
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct BoundField {
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    source: String,
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct TemplateParams {
+    template: String,
+    #[serde(default)]
+    title: BoundField,
+    #[serde(default)]
+    subtitle: BoundField,
+    #[serde(default = "default_text_color")]
+    text_color: String,
+    #[serde(default = "default_accent_color")]
+    accent_color: String,
+    #[serde(default = "default_bg_opacity")]
+    bg_opacity: f32,
+    #[serde(default)]
+    position: String,
+    #[serde(default)]
+    logo_data_uri: Option<String>,
+    #[serde(default)]
+    speed_seconds: Option<u32>,
+    /// Google Fonts family name, same convention as StatusForge/Multi-Chat's
+    /// own theme settings — empty (or unrecognized) just falls back to the
+    /// bundled system font stack.
+    #[serde(default)]
+    font_family: String,
+    #[serde(default = "default_border_radius")]
+    border_radius: String,
+    #[serde(default = "default_true")]
+    animations_enabled: bool,
+}
+
+fn default_text_color() -> String {
+    "#ffffff".into()
+}
+fn default_accent_color() -> String {
+    "#9146ff".into()
+}
+fn default_bg_opacity() -> f32 {
+    0.85
+}
+fn default_border_radius() -> String {
+    "rounded".into()
+}
+fn default_true() -> bool {
+    true
+}
+
+const FONT_STACK: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+
+/// Maps to the same three-step scale as StatusForge's theme settings
+/// (`sharp` / `soft` / `rounded`).
+fn radius_px(input: &str) -> &'static str {
+    match input {
+        "sharp" => "2px",
+        "soft" => "8px",
+        _ => "16px",
+    }
+}
+
+/// Only letters, digits, spaces, and hyphens — enough for any real Google
+/// Fonts family name, and safe to drop straight into both a CSS
+/// `font-family` value and a Google Fonts URL query.
+fn safe_font_family(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 60
+        || !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '-')
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Only a plain `#rgb`/`#rrggbb` hex code is accepted for anything that
+/// lands directly in generated CSS/inline styles — falls back to a known-
+/// safe default rather than erroring, since a rejected color shouldn't block
+/// saving the rest of the overlay.
+fn safe_color(input: &str, fallback: &str) -> String {
+    let is_hex = |s: &str| s.len() == 4 || s.len() == 7;
+    if input.starts_with('#') && is_hex(input) && input[1..].chars().all(|c| c.is_ascii_hexdigit()) {
+        input.to_string()
+    } else {
+        fallback.to_string()
+    }
+}
+
+/// Only `data:image/...` is accepted for a logo — rejects anything else
+/// (e.g. a `javascript:` URL) rather than embedding it in the page.
+fn safe_logo(input: &Option<String>) -> Option<String> {
+    input
+        .as_ref()
+        .filter(|s| s.starts_with("data:image/"))
+        .cloned()
+}
+
+fn clamp01(v: f32) -> f32 {
+    v.clamp(0.0, 1.0)
+}
+
+/// Renders a bound field as HTML: static text is escaped and printed as-is;
+/// a live-bound field gets a `data-bind` span the generated page's poller
+/// (see `data_bind_script`) fills in and keeps current.
+fn render_field(field: &BoundField, css_class: &str) -> String {
+    let label = escape_html(field.text.trim());
+    if field.source.trim().is_empty() {
+        format!(r#"<span class="{css_class}">{label}</span>"#)
+    } else {
+        let source = escape_html(field.source.trim());
+        format!(
+            r#"<span class="{css_class}">{label} <span data-bind="{source}">—</span></span>"#
+        )
+    }
+}
+
+fn has_binding(params: &TemplateParams) -> bool {
+    !params.title.source.trim().is_empty() || !params.subtitle.source.trim().is_empty()
+}
+
+/// Appended once, only when at least one field is data-bound, so a fully
+/// static overlay never opens a WebSocket it has no use for. Connects to
+/// `/data-ws`, formats each published value for its key, and fills in every
+/// `[data-bind]` element that matches.
+const DATA_BIND_SCRIPT: &str = r#"<script>
+(function() {
+  function fmt(key, value) {
+    if (value == null) return "—";
+    if (key === "uptime" || key === "timer") {
+      var s = Math.max(0, Math.floor(Number(value) || 0));
+      var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+      return [h, m, sec].map(function(n) { return String(n).padStart(2, "0"); }).join(":");
+    }
+    if (typeof value === "number") return value.toLocaleString();
+    return String(value);
+  }
+  function apply(data) {
+    document.querySelectorAll("[data-bind]").forEach(function(el) {
+      var key = el.getAttribute("data-bind");
+      el.textContent = fmt(key, data[key]);
+    });
+  }
+  function connect() {
+    var token = getOverlayToken();
+    // No token in the URL means this page isn't loaded from a real
+    // /forge-overlay or /custom-overlay path (e.g. the Overlay Maker's own
+    // live preview, which renders via srcDoc and has no such URL) — skip
+    // connecting rather than opening a WebSocket the server will reject.
+    if (!token) return;
+    var ws = new WebSocket("ws://127.0.0.1:53735/data-ws?token=" + token);
+    ws.onmessage = function(ev) { try { apply(JSON.parse(ev.data)); } catch (e) {} };
+    ws.onclose = function() { setTimeout(connect, 3000); };
+    ws.onerror = function() { ws.close(); };
+  }
+  connect();
+})();
+</script>"#;
+
+/// Extracts the overlay token from the page's own URL the same way
+/// `widgets/alerts-overlay.html` does — `getOverlayToken()` inline rather
+/// than baking the token into the saved file, so a regenerated/rotated
+/// token doesn't strand every overlay already built with the old one.
+const TOKEN_FROM_PATH_JS: &str = r#"
+function getOverlayToken() {
+  var parts = window.location.pathname.split("/");
+  for (var i = 0; i < parts.length; i++) {
+    if ((parts[i] === "forge-overlay" || parts[i] === "custom-overlay") && parts[i + 1]) return parts[i + 1];
+  }
+  return "";
+}
+"#;
+
+fn render_template(params: &TemplateParams) -> Result<String, String> {
+    let text_color = safe_color(&params.text_color, &default_text_color());
+    let accent = safe_color(&params.accent_color, &default_accent_color());
+    let bg_opacity = clamp01(params.bg_opacity);
+    let radius = radius_px(&params.border_radius);
+    let logo = safe_logo(&params.logo_data_uri);
+    let logo_html = logo
+        .map(|src| format!(r#"<img class="logo" src="{src}" alt="">"#))
+        .unwrap_or_default();
+    let title_html = render_field(&params.title, "title");
+    let subtitle_html = render_field(&params.subtitle, "subtitle");
+
+    // Same convention as StatusForge/Multi-Chat's own theme settings: an
+    // optional Google Fonts family, loaded via a <link> tag, that falls
+    // back to the bundled system stack when unset or invalid.
+    let font_family = safe_font_family(&params.font_family);
+    let font_css = font_family
+        .as_ref()
+        .map(|f| format!("\"{f}\", {FONT_STACK}"))
+        .unwrap_or_else(|| FONT_STACK.to_string());
+    let font_link = font_family
+        .as_ref()
+        .map(|f| {
+            let query = f.replace(' ', "+");
+            format!(
+                r#"<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family={query}:wght@400;500;700;800&display=swap">"#
+            )
+        })
+        .unwrap_or_default();
+
+    // A subtle pop-in, same spirit as widgets/alerts-overlay.html's entrance
+    // animation — off entirely (not just neutralized) when the user disables
+    // animations, so a disabled overlay never even defines the keyframes.
+    let (card_animation, keyframes) = if params.animations_enabled {
+        (
+            "animation: overlay-pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;",
+            "@keyframes overlay-pop-in { from { opacity: 0; transform: scale(0.9) translateY(-8px); } to { opacity: 1; transform: scale(1) translateY(0); } }",
+        )
+    } else {
+        ("", "")
+    };
+
+    let (position_css, body_html, extra_style) = match params.template.as_str() {
+        "lower-third" => {
+            let align = match params.position.as_str() {
+                "bottom-right" => "right: 40px; align-items: flex-end; text-align: right;",
+                "bottom-center" => "left: 50%; transform: translateX(-50%); align-items: center; text-align: center;",
+                _ => "left: 40px; align-items: flex-start; text-align: left;",
+            };
+            (
+                format!("position: fixed; bottom: 40px; display: flex; flex-direction: column; gap: 4px; {align}"),
+                format!(
+                    r#"<div id="card"><div class="accent-bar"></div><div class="text">{logo_html}{title_html}{subtitle_html}</div></div>"#
+                ),
+                format!(
+                    "#card {{ display: flex; align-items: center; gap: 14px; padding: 14px 24px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); {card_animation} }}\n\
+                     .accent-bar {{ width: 6px; align-self: stretch; border-radius: 4px; background: {accent}; }}\n\
+                     .text {{ display: flex; flex-direction: column; gap: 2px; }}\n\
+                     .title {{ font-size: 26px; font-weight: 800; color: {text_color}; }}\n\
+                     .subtitle {{ font-size: 15px; font-weight: 500; color: {text_color}; opacity: 0.75; }}\n\
+                     .logo {{ height: 40px; width: auto; border-radius: 6px; }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
+        "corner-badge" => {
+            let corner_css = match params.position.as_str() {
+                "top-left" => "top: 30px; left: 30px;",
+                "top-right" => "top: 30px; right: 30px;",
+                "bottom-right" => "bottom: 30px; right: 30px;",
+                _ => "bottom: 30px; left: 30px;",
+            };
+            (
+                format!("position: fixed; {corner_css}"),
+                format!(r#"<div id="card">{logo_html}<div class="text">{title_html}{subtitle_html}</div></div>"#),
+                format!(
+                    "#card {{ display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; box-shadow: 0 0 20px {accent}55; {card_animation} }}\n\
+                     .text {{ display: flex; flex-direction: column; }}\n\
+                     .title {{ font-size: 16px; font-weight: 800; color: {text_color}; }}\n\
+                     .subtitle {{ font-size: 12px; color: {text_color}; opacity: 0.75; }}\n\
+                     .logo {{ height: 28px; width: 28px; border-radius: 50%; object-fit: cover; }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
+        "ticker" => {
+            let side_css = if params.position == "top" { "top: 0;" } else { "bottom: 0;" };
+            let duration = params.speed_seconds.unwrap_or(18).clamp(4, 120);
+            (
+                format!("position: fixed; left: 0; right: 0; {side_css}"),
+                format!(
+                    r#"<div id="bar"><div id="track">{logo_html}{title_html}{subtitle_html}</div></div>"#
+                ),
+                format!(
+                    "#bar {{ width: 100%; overflow: hidden; padding: 10px 0; background: rgba(5, 5, 5, {bg_opacity}); border-top: 2px solid {accent}; border-bottom: 2px solid {accent}; }}\n\
+                     #track {{ display: inline-flex; align-items: center; gap: 20px; white-space: nowrap; padding-left: 100%; animation: scroll {duration}s linear infinite; }}\n\
+                     .title {{ font-size: 20px; font-weight: 800; color: {text_color}; }}\n\
+                     .subtitle {{ font-size: 16px; color: {text_color}; opacity: 0.8; }}\n\
+                     .logo {{ height: 26px; width: auto; }}\n\
+                     @keyframes scroll {{ from {{ transform: translateX(0); }} to {{ transform: translateX(-200%); }} }}"
+                ),
+            )
+        }
+        "text-box" => {
+            let place_css = match params.position.as_str() {
+                "top-left" => "top: 40px; left: 40px;",
+                "top-right" => "top: 40px; right: 40px;",
+                "bottom-left" => "bottom: 40px; left: 40px;",
+                "bottom-right" => "bottom: 40px; right: 40px;",
+                _ => "top: 50%; left: 50%; transform: translate(-50%, -50%);",
+            };
+            (
+                format!("position: fixed; {place_css}"),
+                format!(r#"<div id="card">{logo_html}<div class="text">{title_html}{subtitle_html}</div></div>"#),
+                format!(
+                    "#card {{ display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 40px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; text-align: center; {card_animation} }}\n\
+                     .title {{ font-size: 34px; font-weight: 800; color: {text_color}; }}\n\
+                     .subtitle {{ font-size: 18px; color: {text_color}; opacity: 0.8; }}\n\
+                     .logo {{ height: 56px; width: auto; }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
+        other => return Err(format!("unknown template: {other}")),
+    };
+
+    let script = if has_binding(params) {
+        format!("<script>{TOKEN_FROM_PATH_JS}</script>{DATA_BIND_SCRIPT}")
+    } else {
+        String::new()
+    };
+
+    Ok(format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>StreamerSuite Overlay</title>
+{font_link}
+<style>
+  html, body {{ margin: 0; padding: 0; background: transparent; overflow: hidden; font-family: {font_css}; }}
+  #card, #bar {{ {position_css} }}
+  {extra_style}
+</style>
+</head>
+<body>
+{body_html}
+{script}
+</body>
+</html>
+"#
+    ))
+}
+
+#[tauri::command]
+pub(crate) fn overlay_preview_template(params: TemplateParams) -> Result<String, String> {
+    render_template(&params)
+}
+
+fn slugify(title: &str, template: &str) -> String {
+    let base = if title.trim().is_empty() {
+        template.to_string()
+    } else {
+        title.trim().to_lowercase()
+    };
+    let mut slug: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    let slug = slug.trim_matches('-');
+    if slug.is_empty() {
+        "overlay".to_string()
+    } else {
+        slug.to_string()
+    }
+}
+
+fn unique_file_name(dir: &std::path::Path, slug: &str) -> String {
+    let mut candidate = format!("{slug}.html");
+    let mut n = 2;
+    while dir.join(&candidate).exists() {
+        candidate = format!("{slug}-{n}.html");
+        n += 1;
+    }
+    candidate
+}
+
+#[tauri::command]
+pub(crate) fn overlay_create_from_template(params: TemplateParams) -> Result<String, String> {
+    let html = render_template(&params)?;
+    let dir = custom_overlays_dir()?;
+    let slug = slugify(&params.title.text, &params.template);
+    let file_name = unique_file_name(&dir, &slug);
+    let dest = dir.join(&file_name);
+    crate::assert_path_in_base(&dest, &dir)?;
+    std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
+    Ok(file_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params(template: &str) -> TemplateParams {
+        TemplateParams {
+            template: template.to_string(),
+            title: BoundField { text: "Hello <World>".to_string(), source: String::new() },
+            subtitle: BoundField::default(),
+            text_color: default_text_color(),
+            accent_color: default_accent_color(),
+            bg_opacity: default_bg_opacity(),
+            position: String::new(),
+            logo_data_uri: None,
+            speed_seconds: None,
+            font_family: String::new(),
+            border_radius: default_border_radius(),
+            animations_enabled: true,
+        }
+    }
+
+    #[test]
+    fn renders_all_templates_and_escapes_text() {
+        for t in ["lower-third", "corner-badge", "ticker", "text-box"] {
+            let html = render_template(&params(t)).unwrap();
+            assert!(html.contains("Hello &lt;World&gt;"), "template {t} should escape title text");
+            assert!(!html.contains("Hello <World>"), "template {t} should not contain raw unescaped text");
+            assert!(html.contains(&default_accent_color()), "template {t} should use the accent color");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_template() {
+        let mut p = params("not-a-real-template");
+        p.template = "not-a-real-template".to_string();
+        assert!(render_template(&p).is_err());
+    }
+
+    #[test]
+    fn falls_back_on_invalid_color() {
+        let mut p = params("lower-third");
+        p.accent_color = "javascript:alert(1)".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(!html.contains("javascript:"));
+        assert!(html.contains(&default_accent_color()));
+    }
+
+    #[test]
+    fn rejects_non_data_uri_logo() {
+        let mut p = params("corner-badge");
+        p.logo_data_uri = Some("https://evil.example/x.png".to_string());
+        let html = render_template(&p).unwrap();
+        assert!(!html.contains("evil.example"));
+        assert!(!html.contains("<img"));
+    }
+
+    #[test]
+    fn accepts_data_uri_logo() {
+        let mut p = params("corner-badge");
+        p.logo_data_uri = Some("data:image/png;base64,AAAA".to_string());
+        let html = render_template(&p).unwrap();
+        assert!(html.contains(r#"src="data:image/png;base64,AAAA""#));
+    }
+
+    #[test]
+    fn no_data_ws_script_when_nothing_bound() {
+        let html = render_template(&params("text-box")).unwrap();
+        assert!(!html.contains("data-ws"));
+    }
+
+    #[test]
+    fn adds_data_bind_span_and_script_when_bound() {
+        let mut p = params("lower-third");
+        p.subtitle = BoundField { text: "Followers".to_string(), source: "followers".to_string() };
+        let html = render_template(&p).unwrap();
+        assert!(html.contains(r#"data-bind="followers""#));
+        assert!(html.contains("/data-ws?token="));
+    }
+
+    #[test]
+    fn slugify_prefers_title_falls_back_to_template() {
+        assert_eq!(slugify("My Cool Overlay!", "lower-third"), "my-cool-overlay");
+        assert_eq!(slugify("   ", "corner-badge"), "corner-badge");
+    }
+
+    #[test]
+    fn unique_file_name_avoids_collisions() {
+        let dir = std::env::temp_dir().join(format!("sf-overlay-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("test.html"), "x").unwrap();
+        assert_eq!(unique_file_name(&dir, "test"), "test-2.html");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn custom_font_family_loads_google_font_and_sets_css() {
+        let mut p = params("lower-third");
+        p.font_family = "Bebas Neue".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(html.contains("fonts.googleapis.com/css2?family=Bebas+Neue"));
+        assert!(html.contains(r#""Bebas Neue","#));
+    }
+
+    #[test]
+    fn invalid_font_family_falls_back_to_system_stack_no_google_link() {
+        let mut p = params("lower-third");
+        p.font_family = "Bebas'; </style><script>alert(1)</script>".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(!html.contains("fonts.googleapis.com"));
+        assert!(!html.contains("<script>alert(1)</script>"));
+    }
+
+    #[test]
+    fn border_radius_scale_matches_app_theme_settings() {
+        for (input, px) in [("sharp", "2px"), ("soft", "8px"), ("rounded", "16px")] {
+            let mut p = params("text-box");
+            p.border_radius = input.to_string();
+            let html = render_template(&p).unwrap();
+            assert!(html.contains(&format!("border-radius: {px}")), "{input} should map to {px}");
+        }
+    }
+
+    #[test]
+    fn animations_can_be_disabled() {
+        let mut p = params("lower-third");
+        p.animations_enabled = false;
+        let html = render_template(&p).unwrap();
+        assert!(!html.contains("overlay-pop-in"));
+    }
+}

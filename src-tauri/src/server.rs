@@ -745,6 +745,53 @@ async fn alerts_ws_push_loop(mut socket: WebSocket, mut rx: tokio::sync::broadca
     }
 }
 
+/// Latest-value snapshot of live data other tools publish for the Overlay
+/// Maker's data-bound fields (Stream Stats' viewer/follower/sub counts,
+/// Stream Timer's current display) — a JSON object merged key by key.
+/// `watch` (like engine status), not `broadcast` (like alerts): a bound
+/// overlay field only ever wants "the current value", so coalescing to the
+/// latest update is exactly right and lets a newly opened browser source
+/// see the current value immediately instead of waiting for the next tick.
+fn overlay_data_watch() -> &'static tokio::sync::watch::Sender<serde_json::Value> {
+    static TX: std::sync::OnceLock<tokio::sync::watch::Sender<serde_json::Value>> = std::sync::OnceLock::new();
+    TX.get_or_init(|| watch::channel(serde_json::json!({})).0)
+}
+
+/// Called by the `overlay_publish_data` Tauri command whenever a tool
+/// (Stream Stats, Stream Timer) has a fresh value to offer bound overlay
+/// fields. Merges into the existing snapshot so one tool publishing doesn't
+/// clobber another's keys.
+pub(crate) fn publish_overlay_data(key: String, value: serde_json::Value) {
+    let tx = overlay_data_watch();
+    let mut current = tx.borrow().clone();
+    if !current.is_object() {
+        current = serde_json::json!({});
+    }
+    current
+        .as_object_mut()
+        .expect("just normalized to an object above")
+        .insert(key, value);
+    let _ = tx.send(current);
+}
+
+async fn overlay_data_handler(
+    Query(q): Query<TokenQuery>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    check_token(&headers, q.token.as_deref())?;
+    Ok(Json(overlay_data_watch().borrow().clone()))
+}
+
+async fn data_ws_handler(
+    Query(q): Query<TokenQuery>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Result<impl IntoResponse, StatusCode> {
+    check_token(&headers, q.token.as_deref())?;
+    let rx = overlay_data_watch().subscribe();
+    Ok(ws.on_upgrade(move |socket| ws_push_loop(socket, rx)))
+}
+
 /// Serves a user-added custom overlay file (image/HTML/etc), gated by the
 /// same `overlay_token` as the built-in widgets. Mirrors
 /// `forge_overlay_handler`'s path-traversal guard and token check, but
@@ -846,6 +893,8 @@ fn build_router(state: ServerState) -> Router {
         // Browser Source before the widget→overlay rename.
         .route("/forge-widget/{token}/{file}", get(forge_overlay_handler))
         .route("/alerts-ws", get(alerts_ws_handler))
+        .route("/overlay-data", get(overlay_data_handler))
+        .route("/data-ws", get(data_ws_handler))
         .route("/custom-overlay/{token}/{file}", get(custom_overlay_handler))
         .route("/api/forge-full", get(forge_full_handler))
         .route("/api/exiled-apps", get(exiled_apps_handler))
