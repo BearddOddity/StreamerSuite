@@ -10,8 +10,13 @@
 /* ── BearddOddity tokens (subset) ─────────────────────────────────────── */
 :root {
   --bd-black: #050505;
+  /* Desktop-window mode gets the live value pushed over a
+     streamersuite://theme-accent Tauri event (see bottom of multichat.js);
+     overlay mode (loaded directly by OBS, no Tauri bridge) always falls
+     back to the brand purple below. --bd-accent-text derives from it so
+     one JS-set property re-tints both. */
   --bd-accent: #9146ff;
-  --bd-accent-text: #c084fc;
+  --bd-accent-text: color-mix(in srgb, var(--bd-accent) 100%, white 30%);
   --bd-green: #4ade80;
   --bd-red: #f87171;
   --bd-amber: #facc15;

@@ -1,18 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { useSharedSettings } from "@/settings";
+import "../../design-system/styles.css";
+import { Button, Card } from "../../design-system/components/core";
 
 // Multi-Chat's real frontend is a self-contained vanilla HTML/CSS/JS app
 // (no build step, no React) — see public/multichat/. Rather than port its
 // IRC/Pusher/ActionCable parsing, emote merging, and moderation logic into
-// React (a large, risky rewrite of working code), it runs unmodified and
-// unembedded, in its own native window backed by the same Tauri process and
-// commands (multichat.rs) as the standalone app.
-//
-// It is NOT rendered as an <iframe> in this content pane: Tauri only injects
-// the window.__TAURI__ IPC bridge into a webview's main frame on Linux/macOS
-// (WebKit) — an iframe never gets it, so every invoke() call inside
-// Multi-Chat would silently no-op. A separate WebviewWindow is itself a main
-// frame, so IPC works exactly as it does standalone.
+// React (a large, risky rewrite of working code), it runs unmodified, in
+// either a separate native window or a native child webview docked into
+// this pane — never as an <iframe>. Tauri only injects the window.__TAURI__
+// IPC bridge into a webview's own main frame; an iframe never gets it, so
+// every invoke() call inside Multi-Chat would silently no-op. Both a
+// separate WebviewWindow and a docked child Webview (see docking.rs) are
+// real main frames, so IPC works exactly as it does standalone.
 const WINDOW_LABEL = "multichat";
 
 async function openMultiChatWindow() {
@@ -32,36 +35,117 @@ async function openMultiChatWindow() {
   });
 }
 
-export default function MultiChatApp() {
-  const [opening, setOpening] = useState(false);
+type Mode = "choosing" | "own-window" | "docked";
 
+// Multi-Chat's window/webview has its own localStorage (separate origin),
+// so it can't just read the current accent color off shared storage — it
+// listens for a Tauri event instead (see multichat.js). A brand-new window
+// hasn't necessarily finished loading and registered that listener by the
+// time it's created, so this re-sends for a couple seconds after open
+// rather than emitting once and risking the first (only) emit landing
+// before anyone's listening.
+function pushAccentColor(accentColor: string) {
+  for (const delay of [0, 300, 800, 1500]) {
+    setTimeout(() => {
+      emit("streamersuite://theme-accent", { accentColor }).catch(() => {});
+    }, delay);
+  }
+}
+
+export default function MultiChatApp() {
+  const { theme } = useSharedSettings();
+  const [mode, setMode] = useState<Mode>("choosing");
+  const [opening, setOpening] = useState(false);
+  const dockRef = useRef<HTMLDivElement>(null);
+
+  // While docked, keep the native child webview's bounds pinned to this
+  // pane — window resizes, sidebar toggles, anything that moves this div.
   useEffect(() => {
-    openMultiChatWindow();
-  }, []);
+    if (mode !== "docked") return;
+    const el = dockRef.current;
+    if (!el) return;
+
+    const sync = () => {
+      const r = el.getBoundingClientRect();
+      invoke("dock_multichat", { x: r.left, y: r.top, width: r.width, height: r.height }).catch(() => {});
+    };
+    sync();
+    pushAccentColor(theme.accentColor);
+
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    window.addEventListener("resize", sync);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", sync);
+      invoke("undock_multichat").catch(() => {});
+    };
+    // Intentionally only depends on mode — while already docked, accent
+    // changes reach it via SharedSettingsContext's own live emit, not this effect.
+  }, [mode]);
+
+  if (mode === "choosing") {
+    return (
+      <div className="h-full flex items-center justify-center bg-[#050505] p-6">
+        <Card padding={24} className="w-full max-w-md text-center">
+          <div className="text-5xl mb-3">💬</div>
+          <h2 className="text-[16px] font-bold text-white/90 mb-1.5">Open Multi-Chat</h2>
+          <p className="text-[12px] text-white/40 mb-6">
+            Run it docked inside StreamerSuite, or as its own floating window you can move to a second monitor.
+          </p>
+          <div className="flex flex-col gap-2">
+            <Button variant="cta" onClick={() => setMode("docked")}>
+              🖥️ Open in StreamerSuite
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={opening}
+              onClick={async () => {
+                setOpening(true);
+                try {
+                  await openMultiChatWindow();
+                  pushAccentColor(theme.accentColor);
+                  setMode("own-window");
+                } finally {
+                  setOpening(false);
+                }
+              }}
+            >
+              🪟 Open in its own window
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (mode === "docked") {
+    return <div ref={dockRef} className="h-full w-full bg-[#050505]" />;
+  }
 
   return (
     <div className="h-full flex flex-col items-center justify-center gap-4 bg-[#050505] text-center px-6">
       <div className="text-5xl">💬</div>
       <div>
         <h2 className="text-[16px] font-bold text-white/90">Multi-Chat is running in its own window</h2>
-        <p className="text-[12px] text-white/40 mt-1 max-w-sm">
-          It opened automatically. If you don't see it, use the button below.
-        </p>
+        <p className="text-[12px] text-white/40 mt-1 max-w-sm">If you don't see it, use the button below.</p>
       </div>
-      <button
+      <Button
+        variant="primary"
+        disabled={opening}
         onClick={async () => {
           setOpening(true);
           try {
             await openMultiChatWindow();
+            pushAccentColor(theme.accentColor);
           } finally {
             setOpening(false);
           }
         }}
-        className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/[0.04] text-white/70 border border-white/[0.08] hover:bg-white/[0.08] transition-all disabled:opacity-50"
-        disabled={opening}
       >
         {opening ? "Opening…" : "Open / Focus Multi-Chat"}
-      </button>
+      </Button>
     </div>
   );
 }

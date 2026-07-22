@@ -99,7 +99,7 @@
   padding: var(--space-12); display: flex; flex-direction: column; gap: var(--space-6);
 }
 .bd-pricing-highlight {
-  border-color: rgba(145,70,255,0.35);
+  border-color: color-mix(in srgb, var(--bd-accent) 35%, transparent);
   box-shadow: var(--shadow-card), var(--glow-accent);
 }
 .bd-pricing-name {
@@ -126,7 +126,7 @@
   letter-spacing: var(--tracking-wide); white-space: nowrap; border: 1px solid transparent;
 }
 .bd-badge-ghost  { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.06); color: var(--text-muted); }
-.bd-badge-purple { background: rgba(145,70,255,0.10);  border-color: rgba(145,70,255,0.20);  color: var(--bd-accent-text); }
+.bd-badge-purple { background: color-mix(in srgb, var(--bd-accent) 10%, transparent);  border-color: color-mix(in srgb, var(--bd-accent) 20%, transparent);  color: var(--bd-accent-text); }
 .bd-badge-green  { background: rgba(74,222,128,0.10);  border-color: rgba(74,222,128,0.20);  color: var(--bd-green); }
 .bd-badge-red    { background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.20); color: var(--bd-red); }
 .bd-badge-amber  { background: rgba(250,204,21,0.10);  border-color: rgba(250,204,21,0.20);  color: var(--bd-amber); }
@@ -149,7 +149,7 @@
 }
 .bd-input::placeholder { color: var(--text-dim); }
 .bd-input:hover  { border-color: rgba(255,255,255,0.25); filter: brightness(1.08); }
-.bd-input:focus  { border-color: rgba(145,70,255,0.5); box-shadow: var(--glow-accent-strong); }
+.bd-input:focus  { border-color: color-mix(in srgb, var(--bd-accent) 50%, transparent); box-shadow: var(--glow-accent-strong); }
 
 /* ── Select ──────────────────────────────────────────────────────────────── */
 .glass-select-wrapper { position: relative; }
@@ -196,9 +196,9 @@
 
 /* ── Range slider ────────────────────────────────────────────────────────── */
 .bd-range { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 9999px; background: rgba(255,255,255,0.08); outline: none; }
-.bd-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--bd-accent); cursor: pointer; border: 2px solid rgba(0,0,0,0.3); box-shadow: 0 0 8px rgba(145,70,255,0.3); transition: box-shadow 0.2s ease; }
-.bd-range::-webkit-slider-thumb:hover { box-shadow: 0 0 14px rgba(145,70,255,0.5); }
-.bd-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--bd-accent); cursor: pointer; border: 2px solid rgba(0,0,0,0.3); box-shadow: 0 0 8px rgba(145,70,255,0.3); }
+.bd-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--bd-accent); cursor: pointer; border: 2px solid rgba(0,0,0,0.3); box-shadow: 0 0 8px color-mix(in srgb, var(--bd-accent) 30%, transparent); transition: box-shadow 0.2s ease; }
+.bd-range::-webkit-slider-thumb:hover { box-shadow: 0 0 14px color-mix(in srgb, var(--bd-accent) 50%, transparent); }
+.bd-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--bd-accent); cursor: pointer; border: 2px solid rgba(0,0,0,0.3); box-shadow: 0 0 8px color-mix(in srgb, var(--bd-accent) 30%, transparent); }
 
 /* ── Progress bar ────────────────────────────────────────────────────────── */
 .bd-progress-track { height: 6px; border-radius: 9999px; background: rgba(255,255,255,0.05); overflow: hidden; }
@@ -266,7 +266,7 @@ span.bd-chip { cursor: default; }
   border: 1px solid var(--line-2); border-radius: var(--radius-xl);
   box-shadow: 0 4px 16px rgba(0,0,0,0.15), var(--inset-highlight); transition: border-color 0.2s ease;
 }
-.bd-toolbar:focus-within { border-color: rgba(145,70,255,0.25); box-shadow: 0 4px 20px rgba(0,0,0,0.2), var(--inset-highlight), 0 0 0 3px rgba(145,70,255,0.06); }
+.bd-toolbar:focus-within { border-color: color-mix(in srgb, var(--bd-accent) 25%, transparent); box-shadow: 0 4px 20px rgba(0,0,0,0.2), var(--inset-highlight), 0 0 0 3px color-mix(in srgb, var(--bd-accent) 6%, transparent); }
 
 /* ── Sidebar nav item ────────────────────────────────────────────────────── */
 .bd-nav {
@@ -299,7 +299,7 @@ span.bd-chip { cursor: default; }
 }
 .bd-toast-success { background: rgba(74,222,128,0.12);  border-color: rgba(74,222,128,0.3);  color: var(--bd-green-text); }
 .bd-toast-error   { background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.3); color: var(--bd-red-text); }
-.bd-toast-info    { background: rgba(145,70,255,0.12);  border-color: rgba(145,70,255,0.3);  color: var(--bd-accent-soft); }
+.bd-toast-info    { background: color-mix(in srgb, var(--bd-accent) 12%, transparent);  border-color: color-mix(in srgb, var(--bd-accent) 30%, transparent);  color: var(--bd-accent-soft); }
 
 /* ── Section head ────────────────────────────────────────────────────────── */
 .bd-section-head { display: flex; align-items: center; gap: 14px; min-width: 0; }

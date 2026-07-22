@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { emit } from "@tauri-apps/api/event";
 import { defaultSharedSettings, type SharedSettings, type ApiKeys, type RoutingConfig, type SystemConfig, type ThemeConfig, type DetectionConfig, type EngineSettings } from "./types";
 
 // ─── Context value ───────────────────────────────────────────────────────────
@@ -254,9 +255,27 @@ export function SharedSettingsProvider({ children }: { children: ReactNode }) {
     root.style.setProperty("--user-cover-glint", t.coverGlint && !animOff ? "unset" : "none");
     root.style.setProperty("--user-card-lift", t.cardHoverLift && !animOff ? "unset" : "none");
     root.style.setProperty("--user-card-glint", t.cardGlint && !animOff ? "unset" : "none");
+    root.style.setProperty("--user-font-family", t.fontFamily);
+    root.style.setProperty("--user-font-weight", t.fontWeight);
+    root.style.setProperty("--user-chat-font-size", `${t.chatFontSize}px`);
+    root.style.setProperty("--user-chat-font-family", t.chatFontFamily);
+    root.style.setProperty("--user-chat-font-weight", t.chatFontWeight);
+    root.style.setProperty("--user-holo-opacity", t.holoEffects && !animOff ? "1" : "0");
+    root.style.setProperty("--user-status-pulse", t.statusPulse && !animOff ? "unset" : "none");
+    root.style.setProperty("--user-toast-anim", t.toastAnimations && !animOff ? "unset" : "none");
+    root.style.setProperty("--user-modal-anim", t.modalAnimations && !animOff ? "unset" : "none");
+    root.style.setProperty("--user-progress-anim", t.progressBarAnimation && !animOff ? "unset" : "none");
+    root.style.setProperty("--user-btn-hover", t.buttonHoverEffects && !animOff ? "unset" : "none");
     root.classList.toggle("light-mode", t.themeMode === "light");
     root.classList.toggle("no-animations", !t.animationsEnabled);
     root.classList.toggle("no-glow", !t.glowEffects);
+    root.classList.toggle("chat-bubbles", t.chatBubbles);
+    root.classList.toggle("no-platform-badges", !t.platformBadges);
+
+    // Multi-Chat runs in its own window/webview (separate localStorage), so
+    // it can't just read this window's settings — push the accent over a
+    // Tauri event instead. No-op there if the window doesn't exist yet.
+    emit("streamersuite://theme-accent", { accentColor: t.accentColor }).catch(() => {});
   }, [state.theme]);
 
   // Helpers

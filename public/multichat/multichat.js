@@ -1366,6 +1366,21 @@ function connectTwitch() {
 
 /* Kick — public Pusher websocket (chatrooms.{id}.v2) */
 const tauriInvoke = window.__TAURI__?.core?.invoke || null;
+
+// Desktop-window/docked mode only (window.__TAURI__ present) — this window
+// has its own localStorage, separate from the main StreamerSuite window
+// (see the boot-time comment near applyChatStyle), so the accent color
+// can't just be read off shared storage. The main window pushes it over a
+// Tauri event instead, on every change and once right after this window
+// opens, so it re-tints even if this window was already open when the
+// setting changed. --bd-accent-text derives from --bd-accent in the
+// stylesheet (see index.html), so this is the only property to touch.
+if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen("streamersuite://theme-accent", (e) => {
+    const accent = e.payload?.accentColor;
+    if (accent) document.documentElement.style.setProperty("--bd-accent", accent);
+  });
+}
 const OAUTH_PORT = 61823; // must match src-tauri/src/lib.rs OAUTH_PORT
 async function resolveKickChatroomId(slug) {
   if (channels.kickChatroomId.trim()) return channels.kickChatroomId.trim();
