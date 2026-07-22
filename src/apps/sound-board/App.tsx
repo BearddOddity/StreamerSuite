@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useSoundBoard } from "./useSoundBoard";
 import type { SoundPad } from "./types";
+import "../../design-system/styles.css";
+import { Button, Card, Chip, SectionHead } from "../../design-system/components/core";
 
 export default function SoundBoardApp() {
   const { pads, masterVolume, setMasterVolume, activePad, brokenPads, addPad, removePad, renamePad, setPadHotkey, play, stopAll } =
@@ -24,36 +26,34 @@ export default function SoundBoardApp() {
     <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
       <div className="max-w-2xl mx-auto w-full">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-[18px] font-bold text-white/90">Sound Board</h2>
-            <p className="text-[11px] text-white/30 mt-0.5">Trigger sound effects during your stream</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-white/25">🔊</span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={masterVolume}
-                onChange={(e) => setMasterVolume(Number(e.target.value))}
-                className="w-20 h-1 accent-[var(--accent-system)] bg-white/[0.06] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--accent-system)]"
-              />
-              <span className="text-[10px] text-white/30 font-mono w-7">{masterVolume}%</span>
-            </div>
-            <button onClick={stopAll} className="px-3 py-2 rounded-xl text-xs font-medium btn-ghost">
-              ⏹ Stop
-            </button>
-            <button
-              onClick={() => setEditing((v) => !v)}
-              className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${
-                editing ? "bg-purple-500/10 text-purple-300 border-purple-500/25" : "btn-ghost"
-              }`}
-            >
-              {editing ? "Done" : "Edit"}
-            </button>
-          </div>
+        <div className="mb-6">
+          <SectionHead
+            icon="🎛️"
+            title="Sound Board"
+            desc="Trigger sound effects during your stream"
+            right={
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-white/25">🔊</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={masterVolume}
+                    onChange={(e) => setMasterVolume(Number(e.target.value))}
+                    className="w-20 h-1 accent-[var(--accent-system)] bg-white/[0.06] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--accent-system)]"
+                  />
+                  <span className="text-[10px] text-white/30 font-mono w-7">{masterVolume}%</span>
+                </div>
+                <Button variant="ghost" size="sm" onClick={stopAll}>
+                  ⏹ Stop
+                </Button>
+                <Chip selected={editing} onClick={() => setEditing((v) => !v)}>
+                  {editing ? "Done" : "Edit"}
+                </Chip>
+              </div>
+            }
+          />
         </div>
 
         {/* Sound pads grid */}
@@ -115,12 +115,12 @@ export default function SoundBoardApp() {
         </div>
 
         {pads.length === 0 && (
-          <div className="mt-6 card-glass p-4">
+          <Card padding={16} className="mt-6">
             <p className="text-[11px] text-white/25 leading-relaxed">
               🎵 Click "Add Sound" to pick .mp3, .wav, .ogg, .m4a, .flac, or .aac files from your computer. Click "Edit" to rename a
               sound, reassign its hotkey, or remove it. Hotkeys trigger sounds while this window has focus.
             </p>
-          </div>
+          </Card>
         )}
       </div>
     </div>
