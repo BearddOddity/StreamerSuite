@@ -702,6 +702,94 @@ async fn health_handler() -> StatusCode {
     StatusCode::OK
 }
 
+/// Broadcast channel for live Alerts Hub events, fanned out to every
+/// connected `/alerts-ws` overlay client (an OBS/Meld browser source).
+/// A `broadcast` channel (not `watch`, like engine status uses) because
+/// alerts are discrete events — coalescing to "just the latest" like watch
+/// does would drop every alert except the last one in a fast burst.
+fn alert_broadcast() -> &'static tokio::sync::broadcast::Sender<serde_json::Value> {
+    static TX: std::sync::OnceLock<tokio::sync::broadcast::Sender<serde_json::Value>> = std::sync::OnceLock::new();
+    TX.get_or_init(|| tokio::sync::broadcast::channel(64).0)
+}
+
+/// Called by the `alerts_broadcast_to_overlay` Tauri command whenever
+/// Alerts Hub fires a real (or test) alert. A no-op if nothing is
+/// subscribed (no overlay browser source currently open).
+pub(crate) fn push_alert_event(event: serde_json::Value) {
+    let _ = alert_broadcast().send(event);
+}
+
+async fn alerts_ws_handler(
+    Query(q): Query<TokenQuery>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Result<impl IntoResponse, StatusCode> {
+    check_token(&headers, q.token.as_deref())?;
+    let rx = alert_broadcast().subscribe();
+    Ok(ws.on_upgrade(move |socket| alerts_ws_push_loop(socket, rx)))
+}
+
+async fn alerts_ws_push_loop(mut socket: WebSocket, mut rx: tokio::sync::broadcast::Receiver<serde_json::Value>) {
+    loop {
+        match rx.recv().await {
+            Ok(event) => {
+                if socket.send(Message::Text(event.to_string().into())).await.is_err() {
+                    return;
+                }
+            }
+            // Client fell behind the channel's 64-event buffer — skip the
+            // gap and keep going rather than disconnecting it.
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
+/// Serves a user-added custom overlay file (image/HTML/etc), gated by the
+/// same `overlay_token` as the built-in widgets. Mirrors
+/// `forge_overlay_handler`'s path-traversal guard and token check, but
+/// reads from `overlays/custom/` (user-managed) instead of `widgets/`
+/// (bundled with the app) — keeping the two directories separate is what
+/// lets the Overlay Library tell "built-in" and "yours" apart.
+async fn custom_overlay_handler(
+    axum::extract::Path((token, file)): axum::extract::Path<(String, String)>,
+) -> Result<axum::response::Response, StatusCode> {
+    let expected = load_config()
+        .map(|c| c.engine_settings.overlay_token)
+        .unwrap_or_default();
+    if expected.is_empty() || !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let custom_dir = crate::app_base_dir()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .join("overlays")
+        .join("custom");
+    let path = custom_dir.join(&file);
+    crate::assert_path_in_base(&path, &custom_dir).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    let mime = match path.extension().and_then(|e| e.to_str()) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("svg") => "image/svg+xml",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("txt") => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+    Ok(([(axum::http::header::CONTENT_TYPE, mime)], bytes).into_response())
+}
+
 /// Serves an overlay file (HTML + its assets) gated by the real
 /// `overlay_token`, at the URL the frontend's Overlay Generator hands out
 /// (`/forge-overlay/{token}/{file}`). `/forge-widget/...` routes here too —
@@ -757,6 +845,8 @@ fn build_router(state: ServerState) -> Router {
         // Old route name, kept working for URLs already pasted into an OBS
         // Browser Source before the widget→overlay rename.
         .route("/forge-widget/{token}/{file}", get(forge_overlay_handler))
+        .route("/alerts-ws", get(alerts_ws_handler))
+        .route("/custom-overlay/{token}/{file}", get(custom_overlay_handler))
         .route("/api/forge-full", get(forge_full_handler))
         .route("/api/exiled-apps", get(exiled_apps_handler))
         .route("/list", post(list_handler))

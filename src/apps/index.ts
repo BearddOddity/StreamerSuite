@@ -8,3 +8,4 @@ import "./sound-board";
 import "./notes-commands";
 import "./statusforge";
 import "./stream-manager";
+import "./overlay-library";

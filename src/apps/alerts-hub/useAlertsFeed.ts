@@ -45,6 +45,9 @@ export function useAlertsFeed(settings: AlertsSettings) {
     const alert: AlertEvent = { ...event, id: generateId(), timestamp: Date.now() };
     setAlerts((prev) => [alert, ...prev].slice(0, MAX_ALERTS));
     if (settingsRef.current.soundEnabled) playChime();
+    // Fan out to the /alerts-ws overlay (Overlay Library) too, so an OBS/Meld
+    // browser source shows the same alert — a no-op if nothing's connected.
+    invoke("alerts_broadcast_to_overlay", { event: alert }).catch(() => {});
   }, []);
 
   const refreshTwitchAccount = useCallback(async () => {
