@@ -2,6 +2,8 @@ import { useState } from "react";
 import { PlatformIcon } from "@/components/common/PlatformIcon";
 import { useStreamStats } from "./useStreamStats";
 import { openJoystickReporting } from "./joystickReporting";
+import "../../design-system/styles.css";
+import { Button, Card, SectionHead } from "../../design-system/components/core";
 
 function formatUptime(startedAt: string | undefined): string {
   if (!startedAt) return "—";
@@ -11,16 +13,19 @@ function formatUptime(startedAt: string | undefined): string {
   return `${h}h ${m}m`;
 }
 
+// The design system's StatCard renders label/value/delta only (no leading icon,
+// and its "delta" is a signed trend, not the neutral caption these tiles need)
+// — so this stays a bespoke tile built on the shared Card shell rather than that.
 function StatCard({ icon, label, value, sub }: { icon: string; label: string; value: string; sub?: string }) {
   return (
-    <div className="card-glass p-4">
+    <Card padding={16}>
       <div className="flex items-center gap-2 mb-2">
         <span className="text-base">{icon}</span>
         <span className="text-[10px] text-white/25 uppercase tracking-wider font-semibold">{label}</span>
       </div>
       <div className="text-[22px] font-bold text-white/90">{value}</div>
       {sub && <div className="text-[10px] mt-1 text-white/30">{sub}</div>}
-    </div>
+    </Card>
   );
 }
 
@@ -43,31 +48,42 @@ export default function StreamStatsApp() {
     <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
       <div className="max-w-3xl mx-auto w-full">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-[18px] font-bold text-white/90">Stream Stats</h2>
-            <p className="text-[11px] text-white/30 mt-0.5">Real-time viewers, followers, and uptime</p>
-          </div>
-          <button
-            onClick={refresh}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all border ${
-              anyLive ? "bg-red-500/10 text-red-400 border-red-500/25" : "btn-ghost"
-            }`}
-          >
-            {anyLive ? "🔴 Live" : "⚪ Offline"}
-          </button>
+        <div className="mb-6">
+          <SectionHead
+            icon="📊"
+            title="Stream Stats"
+            desc="Real-time viewers, followers, and uptime"
+            right={
+              <button
+                onClick={refresh}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all border ${
+                  anyLive ? "bg-red-500/10 text-red-400 border-red-500/25" : "btn-ghost"
+                }`}
+              >
+                {anyLive ? "🔴 Live" : "⚪ Offline"}
+              </button>
+            }
+          />
         </div>
 
         {/* Connection hints */}
         {!twitchConnected && (
-          <div className="surface-glass p-3 mb-3">
+          <Card padding={12} className="mb-3">
             <p className="text-[11px] text-amber-400/70">⚠️ Connect Twitch in Alerts Hub to see Twitch stats.</p>
-          </div>
+          </Card>
         )}
-        {twitchError && <div className="surface-glass p-3 mb-3"><p className="text-[11px] text-red-400/70">{twitchError}</p></div>}
-        {kickError && <div className="surface-glass p-3 mb-3"><p className="text-[11px] text-red-400/70">{kickError}</p></div>}
+        {twitchError && (
+          <Card padding={12} className="mb-3">
+            <p className="text-[11px]" style={{ color: "var(--bd-red-text)" }}>{twitchError}</p>
+          </Card>
+        )}
+        {kickError && (
+          <Card padding={12} className="mb-3">
+            <p className="text-[11px]" style={{ color: "var(--bd-red-text)" }}>{kickError}</p>
+          </Card>
+        )}
 
-        <div className="surface-glass p-3 mb-6 flex items-center gap-2">
+        <Card padding={12} className="mb-6 flex items-center gap-2">
           <PlatformIcon platform="kick" size="sm" />
           {editingSlug ? (
             <>
@@ -75,39 +91,41 @@ export default function StreamStatsApp() {
                 value={slugDraft}
                 onChange={(e) => setSlugDraft(e.target.value)}
                 placeholder="Kick channel slug"
-                className="flex-1 bg-white/[0.03] border border-white/[0.08] rounded-lg px-2 py-1 text-[11px] text-white/80"
+                className="flex-1 input-glass text-[11px]"
+                style={{ padding: "6px 10px" }}
               />
-              <button
+              <Button
+                variant="success"
+                size="sm"
                 onClick={() => {
                   setKickSlug(slugDraft.trim());
                   setEditingSlug(false);
                 }}
-                className="text-[11px] text-green-400"
               >
                 Save
-              </button>
+              </Button>
             </>
           ) : (
             <>
               <span className="text-[11px] text-white/50 flex-1">
                 {kickSlug ? `Tracking Kick: ${kickSlug}` : "No Kick channel set — Kick stats need a connected account (Multi-Chat) and a channel slug."}
               </span>
-              <button onClick={() => setEditingSlug(true)} className="text-[11px] text-white/40 hover:text-white/70">
+              <Button variant="ghost" size="sm" onClick={() => setEditingSlug(true)}>
                 {kickSlug ? "Change" : "Set"}
-              </button>
+              </Button>
             </>
           )}
-        </div>
+        </Card>
 
-        <div className="surface-glass p-3 mb-6 flex items-center gap-2">
+        <Card padding={12} className="mb-6 flex items-center gap-2">
           <PlatformIcon platform="joystick" size="sm" />
           <span className="text-[11px] text-white/50 flex-1">
             Joystick.tv has no public stats API — open your real dashboard to see viewers, followers, and tips.
           </span>
-          <button onClick={openJoystickReporting} className="text-[11px] text-white/40 hover:text-white/70">
+          <Button variant="ghost" size="sm" onClick={openJoystickReporting}>
             Open Reporting
-          </button>
-        </div>
+          </Button>
+        </Card>
 
         {/* Stats grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
@@ -120,7 +138,7 @@ export default function StreamStatsApp() {
         </div>
 
         {/* Viewer history — real polled samples, not synthesized */}
-        <div className="card-glass p-5">
+        <Card padding={20}>
           <h4 className="text-[12px] font-semibold text-white/70 mb-4">Viewer History (this session)</h4>
           {history.length < 2 ? (
             <div className="text-center py-10 text-white/20 text-sm">Collecting data — checks every 20s while a platform is connected.</div>
@@ -145,11 +163,11 @@ export default function StreamStatsApp() {
               </div>
             </>
           )}
-        </div>
+        </Card>
 
         {/* Platform breakdown */}
         {platforms.length > 0 && (
-          <div className="mt-4 card-glass p-5">
+          <Card padding={20} className="mt-4">
             <h4 className="text-[12px] font-semibold text-white/70 mb-3">Platform Breakdown</h4>
             <div className="space-y-3">
               {platforms.map((p) => {
@@ -167,7 +185,7 @@ export default function StreamStatsApp() {
                 );
               })}
             </div>
-          </div>
+          </Card>
         )}
       </div>
     </div>
