@@ -10,6 +10,7 @@ pub mod metadata;
 pub mod metadata_signing;
 pub mod multichat;
 pub mod server;
+pub mod stream_manager;
 use config::{AppConfig, EngineStatus};
 
 use serde::Deserialize;
@@ -2588,6 +2589,10 @@ pub fn run() {
             alerts::alerts_eventsub_subscribe,
             alerts::twitch_stream_stats,
             multichat::kick_channel_stats,
+            stream_manager::stream_manager_get_twitch_info,
+            stream_manager::stream_manager_update_twitch,
+            stream_manager::stream_manager_get_kick_info,
+            stream_manager::stream_manager_update_kick,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

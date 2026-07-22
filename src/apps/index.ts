@@ -7,3 +7,4 @@ import "./alerts-hub";
 import "./sound-board";
 import "./notes-commands";
 import "./statusforge";
+import "./stream-manager";
