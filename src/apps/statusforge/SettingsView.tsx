@@ -324,7 +324,7 @@ function EngineSubTab({
                   ))}
                   <span className="text-[11px] font-medium text-white/50 ml-2">
                     Waterfall Mode:{" "}
-                    <span className="text-purple-300">
+                    <span className="text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)]">
                       {config.engine_settings.strict_forge_mode ? "Strict Lockdown" : "Standard"}
                     </span>
                   </span>
@@ -486,7 +486,7 @@ function EngineSubTab({
                                 Processes consuming less memory are discarded as non-games
                               </p>
                             </div>
-                            <span className="text-xs font-mono font-semibold text-purple-300">
+                            <span className="text-xs font-mono font-semibold text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)]">
                               {config.engine_settings.ram_threshold} MB
                             </span>
                           </div>
@@ -746,7 +746,7 @@ function EngineSubTab({
                                 Minimum score needed to count as a game
                               </p>
                             </div>
-                            <span className="text-xs font-mono font-semibold text-purple-300">
+                            <span className="text-xs font-mono font-semibold text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)]">
                               {config.engine_settings.confidence_threshold.toFixed(1)}
                             </span>
                           </div>
@@ -781,7 +781,7 @@ function EngineSubTab({
                   {/* Stage 6: Forged Output */}
                   <div className="flex items-center justify-between py-3">
                     <div className="flex items-center gap-3.5">
-                      <span className="w-6 h-6 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-bold flex items-center justify-center shrink-0">
+                      <span className="w-6 h-6 rounded-lg bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_15%)] text-[10px] font-bold flex items-center justify-center shrink-0">
                         6
                       </span>
                       <div>
@@ -877,7 +877,7 @@ function EngineSubTab({
           description="What to show when no game is running."
           icon="🌙"
           badge={
-            <span className="text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-2.5 py-1 rounded-full font-semibold max-w-[120px] truncate">
+            <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-full font-semibold max-w-[120px] truncate">
               {config.engine_settings.idle_category || "None"}
             </span>
           }
@@ -1476,7 +1476,7 @@ function ApiRoutingSubTab({ toast }: { toast: (msg: string, type?: ToastType) =>
       >
         <div
           ref={floatingRef}
-          className={`relative w-[380px] h-full max-h-[600px] m-4 flex flex-col bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-purple-900/20 ${
+          className={`relative w-[380px] h-full max-h-[600px] m-4 flex flex-col bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] ${
             floatingClosing ? "animate-float-card-out" : "animate-float-card-in"
           }`}
         >
@@ -1616,7 +1616,7 @@ function ApiRoutingSubTab({ toast }: { toast: (msg: string, type?: ToastType) =>
           onClick={() => setSection("keys")}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 border cursor-pointer ${
             section === "keys"
-              ? "bg-purple-500/15 text-purple-300 border-purple-500/25 shadow-md shadow-purple-500/5"
+              ? "bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_15%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] border-[color-mix(in_srgb,var(--user-accent,#9146ff)_25%,transparent)] shadow-md shadow-[color-mix(in_srgb,var(--user-accent,#9146ff)_5%,transparent)]"
               : "bg-transparent text-white/40 border-transparent hover:text-white/80 hover:bg-white/[0.04]"
           }`}
         >
@@ -1632,7 +1632,7 @@ function ApiRoutingSubTab({ toast }: { toast: (msg: string, type?: ToastType) =>
           onClick={() => setSection("routing")}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 border cursor-pointer ${
             section === "routing"
-              ? "bg-purple-500/15 text-purple-300 border-purple-500/25 shadow-md shadow-purple-500/5"
+              ? "bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_15%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] border-[color-mix(in_srgb,var(--user-accent,#9146ff)_25%,transparent)] shadow-md shadow-[color-mix(in_srgb,var(--user-accent,#9146ff)_5%,transparent)]"
               : "bg-transparent text-white/40 border-transparent hover:text-white/80 hover:bg-white/[0.04]"
           }`}
         >
@@ -1653,7 +1653,7 @@ function ApiRoutingSubTab({ toast }: { toast: (msg: string, type?: ToastType) =>
             <h3 className="text-white font-semibold">API Keys</h3>
             <button
               onClick={() => openFloating("keys")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 hover:border-purple-500/40 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_15%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_25%,transparent)] hover:bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_25%,transparent)] hover:border-[color-mix(in_srgb,var(--user-accent,#9146ff)_40%,transparent)] transition-all cursor-pointer"
             >
               <span className="text-sm leading-none">+</span>
               Add Key
@@ -1706,7 +1706,7 @@ function ApiRoutingSubTab({ toast }: { toast: (msg: string, type?: ToastType) =>
                     key={entry.key}
                     className={`rounded-xl border transition-all duration-200 ${
                       isEditing
-                        ? "bg-white/[0.04] border-purple-500/30"
+                        ? "bg-white/[0.04] border-[color-mix(in_srgb,var(--user-accent,#9146ff)_30%,transparent)]"
                         : "bg-white/[0.02] border-white/[0.06] hover:border-white/10"
                     }`}
                   >
@@ -1792,7 +1792,7 @@ function ApiRoutingSubTab({ toast }: { toast: (msg: string, type?: ToastType) =>
             <h3 className="text-white font-semibold">Broadcaster Routing</h3>
             <button
               onClick={() => openFloating("routing")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/25 hover:bg-purple-500/25 hover:border-purple-500/40 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_15%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_25%,transparent)] hover:bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_25%,transparent)] hover:border-[color-mix(in_srgb,var(--user-accent,#9146ff)_40%,transparent)] transition-all cursor-pointer"
             >
               <span className="text-sm leading-none">+</span>
               Add Integration
@@ -1875,7 +1875,7 @@ function ApiRoutingSubTab({ toast }: { toast: (msg: string, type?: ToastType) =>
                     key={entry.key}
                     className={`rounded-xl border transition-all duration-200 ${
                       isEditing
-                        ? "bg-white/[0.04] border-purple-500/30"
+                        ? "bg-white/[0.04] border-[color-mix(in_srgb,var(--user-accent,#9146ff)_30%,transparent)]"
                         : "bg-white/[0.02] border-white/[0.06] hover:border-white/10"
                     }`}
                   >
@@ -2060,7 +2060,7 @@ function AboutSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
         icon="ℹ️"
         defaultOpen={true}
         badge={
-          <span className="text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-2.5 py-1 rounded-full font-semibold">
+          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-full font-semibold">
             StatusForge v{appVersion || "…"}
           </span>
         }
@@ -2126,7 +2126,7 @@ function AdvancedAnimations({
               onClick={() => set("transitionSpeed", speed)}
               className={`px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
                 prefs.transitionSpeed === speed
-                  ? "bg-purple-500/15 text-purple-300 border-purple-500/25 shadow"
+                  ? "bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_15%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] border-[color-mix(in_srgb,var(--user-accent,#9146ff)_25%,transparent)] shadow"
                   : "bg-white/[0.03] text-white/40 border-white/[0.06] hover:bg-white/[0.06]"
               }`}
             >
@@ -2413,7 +2413,7 @@ function SystemSubTab({
         description="Control what happens when your computer starts."
         icon="🚀"
         badge={
-          <span className="text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-2.5 py-1 rounded-full font-semibold">
+          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-full font-semibold">
             {startupCount} / 3 Enabled
           </span>
         }
@@ -2483,7 +2483,7 @@ function SystemSubTab({
         description="Get desktop notifications for important events."
         icon="🔔"
         badge={
-          <span className="text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-2.5 py-1 rounded-full font-semibold">
+          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-full font-semibold">
             {notifyCount} / 3 Active
           </span>
         }
@@ -2528,7 +2528,7 @@ function SystemSubTab({
         description="Publish live status events to a custom webhook."
         icon="🎮"
         badge={
-          <span className="text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-2.5 py-1 rounded-full font-semibold">
+          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-full font-semibold">
             {integrationsCount} / 1 Hooked
           </span>
         }
@@ -3168,7 +3168,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
           <span
             className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
               prefs.bgImage
-                ? "bg-purple-500/10 border-purple-500/20 text-purple-300"
+                ? "bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)]"
                 : "bg-white/5 border-white/5 text-white/40"
             }`}
           >
@@ -3258,7 +3258,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
                 How visible the background image is
               </p>
             </div>
-            <span className="text-xs font-mono font-semibold text-purple-300">
+            <span className="text-xs font-mono font-semibold text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)]">
               {prefs.bgOpacity}%
             </span>
           </div>
@@ -3286,7 +3286,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
                 Blur the background image
               </p>
             </div>
-            <span className="text-xs font-mono font-semibold text-purple-300">
+            <span className="text-xs font-mono font-semibold text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)]">
               {prefs.bgBlur}px
             </span>
           </div>
@@ -3325,7 +3325,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
                 How transparent panel backgrounds are
               </p>
             </div>
-            <span className="text-xs font-mono font-semibold text-purple-300">
+            <span className="text-xs font-mono font-semibold text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)]">
               {prefs.panelOpacity}%
             </span>
           </div>
@@ -3370,7 +3370,7 @@ function ThemeSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
               <span className="text-xs text-white/75 font-medium font-sans">Global Font Scale</span>
               <p className="text-[10px] text-white/35 mt-0.5">Scale text size across the app</p>
             </div>
-            <span className="text-xs font-mono font-semibold text-purple-300">
+            <span className="text-xs font-mono font-semibold text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)]">
               {prefs.fontScale}%
             </span>
           </div>
