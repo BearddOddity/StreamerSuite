@@ -62,7 +62,7 @@ export default function StreamTimerApp() {
     : 0;
 
   return (
-    <div className="h-full flex flex-col items-center justify-center p-8 bg-[#050505]">
+    <div className="h-full flex flex-col items-center justify-center p-8">
       <div className="w-full max-w-lg">
         {/* Mode toggle */}
         <div className="flex items-center justify-center gap-2 mb-8">
