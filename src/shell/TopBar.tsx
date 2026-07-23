@@ -1,16 +1,15 @@
 import { getApp } from "@/apps/registry";
+import { openAppInNewWindow } from "./popout";
 
 interface Props {
   activeAppId: string | null;
   onOpenLauncher: () => void;
   onOpenSettings: () => void;
-  onOpenMultiChatPopout?: () => void;
 }
 
 const MAIN_SETTINGS_ID = "__main-settings__";
-const MULTI_CHAT_ID = "multi-chat";
 
-export default function TopBar({ activeAppId, onOpenLauncher, onOpenSettings, onOpenMultiChatPopout }: Props) {
+export default function TopBar({ activeAppId, onOpenLauncher, onOpenSettings }: Props) {
   const isMainSettings = activeAppId === MAIN_SETTINGS_ID;
   const activeApp = activeAppId && !isMainSettings ? getApp(activeAppId) : null;
 
@@ -49,11 +48,11 @@ export default function TopBar({ activeAppId, onOpenLauncher, onOpenSettings, on
 
       {/* Right side */}
       <div className="ml-auto flex items-center gap-2">
-        {activeAppId === MULTI_CHAT_ID && onOpenMultiChatPopout && (
+        {activeApp && (
           <button
-            onClick={onOpenMultiChatPopout}
+            onClick={() => openAppInNewWindow(activeApp.id, activeApp.name)}
             className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-all shrink-0"
-            title="Open Multi-Chat in a new window"
+            title={`Open ${activeApp.name} in a new window`}
           >
             <span className="text-base leading-none">🪟</span>
           </button>

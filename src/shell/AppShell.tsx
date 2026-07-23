@@ -4,14 +4,12 @@ import Launcher from "./Launcher";
 import TopBar from "./TopBar";
 import MainSettingsPage from "@/components/settings/MainSettingsPage";
 import type { SettingsTabId } from "@/components/settings/MainSettingsPage";
-import EmbeddedMultiChat, { openPopoutWindow } from "@/apps/multi-chat/EmbeddedMultiChat";
-import { useSharedSettings } from "@/settings";
+import EmbeddedMultiChat from "@/apps/multi-chat/EmbeddedMultiChat";
 
 const MAIN_SETTINGS_ID = "__main-settings__";
 const MULTI_CHAT_ID = "multi-chat";
 
 export default function AppShell() {
-  const { theme } = useSharedSettings();
   const [activeAppId, setActiveAppId] = useState<string | null>(null);
   const [launcherOpen, setLauncherOpen] = useState(true);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("apiKeys");
@@ -47,12 +45,7 @@ export default function AppShell() {
 
   return (
     <div className="flex flex-col h-screen w-screen text-white/80 font-sans overflow-hidden">
-      <TopBar
-        activeAppId={activeAppId}
-        onOpenLauncher={handleOpenLauncher}
-        onOpenSettings={() => openSettings()}
-        onOpenMultiChatPopout={() => openPopoutWindow(theme.accentColor)}
-      />
+      <TopBar activeAppId={activeAppId} onOpenLauncher={handleOpenLauncher} onOpenSettings={() => openSettings()} />
       <div className="flex-1 min-h-0 relative overflow-hidden">
         {isMainSettings ? (
           <MainSettingsPage initialTab={settingsTab} onBack={handleOpenLauncher} />
