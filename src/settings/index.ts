@@ -1,5 +1,7 @@
 export { SharedSettingsProvider, useSharedSettings, STORAGE_KEY, SETTINGS_CHANGED_EVENT } from "./SharedSettingsContext";
 export { defaultSharedSettings } from "./types";
+export { resolveImageSrc } from "./resolveImageSrc";
+export { compressImage } from "./compressImage";
 export type {
   SharedSettings,
   ApiKeys,

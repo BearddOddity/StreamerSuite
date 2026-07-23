@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { defaultSharedSettings, type SharedSettings, type ApiKeys, type RoutingConfig, type SystemConfig, type ThemeConfig, type DetectionConfig, type EngineSettings } from "./types";
+import { resolveImageSrc } from "./resolveImageSrc";
 
 // ─── Context value ───────────────────────────────────────────────────────────
 
@@ -186,15 +187,17 @@ function migrateLegacy(): Partial<SharedSettings> | null {
 
 // ─── Load / merge ────────────────────────────────────────────────────────────
 
-// A previously-stored oversized wallpaper (from before uploads were
-// size-capped, or from testing an earlier build) can make every future
-// write fail with QuotaExceededError before the write-time recovery in
-// the persist effect ever gets a chance to run — the corrupted value
+// A previously-stored oversized wallpaper (from before uploads went
+// through compressImage, or from testing an earlier build) can make every
+// future write fail with QuotaExceededError before the write-time recovery
+// in the persist effect ever gets a chance to run — the corrupted value
 // just sits there forever. Stripping it here, at load time, means a
 // profile carrying old bloated data self-heals on the very next launch
 // instead of staying permanently stuck with settings that appear to do
-// nothing.
-const MAX_BG_IMAGE_CHARS = 300_000;
+// nothing. Set well above what compressImage's 1920px/JPEG@85% output
+// normally produces (typically a few hundred KB), so it only ever catches
+// genuinely oversized/corrupted values, not legitimate compressed photos.
+const MAX_BG_IMAGE_CHARS = 3_000_000;
 function sanitizeLoaded(settings: SharedSettings): SharedSettings {
   if (settings.theme?.bgImage && settings.theme.bgImage.length > MAX_BG_IMAGE_CHARS) {
     return { ...settings, theme: { ...settings.theme, bgImage: "" } };
@@ -304,7 +307,7 @@ export function SharedSettingsProvider({ children }: { children: ReactNode }) {
     root.style.setProperty("--user-bg", t.bgColor);
     root.style.setProperty("--user-bg-opacity", String(t.bgOpacity / 100));
     root.style.setProperty("--user-bg-blur", `${t.bgBlur}px`);
-    root.style.setProperty("--user-bg-image", t.bgImage ? `url(${t.bgImage})` : "none");
+    root.style.setProperty("--user-bg-image", t.bgImage ? `url(${resolveImageSrc(t.bgImage)})` : "none");
     root.style.setProperty("--user-panel-opacity", String(t.panelOpacity / 100));
     root.style.setProperty("--user-font-scale", String(t.fontScale / 100));
     root.style.setProperty("--user-radius", t.borderRadius === "sharp" ? "2px" : t.borderRadius === "soft" ? "8px" : "16px");
