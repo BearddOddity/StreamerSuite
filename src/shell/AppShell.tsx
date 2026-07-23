@@ -5,6 +5,7 @@ import TopBar from "./TopBar";
 import MainSettingsPage from "@/components/settings/MainSettingsPage";
 import type { SettingsTabId } from "@/components/settings/MainSettingsPage";
 import EmbeddedMultiChat from "@/apps/multi-chat/EmbeddedMultiChat";
+import { openAppInNewWindow } from "./popout";
 
 const MAIN_SETTINGS_ID = "__main-settings__";
 const MULTI_CHAT_ID = "multi-chat";
@@ -35,6 +36,12 @@ export default function AppShell() {
   const isMainSettings = activeAppId === MAIN_SETTINGS_ID;
   const isMultiChat = !launcherOpen && activeAppId === MULTI_CHAT_ID;
 
+  const handlePopOutActiveApp = useCallback(() => {
+    if (!activeApp) return;
+    openAppInNewWindow(activeApp.id, activeApp.name);
+    handleOpenLauncher();
+  }, [activeApp, handleOpenLauncher]);
+
   const categories = [
     { id: "chat", label: "Chat" },
     { id: "tools", label: "Tools" },
@@ -45,7 +52,12 @@ export default function AppShell() {
 
   return (
     <div className="flex flex-col h-screen w-screen text-white/80 font-sans overflow-hidden">
-      <TopBar activeAppId={activeAppId} onOpenLauncher={handleOpenLauncher} onOpenSettings={() => openSettings()} />
+      <TopBar
+        activeAppId={activeAppId}
+        onOpenLauncher={handleOpenLauncher}
+        onOpenSettings={() => openSettings()}
+        onPopOutActiveApp={handlePopOutActiveApp}
+      />
       <div className="flex-1 min-h-0 relative overflow-hidden">
         {isMainSettings ? (
           <MainSettingsPage initialTab={settingsTab} onBack={handleOpenLauncher} />
