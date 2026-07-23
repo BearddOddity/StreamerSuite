@@ -4,8 +4,10 @@ import Launcher from "./Launcher";
 import TopBar from "./TopBar";
 import MainSettingsPage from "@/components/settings/MainSettingsPage";
 import type { SettingsTabId } from "@/components/settings/MainSettingsPage";
+import EmbeddedMultiChat from "@/apps/multi-chat/EmbeddedMultiChat";
 
 const MAIN_SETTINGS_ID = "__main-settings__";
+const MULTI_CHAT_ID = "multi-chat";
 
 export default function AppShell() {
   const [activeAppId, setActiveAppId] = useState<string | null>(null);
@@ -31,6 +33,7 @@ export default function AppShell() {
   const activeApp = activeAppId && activeAppId !== MAIN_SETTINGS_ID ? getApp(activeAppId) : null;
   const ActiveComponent = activeApp?.component;
   const isMainSettings = activeAppId === MAIN_SETTINGS_ID;
+  const isMultiChat = !launcherOpen && activeAppId === MULTI_CHAT_ID;
 
   const categories = [
     { id: "chat", label: "Chat" },
@@ -52,9 +55,16 @@ export default function AppShell() {
             categories={categories.map((c) => ({ ...c, apps: getAppsByCategory(c.id) }))}
             onLaunch={handleLaunchApp}
           />
-        ) : ActiveComponent ? (
+        ) : ActiveComponent && activeAppId !== MULTI_CHAT_ID ? (
           <ActiveComponent />
         ) : null}
+        {/* Always mounted (never unmounted on navigation, only hidden) so its
+            chat connections stay alive in the background exactly like a
+            real second window would — matching what navigating away from a
+            standalone Multi-Chat window used to do. */}
+        <div className={isMultiChat ? "absolute inset-0" : "hidden"}>
+          <EmbeddedMultiChat />
+        </div>
       </div>
     </div>
   );
