@@ -2581,13 +2581,24 @@ function applyChatStyle() {
   shell.style.setProperty("--msg-max-width", settings.narrowBubbles ? "320px" : "560px");
   document.documentElement.style.setProperty("--bg-blur", (Number(settings.bgBlur) || 0) + "px");
   const bg = $("bg-layer");
-  bg.style.backgroundColor = hexToRgba(settings.bgColor, settings.bgOpacity);
-  if (settings.bgImage) {
-    bg.style.backgroundImage = `url("${settings.bgImage}")`;
-    bg.style.backgroundBlendMode = "overlay"; // the color+opacity above now tints the image instead of hiding it
-  } else {
+  if (tauriInvoke) {
+    // Embedded in StreamerSuite (real Tauri context, as opposed to a raw
+    // OBS browser-source overlay with no Tauri context at all): defer to
+    // the app's own shared Base Background Color / Background Wallpaper
+    // (applied to body::before, sitting behind #mc-embed-root) instead of
+    // this panel's own separate bgColor/bgImage/bgOpacity settings, which
+    // only make sense for the standalone overlay use case.
+    bg.style.backgroundColor = "transparent";
     bg.style.backgroundImage = "none";
-    bg.style.backgroundBlendMode = "normal";
+  } else {
+    bg.style.backgroundColor = hexToRgba(settings.bgColor, settings.bgOpacity);
+    if (settings.bgImage) {
+      bg.style.backgroundImage = `url("${settings.bgImage}")`;
+      bg.style.backgroundBlendMode = "overlay"; // the color+opacity above now tints the image instead of hiding it
+    } else {
+      bg.style.backgroundImage = "none";
+      bg.style.backgroundBlendMode = "normal";
+    }
   }
 }
 
