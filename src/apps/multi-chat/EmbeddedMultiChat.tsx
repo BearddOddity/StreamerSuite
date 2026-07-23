@@ -1,6 +1,4 @@
 import { useEffect, useRef } from "react";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { emit } from "@tauri-apps/api/event";
 
 // Multi-Chat's real frontend is a self-contained vanilla HTML/CSS/JS app
 // (public/multichat/) — no build step, no React, written before this app's
@@ -14,47 +12,14 @@ import { emit } from "@tauri-apps/api/event";
 // separate-webview bridging needed), and it shares this document's CSS
 // custom properties, so accent/theme changes apply live with zero glue
 // code (see the --bd-accent handling below).
+//
+// "Open in a new window" is handled generically for every app by
+// shell/popout.ts + PopoutShell (a fresh window loading this same
+// component via ?popout=multi-chat) rather than a bespoke popout here —
+// that new window gets its own SharedSettingsProvider reading the same
+// shared localStorage, so it inherits --bd-accent the same way the
+// embedded copy does, with no event-bridging needed either.
 const ROOT_ID = "mc-embed-root";
-const POPOUT_LABEL = "multichat";
-
-// The popout is a genuinely separate webview/document (its own
-// localStorage, its own :root), so — unlike the embedded copy above — it
-// can't just inherit --bd-accent through CSS. It listens for this Tauri
-// event instead (see the bottom of multichat.js). A brand-new window
-// hasn't necessarily finished loading and registered that listener by the
-// time it's created, so this re-sends for a couple seconds after open
-// rather than emitting once and risking the first (only) emit landing
-// before anyone's listening.
-function pushAccentColor(accentColor: string) {
-  for (const delay of [0, 300, 800, 1500]) {
-    setTimeout(() => {
-      emit("streamersuite://theme-accent", { accentColor }).catch(() => {});
-    }, delay);
-  }
-}
-
-// Exported for TopBar's "open in a new window" button — it lives there,
-// not floating over this component's own render, since every edge of the
-// embedded pane is already used by multichat's own UI (top bar, filters
-// row, compose bar), so an overlay button here has no collision-free spot
-// to sit in regardless of window width or which drawer is open.
-export async function openPopoutWindow(accentColor: string) {
-  const existing = await WebviewWindow.getByLabel(POPOUT_LABEL);
-  if (existing) {
-    await existing.setFocus();
-    return;
-  }
-  new WebviewWindow(POPOUT_LABEL, {
-    url: "/multichat/index.html",
-    title: "Multi-Chat",
-    width: 560,
-    height: 900,
-    minWidth: 320,
-    minHeight: 480,
-    resizable: true,
-  });
-  pushAccentColor(accentColor);
-}
 
 // multichat.js's own :root block hardcodes a fallback purple for
 // --bd-accent (needed when the page loads standalone, e.g. as an OBS

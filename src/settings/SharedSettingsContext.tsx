@@ -295,6 +295,21 @@ export function SharedSettingsProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, onExternalChange);
   }, []);
 
+  // Same idea, but across windows: a popout (see shell/popout.ts) is a
+  // genuinely separate document, so SETTINGS_CHANGED_EVENT (a same-document
+  // custom event) never reaches it. The native `storage` event exists for
+  // exactly this — it only ever fires in *other* windows sharing this
+  // origin's localStorage, never the one that made the write, so there's
+  // no self-echo case to guard against here the way there is above.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY) return;
+      setState(load());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   // Apply CSS custom properties for theme
   useEffect(() => {
     const root = document.documentElement;
