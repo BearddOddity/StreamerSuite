@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { emit } from "@tauri-apps/api/event";
-import { defaultSharedSettings, type SharedSettings, type ApiKeys, type RoutingConfig, type SystemConfig, type ThemeConfig, type DetectionConfig, type EngineSettings } from "./types";
+import { defaultSharedSettings, type SharedSettings, type ApiKeys, type RoutingConfig, type SystemConfig, type ThemeConfig } from "./types";
 import { resolveImageSrc } from "./resolveImageSrc";
 
 // ─── Context value ───────────────────────────────────────────────────────────
@@ -18,12 +18,6 @@ interface SharedSettingsContextValue extends SharedSettings {
   // Theme
   setTheme: (theme: ThemeConfig) => void;
   updateTheme: (field: keyof ThemeConfig, value: ThemeConfig[keyof ThemeConfig]) => void;
-  // Detection
-  setDetection: (detection: DetectionConfig) => void;
-  updateDetection: (field: keyof DetectionConfig, value: DetectionConfig[keyof DetectionConfig]) => void;
-  // Engine
-  setEngine: (engine: EngineSettings) => void;
-  updateEngine: (field: keyof EngineSettings, value: EngineSettings[keyof EngineSettings]) => void;
   // Import / merge (for migration from StatusForge standalone)
   mergeFromStatusForge: (sf: Partial<SharedSettings>) => void;
 }
@@ -165,19 +159,6 @@ function migrateLegacy(): Partial<SharedSettings> | null {
         modalAnimations: p.modalAnimations ?? defaultSharedSettings.theme.modalAnimations,
         progressBarAnimation: p.progressBarAnimation ?? defaultSharedSettings.theme.progressBarAnimation,
         buttonHoverEffects: p.buttonHoverEffects ?? defaultSharedSettings.theme.buttonHoverEffects,
-      };
-    }
-  } catch { /* ignore */ }
-
-  try {
-    const raw = localStorage.getItem("statusforge_dev_settings");
-    if (raw) {
-      foundAny = true;
-      const p = JSON.parse(raw);
-      migrated.detection = {
-        ...defaultSharedSettings.detection,
-        devToolsEnabled: p.devToolsEnabled ?? defaultSharedSettings.detection.devToolsEnabled,
-        closedBetaChannel: p.closedBetaChannel ?? defaultSharedSettings.detection.closedBetaChannel,
       };
     }
   } catch { /* ignore */ }
@@ -377,12 +358,6 @@ export function SharedSettingsProvider({ children }: { children: ReactNode }) {
     // Theme
     setTheme: (theme) => setState((s) => ({ ...s, theme })),
     updateTheme: (field, value) => updateSection("theme", field, value),
-    // Detection
-    setDetection: (detection) => setState((s) => ({ ...s, detection })),
-    updateDetection: (field, value) => updateSection("detection", field, value),
-    // Engine
-    setEngine: (engine) => setState((s) => ({ ...s, engine })),
-    updateEngine: (field, value) => updateSection("engine", field, value),
     // Merge
     mergeFromStatusForge: (sf) => setState((s) => deepMerge(s, sf) as SharedSettings),
   };

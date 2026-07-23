@@ -62,6 +62,16 @@ export interface SystemConfig {
   wsAutoReconnect: boolean;
   autoConnectChannels: boolean;
   updateChannel: "stable" | "beta" | "closed-beta";
+  // StatusForge-only extras (surfaced only in StatusForge's own Settings ->
+  // System sub-tab, not in StreamerSuite's centralized General tab) — kept
+  // in the unified store so they persist through the same storage/sync
+  // mechanism as everything else, instead of a private localStorage key
+  // that could silently drift out of sync.
+  autoUpdateCheckEnabled: boolean;
+  showDevTools: boolean;
+  showAccessTokens: boolean;
+  onboardingComplete: boolean;
+  setupBannerDismissed: boolean;
 }
 
 // ── Theme (merged from StatusForge ThemePrefs + main ThemeTab) ───────────────
@@ -112,49 +122,6 @@ export interface ThemeConfig {
   buttonHoverEffects: boolean;
 }
 
-// ── Detection (from StatusForge) ─────────────────────────────────────────────
-
-export type DetectionMode = "python" | "native" | "spark";
-
-export interface DetectionConfig {
-  mode: DetectionMode;
-  pythonFallback: boolean;
-  scanIntervalSecs: number;
-  devToolsEnabled: boolean;
-  closedBetaChannel: boolean;
-}
-
-// ── Engine Settings (from StatusForge) ───────────────────────────────────────
-
-export interface EngineSettings {
-  idleCategory: string;
-  scanInterval: number;
-  gracePeriod: number;
-  widgetPollRate: number;
-  widgetFadeTimer: number;
-  safeMode: boolean;
-  autoPush: boolean;
-  strictForgeMode: boolean;
-  emulatorDetection: boolean;
-  ramThreshold: number;
-  processFilterBypass: boolean;
-  confidenceThreshold: number;
-  // Behavior Trap toggles
-  trapChromium: boolean;
-  trapCmdline: boolean;
-  trapUiFramework: boolean;
-  trapGeometry: boolean;
-  // Confidence scoring toggles
-  scoreEngineDna: boolean;
-  scoreFullscreen: boolean;
-  scoreWindowTitle: boolean;
-  scoreRam: boolean;
-  // Spark
-  sparkPin: string;
-  // Widget
-  widgetToken: string;
-}
-
 // ── Main unified settings ────────────────────────────────────────────────────
 
 export interface SharedSettings {
@@ -162,8 +129,6 @@ export interface SharedSettings {
   routing: RoutingConfig;
   system: SystemConfig;
   theme: ThemeConfig;
-  detection: DetectionConfig;
-  engine: EngineSettings;
 }
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
@@ -216,6 +181,11 @@ export const defaultSharedSettings: SharedSettings = {
     customWebhookUrl: "",
     wsAutoReconnect: true,
     updateChannel: "stable",
+    autoUpdateCheckEnabled: true,
+    showDevTools: false,
+    showAccessTokens: false,
+    onboardingComplete: false,
+    setupBannerDismissed: false,
   },
   theme: {
     accentColor: "#9146FF",
@@ -254,36 +224,5 @@ export const defaultSharedSettings: SharedSettings = {
     modalAnimations: true,
     progressBarAnimation: true,
     buttonHoverEffects: true,
-  },
-  detection: {
-    mode: "python",
-    pythonFallback: true,
-    scanIntervalSecs: 5,
-    devToolsEnabled: false,
-    closedBetaChannel: false,
-  },
-  engine: {
-    idleCategory: "Just Chatting",
-    scanInterval: 15,
-    gracePeriod: 0,
-    widgetPollRate: 8,
-    widgetFadeTimer: 15,
-    safeMode: false,
-    autoPush: false,
-    strictForgeMode: false,
-    emulatorDetection: true,
-    ramThreshold: 80,
-    processFilterBypass: false,
-    confidenceThreshold: 0.5,
-    trapChromium: true,
-    trapCmdline: true,
-    trapUiFramework: true,
-    trapGeometry: true,
-    scoreEngineDna: true,
-    scoreFullscreen: true,
-    scoreWindowTitle: true,
-    scoreRam: true,
-    sparkPin: "0000",
-    widgetToken: "",
   },
 };

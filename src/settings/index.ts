@@ -14,7 +14,4 @@ export type {
   RadiusPreset,
   TransitionSpeed,
   ChatDensity,
-  DetectionConfig,
-  DetectionMode,
-  EngineSettings,
 } from "./types";
