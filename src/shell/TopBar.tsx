@@ -1,15 +1,15 @@
 import { getApp } from "@/apps/registry";
-import { openAppInNewWindow } from "./popout";
 
 interface Props {
   activeAppId: string | null;
   onOpenLauncher: () => void;
   onOpenSettings: () => void;
+  onPopOutActiveApp?: () => void;
 }
 
 const MAIN_SETTINGS_ID = "__main-settings__";
 
-export default function TopBar({ activeAppId, onOpenLauncher, onOpenSettings }: Props) {
+export default function TopBar({ activeAppId, onOpenLauncher, onOpenSettings, onPopOutActiveApp }: Props) {
   const isMainSettings = activeAppId === MAIN_SETTINGS_ID;
   const activeApp = activeAppId && !isMainSettings ? getApp(activeAppId) : null;
 
@@ -48,9 +48,9 @@ export default function TopBar({ activeAppId, onOpenLauncher, onOpenSettings }: 
 
       {/* Right side */}
       <div className="ml-auto flex items-center gap-2">
-        {activeApp && (
+        {activeApp && onPopOutActiveApp && (
           <button
-            onClick={() => openAppInNewWindow(activeApp.id, activeApp.name)}
+            onClick={onPopOutActiveApp}
             className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-all shrink-0"
             title={`Open ${activeApp.name} in a new window`}
           >
