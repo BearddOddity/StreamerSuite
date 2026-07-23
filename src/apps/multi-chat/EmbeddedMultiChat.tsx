@@ -1,4 +1,7 @@
 import { useEffect, useRef } from "react";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { emit } from "@tauri-apps/api/event";
+import { useSharedSettings } from "@/settings";
 
 // Multi-Chat's real frontend is a self-contained vanilla HTML/CSS/JS app
 // (public/multichat/) — no build step, no React, written before this app's
@@ -13,6 +16,41 @@ import { useEffect, useRef } from "react";
 // custom properties, so accent/theme changes apply live with zero glue
 // code (see the --bd-accent handling below).
 const ROOT_ID = "mc-embed-root";
+const POPOUT_LABEL = "multichat";
+
+// The popout is a genuinely separate webview/document (its own
+// localStorage, its own :root), so — unlike the embedded copy above — it
+// can't just inherit --bd-accent through CSS. It listens for this Tauri
+// event instead (see the bottom of multichat.js). A brand-new window
+// hasn't necessarily finished loading and registered that listener by the
+// time it's created, so this re-sends for a couple seconds after open
+// rather than emitting once and risking the first (only) emit landing
+// before anyone's listening.
+function pushAccentColor(accentColor: string) {
+  for (const delay of [0, 300, 800, 1500]) {
+    setTimeout(() => {
+      emit("streamersuite://theme-accent", { accentColor }).catch(() => {});
+    }, delay);
+  }
+}
+
+async function openPopoutWindow(accentColor: string) {
+  const existing = await WebviewWindow.getByLabel(POPOUT_LABEL);
+  if (existing) {
+    await existing.setFocus();
+    return;
+  }
+  new WebviewWindow(POPOUT_LABEL, {
+    url: "/multichat/index.html",
+    title: "Multi-Chat",
+    width: 560,
+    height: 900,
+    minWidth: 320,
+    minHeight: 480,
+    resizable: true,
+  });
+  pushAccentColor(accentColor);
+}
 
 // multichat.js's own :root block hardcodes a fallback purple for
 // --bd-accent (needed when the page loads standalone, e.g. as an OBS
@@ -37,6 +75,7 @@ function scopeMultichatCss(css: string): string {
 }
 
 export default function EmbeddedMultiChat() {
+  const { theme } = useSharedSettings();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -102,5 +141,16 @@ export default function EmbeddedMultiChat() {
     };
   }, []);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return (
+    <div className="relative h-full w-full">
+      <div ref={containerRef} className="h-full w-full" />
+      <button
+        onClick={() => openPopoutWindow(theme.accentColor)}
+        title="Open in a new window"
+        className="absolute top-[10px] right-[52px] z-10 w-9 h-9 rounded-lg flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-all cursor-pointer bg-transparent border-none"
+      >
+        🪟
+      </button>
+    </div>
+  );
 }
