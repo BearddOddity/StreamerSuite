@@ -211,7 +211,7 @@ function ChecklistPanel() {
 
 export default function StreamManagerApp() {
   return (
-    <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
+    <div className="h-full flex flex-col p-6 overflow-y-auto">
       <div className="max-w-2xl mx-auto w-full">
         <div className="mb-6">
           <SectionHead

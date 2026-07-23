@@ -17,7 +17,7 @@ export default function SceneSwitcherApp() {
   const connected = status === "connected";
 
   return (
-    <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
+    <div className="h-full flex flex-col p-6 overflow-y-auto">
       <div className="max-w-2xl mx-auto w-full">
         {/* Header */}
         <div className="mb-6">

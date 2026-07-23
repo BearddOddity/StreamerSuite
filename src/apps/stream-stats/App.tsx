@@ -45,7 +45,7 @@ export default function StreamStatsApp() {
   ].filter((p): p is NonNullable<typeof p> => p !== null && p.live);
 
   return (
-    <div className="h-full flex flex-col p-6 bg-[#050505] overflow-y-auto">
+    <div className="h-full flex flex-col p-6 overflow-y-auto">
       <div className="max-w-3xl mx-auto w-full">
         {/* Header */}
         <div className="mb-6">
