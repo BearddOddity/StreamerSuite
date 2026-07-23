@@ -3,11 +3,10 @@ import { useSharedSettings } from "@/settings";
 import GeneralTab from "./GeneralTab";
 import ApiKeysTab from "./ApiKeysTab";
 import ThemeTab from "./ThemeTab";
-import EngineTab from "./EngineTab";
 import AboutTab from "./AboutTab";
 import { SubTabBtn } from "./SettingsComponents";
 
-export type SettingsTabId = "general" | "engine" | "apiKeys" | "theme" | "about";
+export type SettingsTabId = "general" | "apiKeys" | "theme" | "about";
 
 interface Props {
   initialTab?: SettingsTabId;
@@ -16,7 +15,6 @@ interface Props {
 
 const tabs: { id: SettingsTabId; label: string; icon: string }[] = [
   { id: "general", label: "General", icon: "⚙️" },
-  { id: "engine", label: "Engine", icon: "⚡" },
   { id: "apiKeys", label: "Connections & Keys", icon: "🔑" },
   { id: "theme", label: "Appearance", icon: "🎨" },
   { id: "about", label: "About", icon: "ℹ️" },
@@ -67,15 +65,6 @@ export default function MainSettingsPage({ initialTab, onBack }: Props) {
           <GeneralTab
             {...settings.system}
             onFieldChange={settings.updateSystem}
-          />
-        )}
-        {activeTab === "engine" && (
-          <EngineTab
-            engine={settings.engine}
-            detection={settings.detection}
-            devUnlocked={settings.detection.devToolsEnabled}
-            onEngineChange={settings.updateEngine}
-            onDetectionChange={settings.updateDetection}
           />
         )}
         {activeTab === "apiKeys" && <ApiKeysTab />}

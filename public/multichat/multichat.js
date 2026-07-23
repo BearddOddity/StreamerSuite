@@ -2316,13 +2316,19 @@ function buildSettingsDrawer() {
     tpRow.append(tp);
     body.append(tpRow);
   }
-  const fsRow = el("div", "cv-settings-row");
-  fsRow.append(el("span", "cv-settings-label", "Font Size"));
-  const fs = el("input", "cv-num");
-  fs.type = "number"; fs.min = 11; fs.max = 24; fs.value = settings.fontSize;
-  fs.onchange = () => { settings.fontSize = Math.max(11, Math.min(24, Number(fs.value) || 14)); saveSet(); };
-  fsRow.append(fs);
-  body.append(fsRow);
+  if (!tauriInvoke) {
+    // Embedded in StreamerSuite, chat font follows the shared Appearance ->
+    // Chat settings (see applyChatStyle) instead of this panel's own copy —
+    // only the standalone overlay (no Tauri context, no shared settings to
+    // draw from) needs its own font controls.
+    const fsRow = el("div", "cv-settings-row");
+    fsRow.append(el("span", "cv-settings-label", "Font Size"));
+    const fs = el("input", "cv-num");
+    fs.type = "number"; fs.min = 11; fs.max = 24; fs.value = settings.fontSize;
+    fs.onchange = () => { settings.fontSize = Math.max(11, Math.min(24, Number(fs.value) || 14)); saveSet(); };
+    fsRow.append(fs);
+    body.append(fsRow);
+  }
 
   const msRow = el("div", "cv-settings-row");
   const msLab = el("div");
@@ -2335,15 +2341,17 @@ function buildSettingsDrawer() {
   msRow.append(ms);
   body.append(msRow);
 
-  const ffRow = el("div", "cv-settings-row");
-  ffRow.append(el("span", "cv-settings-label", "Font Family"));
-  const ff = el("input", "cv-input");
-  ff.style.width = "150px"; ff.placeholder = "system default"; ff.value = settings.fontFamily;
-  ff.onchange = () => { settings.fontFamily = ff.value; saveSet(); };
-  ffRow.append(ff);
-  body.append(ffRow);
+  if (!tauriInvoke) {
+    const ffRow = el("div", "cv-settings-row");
+    ffRow.append(el("span", "cv-settings-label", "Font Family"));
+    const ff = el("input", "cv-input");
+    ff.style.width = "150px"; ff.placeholder = "system default"; ff.value = settings.fontFamily;
+    ff.onchange = () => { settings.fontFamily = ff.value; saveSet(); };
+    ffRow.append(ff);
+    body.append(ffRow);
+  }
 
-  if (!isOverlay) {
+  if (!tauriInvoke) {
     const bgRow = el("div", "cv-settings-row");
     bgRow.append(el("span", "cv-settings-label", "Background"));
     const wrap = el("div", "cv-color-wrap");
@@ -2428,7 +2436,7 @@ function buildSettingsDrawer() {
   bpRow.append(bp);
   body.append(bpRow);
 
-  if (!isOverlay) {
+  if (!tauriInvoke) {
     const boRow = el("div", "cv-settings-row");
     const boLab = el("div");
     boLab.append(el("div", "cv-settings-label", "Background Opacity"));
@@ -2571,9 +2579,21 @@ function hexToRgba(hex, pct) {
 }
 function applyChatStyle() {
   const shell = $("shell");
-  shell.style.setProperty("--chat-font-size", Math.max(11, Math.min(24, Number(settings.fontSize) || 14)) + "px");
-  const fam = (settings.fontFamily || "").trim();
-  shell.style.setProperty("--chat-font-family", fam ? `"${fam}", var(--font-ui)` : "var(--font-ui)");
+  if (tauriInvoke) {
+    // Embedded in StreamerSuite: follow the shared Appearance -> Chat font
+    // settings live via CSS variable reference (already applied to :root by
+    // SharedSettingsContext) instead of this panel's own separate
+    // fontSize/fontFamily, which are hidden in the settings drawer here and
+    // only meaningful for the standalone overlay use case below. Referencing
+    // rather than resolving-and-copying means a theme change while Multi-Chat
+    // is mounted in the background takes effect without re-running this.
+    shell.style.setProperty("--chat-font-size", "var(--user-chat-font-size, 14px)");
+    shell.style.setProperty("--chat-font-family", "var(--user-chat-font-family, var(--font-ui))");
+  } else {
+    shell.style.setProperty("--chat-font-size", Math.max(11, Math.min(24, Number(settings.fontSize) || 14)) + "px");
+    const fam = (settings.fontFamily || "").trim();
+    shell.style.setProperty("--chat-font-family", fam ? `"${fam}", var(--font-ui)` : "var(--font-ui)");
+  }
   shell.style.setProperty("--bottom-pad", (Number(settings.bottomPad) || 0) + "px");
   shell.style.setProperty("--glass-blur", (Number(settings.glassBlur) || 0) + "px");
   shell.style.setProperty("--glass-alpha", Math.max(0, Math.min(100, Number(settings.glassOpacity) || 0)) / 100);
