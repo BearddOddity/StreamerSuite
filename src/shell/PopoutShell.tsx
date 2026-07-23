@@ -10,7 +10,7 @@ export default function PopoutShell({ appId }: { appId: string }) {
 
   return (
     <SharedSettingsProvider>
-      <div className="h-screen w-screen overflow-hidden bg-[#050505] text-white/80 font-sans">
+      <div className="h-screen w-screen overflow-hidden text-white/80 font-sans">
         {Component ? (
           <Component />
         ) : (
