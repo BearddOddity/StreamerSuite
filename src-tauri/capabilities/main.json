@@ -1,7 +1,7 @@
 {
   "identifier": "main",
   "description": "Main window permissions",
-  "windows": ["main", "multichat", "multichat-docked"],
+  "windows": ["main", "multichat"],
   "permissions": [
     "core:default",
     "fs:default",

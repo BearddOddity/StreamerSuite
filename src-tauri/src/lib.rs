@@ -5,7 +5,6 @@ pub mod feedback;
 pub mod pusher;
 pub use forge_detection as scanner;
 pub mod blipy_protocol;
-pub mod docking;
 pub mod hub;
 pub mod metadata;
 pub mod metadata_signing;
@@ -2606,8 +2605,6 @@ pub fn run() {
             overlay_manager::overlay_create_from_template,
             overlay_manager::overlay_get_template_params,
             overlay_manager::overlay_update_template,
-            docking::dock_multichat,
-            docking::undock_multichat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
