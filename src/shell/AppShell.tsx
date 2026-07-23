@@ -41,7 +41,7 @@ export default function AppShell() {
   ] as const;
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#050505] text-white/80 font-sans overflow-hidden">
+    <div className="flex flex-col h-screen w-screen text-white/80 font-sans overflow-hidden">
       <TopBar activeAppId={activeAppId} onOpenLauncher={handleOpenLauncher} onOpenSettings={() => openSettings()} />
       <div className="flex-1 min-h-0 relative overflow-hidden">
         {isMainSettings ? (
