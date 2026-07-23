@@ -14,7 +14,7 @@
 // only their storage backing changed — so nothing in App.tsx or
 // SettingsView.tsx needed to change.
 
-import { STORAGE_KEY, SETTINGS_CHANGED_EVENT, defaultSharedSettings } from "@/settings";
+import { STORAGE_KEY, SETTINGS_CHANGED_EVENT, defaultSharedSettings, resolveImageSrc } from "@/settings";
 import type { ThemeConfig } from "@/settings";
 
 export interface ThemePrefs {
@@ -112,11 +112,11 @@ function toThemePrefs(theme: ThemeConfig): ThemePrefs {
   };
 }
 
-// See the matching guard in SharedSettingsContext.tsx's load(): a
-// previously-stored oversized wallpaper must be stripped on read too, or
-// every write through this path re-inherits it and keeps failing the
-// localStorage quota forever.
-const MAX_BG_IMAGE_CHARS = 300_000;
+// See the matching guard (and its size rationale) in
+// SharedSettingsContext.tsx's load(): a previously-stored oversized
+// wallpaper must be stripped on read too, or every write through this path
+// re-inherits it and keeps failing the localStorage quota forever.
+const MAX_BG_IMAGE_CHARS = 3_000_000;
 
 function readUnifiedTheme(): ThemeConfig {
   try {
@@ -215,7 +215,7 @@ export function applyThemePrefs(prefs: ThemePrefs) {
   root.style.setProperty("--user-bg", prefs.bgColor);
   root.style.setProperty("--user-bg-opacity", String(prefs.bgOpacity / 100));
   root.style.setProperty("--user-bg-blur", `${prefs.bgBlur}px`);
-  root.style.setProperty("--user-bg-image", prefs.bgImage ? `url(${prefs.bgImage})` : "none");
+  root.style.setProperty("--user-bg-image", prefs.bgImage ? `url(${resolveImageSrc(prefs.bgImage)})` : "none");
   root.style.setProperty("--user-panel-opacity", String(prefs.panelOpacity / 100));
   root.style.setProperty("--user-font-scale", String(prefs.fontScale / 100));
   root.style.setProperty("--user-font-family", `"${(prefs.fontFamily || "Montserrat").trim()}"`);

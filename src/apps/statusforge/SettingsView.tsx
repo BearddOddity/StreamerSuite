@@ -14,6 +14,7 @@ import {
 } from "@statusforge/components/SettingsComponents";
 import OAuthConnectModal from "@statusforge/components/OAuthConnectModal";
 import { type ThemePrefs, loadThemePrefs, saveThemePrefs, applyThemePrefs } from "@statusforge/theme";
+import { compressImage } from "@/settings";
 import {
   type SystemPrefs,
   loadSystemPrefs,
@@ -2776,47 +2777,6 @@ const BG_PRESETS: { name: string; color: string }[] = [
 // ─── Image Compression Helper ────────────────────────────────────────────────
 // Compresses uploaded images to JPEG at 85% quality, max 1920px, to keep
 // data URLs small enough for localStorage (~5MB quota).
-function compressImage(file: File, maxSize = 1920, quality = 0.85): Promise<string> {
-  return new Promise((resolve, reject) => {
-    // Reject files larger than 25MB (before compression)
-    if (file.size > 25 * 1024 * 1024) {
-      reject(new Error("Image too large. Max 25 MB."));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        let w = img.width;
-        let h = img.height;
-        if (w > maxSize || h > maxSize) {
-          if (w > h) {
-            h = Math.round((h * maxSize) / w);
-            w = maxSize;
-          } else {
-            w = Math.round((w * maxSize) / h);
-            h = maxSize;
-          }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("Canvas not supported"));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      };
-      img.onerror = () => reject(new Error("Failed to load image"));
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsDataURL(file);
-  });
-}
-
 // The individual toggles inside the Animations "Advanced" dropdown — kept in
 // one place so the Quality/Performance master switches can drive them all.
 const ADVANCED_ANIM_KEYS = [

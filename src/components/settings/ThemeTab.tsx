@@ -1,4 +1,5 @@
 import type { ThemeConfig, Density, RadiusPreset, TransitionSpeed, ChatDensity } from "@/settings";
+import { compressImage } from "@/settings";
 import {
   Toggle,
   SettingsRow,
@@ -161,24 +162,19 @@ export default function ThemeTab(props: Props) {
             <input type="file" accept="image/*" className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
+                e.target.value = "";
                 if (!file) return;
                 // Wallpapers are stored as base64 inside the shared settings
                 // blob (localStorage), which has a ~5-10MB per-origin quota
                 // shared with every other setting — an oversized image blows
                 // past that and silently fails *every* future settings write,
-                // not just this one. Cap well under the quota; a URL avoids
-                // this limit entirely.
-                const MAX_BYTES = 750 * 1024;
-                if (file.size > MAX_BYTES) {
-                  window.alert(
-                    `That image is too large (${Math.round(file.size / 1024)}KB). Please pick one under ${Math.round(MAX_BYTES / 1024)}KB, or paste an image URL instead.`
-                  );
-                  e.target.value = "";
-                  return;
-                }
-                const reader = new FileReader();
-                reader.onload = (ev) => u("bgImage", ev.target?.result as string);
-                reader.readAsDataURL(file);
+                // not just this one. compressImage downsizes to 1920px and
+                // re-encodes as JPEG@85%, which keeps typical photos well
+                // under the quota regardless of the original file size (up
+                // to 25MB) instead of just rejecting anything too big.
+                compressImage(file)
+                  .then((compressed) => u("bgImage", compressed))
+                  .catch((err) => window.alert(err.message || "Failed to process image"));
               }} />
           </label>
           <input type="url" value={props.bgImage.startsWith("data:") ? "" : props.bgImage}
