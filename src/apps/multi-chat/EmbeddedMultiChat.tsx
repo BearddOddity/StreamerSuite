@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { emit } from "@tauri-apps/api/event";
-import { useSharedSettings } from "@/settings";
 
 // Multi-Chat's real frontend is a self-contained vanilla HTML/CSS/JS app
 // (public/multichat/) — no build step, no React, written before this app's
@@ -34,7 +33,12 @@ function pushAccentColor(accentColor: string) {
   }
 }
 
-async function openPopoutWindow(accentColor: string) {
+// Exported for TopBar's "open in a new window" button — it lives there,
+// not floating over this component's own render, since every edge of the
+// embedded pane is already used by multichat's own UI (top bar, filters
+// row, compose bar), so an overlay button here has no collision-free spot
+// to sit in regardless of window width or which drawer is open.
+export async function openPopoutWindow(accentColor: string) {
   const existing = await WebviewWindow.getByLabel(POPOUT_LABEL);
   if (existing) {
     await existing.setFocus();
@@ -71,11 +75,26 @@ function scopeMultichatCss(css: string): string {
     // leak onto this app's real <body> instead, and its color/font-family
     // values reference tokens that only exist inside #mc-embed-root, so
     // outside that scope they'd resolve to nothing.
-    .replace(/html,\s*body\s*\{[^}]*\}/, `#${ROOT_ID} { height: 100%; }`);
+    .replace(/html,\s*body\s*\{[^}]*\}/, `#${ROOT_ID} { height: 100%; position: relative; }`)
+    // multichat's drawers/backdrops/palette/menu/toast/bg-layer all use
+    // position: fixed, meant to cover "the whole page" when it WAS the
+    // whole page. Embedded, that instead covers the *entire StreamerSuite
+    // window* — including the TopBar above this pane — and the open
+    // Channels/Settings drawer's backdrop has pointer-events: auto,
+    // silently blocking clicks on the launcher/settings buttons the whole
+    // time a drawer is open (which is the default state on first load,
+    // since Channels auto-opens with no channels connected). #mc-embed-root
+    // is given `position: relative` below so these anchor to *it* instead.
+    .replace(/position:\s*fixed/g, "position: absolute")
+    // .cv-shell sizes itself to 100vh/100dvh — the full OS window height,
+    // meant for when multichat WAS the window. Embedded, that's taller
+    // than the actual pane (AppShell's TopBar takes some of that height),
+    // pushing the bottom of multichat (its compose bar) past the visible
+    // area, clipped off by the container's overflow-hidden.
+    .replace(/height:\s*100vh;\s*height:\s*100dvh;/, "height: 100%;");
 }
 
 export default function EmbeddedMultiChat() {
-  const { theme } = useSharedSettings();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -141,16 +160,5 @@ export default function EmbeddedMultiChat() {
     };
   }, []);
 
-  return (
-    <div className="relative h-full w-full">
-      <div ref={containerRef} className="h-full w-full" />
-      <button
-        onClick={() => openPopoutWindow(theme.accentColor)}
-        title="Open in a new window"
-        className="absolute top-[10px] right-[52px] z-10 w-9 h-9 rounded-lg flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-all cursor-pointer bg-transparent border-none"
-      >
-        🪟
-      </button>
-    </div>
-  );
+  return <div ref={containerRef} className="h-full w-full" />;
 }
