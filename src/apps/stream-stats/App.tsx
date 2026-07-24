@@ -69,7 +69,7 @@ export default function StreamStatsApp() {
         {/* Connection hints */}
         {!twitchConnected && (
           <Card padding={12} className="mb-3">
-            <p className="text-[11px] text-amber-400/70">⚠️ Connect Twitch in Alerts Hub to see Twitch stats.</p>
+            <p className="text-[11px] text-amber-400/70">⚠️ Connect Twitch in StreamerSuite Settings → Connections & Keys to see Twitch stats.</p>
           </Card>
         )}
         {twitchError && (
@@ -108,7 +108,7 @@ export default function StreamStatsApp() {
           ) : (
             <>
               <span className="text-[11px] text-white/50 flex-1">
-                {kickSlug ? `Tracking Kick: ${kickSlug}` : "No Kick channel set — Kick stats need a connected account (Multi-Chat) and a channel slug."}
+                {kickSlug ? `Tracking Kick: ${kickSlug}` : "No Kick channel set — connect Kick in StreamerSuite Settings → Connections & Keys, or set a channel slug here."}
               </span>
               <Button variant="ghost" size="sm" onClick={() => setEditingSlug(true)}>
                 {kickSlug ? "Change" : "Set"}

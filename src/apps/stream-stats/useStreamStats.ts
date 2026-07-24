@@ -25,16 +25,20 @@ export function useStreamStats() {
   kickSlugRef.current = kickSlug;
 
   const poll = useCallback(async () => {
-    const [account, twitchResult, kickResult] = await Promise.all([
-      invoke<{ username: string; user_id: string } | null>("alerts_oauth_get_account").catch(() => null),
+    const [config, twitchResult, kickResult] = await Promise.all([
+      // Twitch connection status now comes from StreamerSuite's centralized
+      // Routing config, not alerts-hub's own (now-removed) OAuth account —
+      // twitch_stream_stats already reads the same shared credentials.
+      invoke<{ broadcaster?: { twitch_token?: string; twitch_client?: string } }>("export_config").catch(() => null),
       invoke<TwitchStats>("twitch_stream_stats").catch((e: unknown) => e),
       kickSlugRef.current.trim()
         ? invoke<KickStats>("kick_channel_stats", { slug: kickSlugRef.current.trim() }).catch((e: unknown) => e)
         : Promise.resolve(null),
     ]);
 
-    setTwitchConnected(!!account);
-    if (account) {
+    const connected = !!(config?.broadcaster?.twitch_token && config?.broadcaster?.twitch_client);
+    setTwitchConnected(connected);
+    if (connected) {
       if (twitchResult && typeof twitchResult === "object" && "is_live" in twitchResult) {
         setTwitch(twitchResult as TwitchStats);
         setTwitchError("");
@@ -81,6 +85,20 @@ export function useStreamStats() {
     const id = setInterval(poll, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [poll]);
+
+  // Default the Kick slug from StreamerSuite's centralized Routing config
+  // the first time it's empty here, same as Multi-Chat and Alerts Hub —
+  // one connection, not three separate slugs to keep typing in sync.
+  useEffect(() => {
+    if (kickSlugRef.current) return;
+    invoke<{ broadcaster?: { kick_channel_id?: string } }>("export_config")
+      .then((cfg) => {
+        const slug = cfg?.broadcaster?.kick_channel_id;
+        if (slug && !kickSlugRef.current) setKickSlug(slug);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Real, in-session viewer history — sampled from actual polls, not
   // synthesized. Starts empty and fills in as polls land; nothing is
