@@ -1238,13 +1238,35 @@ fn disconnect_platform(platform: String) -> Result<String, String> {
         ],
         _ => return Err(format!("Unknown platform: {}", platform)),
     };
+    // A deletion failure here used to be logged and silently ignored — the
+    // command still returned Ok, so the UI reported "disconnected" while
+    // the token sat untouched in the OS keychain. The very next config
+    // load's backfill_from_keychain (see auth.rs) would then read that
+    // still-present entry straight back into the (just-cleared) in-memory
+    // config, making disconnect look like it had no effect at all. Track
+    // real failures now and fail the command instead of pretending it worked.
+    let mut failed_deletes = Vec::new();
     for name in keychain_names {
-        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, name) {
-            match entry.delete_credential() {
+        match keyring::Entry::new(KEYRING_SERVICE, name) {
+            Ok(entry) => match entry.delete_credential() {
                 Ok(()) | Err(keyring::Error::NoEntry) => {}
-                Err(e) => log::warn!("[KEYCHAIN] Failed to delete {} on disconnect: {}", name, e),
+                Err(e) => {
+                    log::warn!("[KEYCHAIN] Failed to delete {} on disconnect: {}", name, e);
+                    failed_deletes.push(format!("{name}: {e}"));
+                }
+            },
+            Err(e) => {
+                log::warn!("[KEYCHAIN] Couldn't open keychain entry {} to delete it: {}", name, e);
+                failed_deletes.push(format!("{name}: {e}"));
             }
         }
+    }
+    if !failed_deletes.is_empty() {
+        return Err(format!(
+            "Couldn't fully clear {} from the OS keychain ({}) — it may reappear after reconnecting. Try again, or clear it manually from your OS credential manager.",
+            platform,
+            failed_deletes.join(", ")
+        ));
     }
 
     let base = app_base_dir()?;
