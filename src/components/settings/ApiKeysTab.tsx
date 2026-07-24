@@ -132,7 +132,15 @@ const ROUTING_CATALOG: {
    * to paste there. Omitted for platforms (Joystick) whose OAuth flow
    * doesn't take a redirect_uri param at all. */
   redirectUri?: string;
-  userFields: { key: string; label: string; hint?: string; optional?: boolean }[];
+  userFields: {
+    key: string;
+    label: string;
+    hint?: string;
+    optional?: boolean;
+    /** Only relevant to the manual-token path — hide once connected via
+     * OAuth, since a live OAuth connection already covers what these do. */
+    manualAlt?: boolean;
+  }[];
   managedFields?: { key: string; label: string }[];
 }[] = [
   {
@@ -162,15 +170,20 @@ const ROUTING_CATALOG: {
         label: "Access Token (Optional)",
         hint: "Alternate to Client Secret — paste a token here if you generate one yourself (your own OAuth tool/callback). Client ID is still required — Twitch's API needs it on every request regardless of how the token was obtained.",
         optional: true,
+        manualAlt: true,
       },
       {
         key: "twitch_broadcaster_id",
         label: "Broadcaster ID (Optional)",
         hint: 'Only needed alongside a manually-pasted Access Token — "Connect Twitch" fetches this automatically.',
         optional: true,
+        manualAlt: true,
       },
     ],
-    managedFields: [{ key: "twitch_refresh", label: "Refresh Token" }],
+    managedFields: [
+      { key: "twitch_refresh", label: "Refresh Token" },
+      { key: "twitch_username", label: "Channel Name" },
+    ],
   },
   {
     key: "kick",
@@ -198,6 +211,7 @@ const ROUTING_CATALOG: {
         label: "Access Token (Optional)",
         hint: "Alternate to Client ID and Client Secret — paste a token here if you generate one yourself (your own OAuth tool/callback). Kick's API doesn't need either once you have a token.",
         optional: true,
+        manualAlt: true,
       },
     ],
     managedFields: [{ key: "kick_refresh", label: "Refresh Token" }],
@@ -224,6 +238,7 @@ const ROUTING_CATALOG: {
         label: "Access Token (Optional)",
         hint: "Alternate to Client ID and Client Secret — paste a token here if you generate one yourself. No client secret is exposed cross-tool this way.",
         optional: true,
+        manualAlt: true,
       },
     ],
     managedFields: [
@@ -1056,7 +1071,9 @@ export default function ApiKeysTab() {
                       <div className="px-4 pb-3 pt-0">
                         <div className="ml-9 flex flex-col gap-3">
                           <div className="flex flex-col gap-2.5">
-                            {entry.userFields.map((f) => {
+                            {entry.userFields
+                              .filter((f) => !(f.manualAlt && hasOauth))
+                              .map((f) => {
                               return (
                                 <div key={f.key}>
                                   <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">
