@@ -166,6 +166,12 @@ const ROUTING_CATALOG: {
         hint: "Required — Twitch's authorization-code exchange rejects the request without it, even for apps that also send PKCE.",
       },
       {
+        key: "twitch_username",
+        label: "Channel Name",
+        hint: '"Connect Twitch" fetches this automatically — Multi-Chat defaults its channel to whatever\'s here.',
+        optional: true,
+      },
+      {
         key: "twitch_token",
         label: "Access Token (Optional)",
         hint: "Alternate to Client Secret — paste a token here if you generate one yourself (your own OAuth tool/callback). Client ID is still required — Twitch's API needs it on every request regardless of how the token was obtained.",
@@ -180,10 +186,7 @@ const ROUTING_CATALOG: {
         manualAlt: true,
       },
     ],
-    managedFields: [
-      { key: "twitch_refresh", label: "Refresh Token" },
-      { key: "twitch_username", label: "Channel Name" },
-    ],
+    managedFields: [{ key: "twitch_refresh", label: "Refresh Token" }],
   },
   {
     key: "kick",
