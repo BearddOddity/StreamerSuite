@@ -1864,53 +1864,27 @@ function buildChannelsDrawer() {
   };
   const hint = html => { const h = el("div", "cv-hint"); h.innerHTML = html; return h; }; // static strings only
 
-  // Client ID/Secret + "register an app" instructions + Connect button —
-  // shown directly while setting up, tucked into a closed disclosure once
-  // the account is already connected (see accountSection below).
-  function oauthSetupBlock(platform) {
+  // Twitch and Kick both connect through StreamerSuite's centralized
+  // Settings now (Settings → Connections & Keys) instead of a login form
+  // here — this module reads the same shared AppConfig those write to
+  // (see multichat.rs's shared_cred_get), so this is just a status readout
+  // + pointer rather than its own OAuth form.
+  function centralConnectionNote(platform, label) {
     const frag = document.createDocumentFragment();
-    const cid = el("input", "cv-input mono");
-    cid.placeholder = "Client ID";
-    const csec = el("input", "cv-input mono");
-    csec.placeholder = "Client Secret";
-    csec.type = "password";
-    frag.append(cid, csec);
-    const savedNote = el("div", "cv-hint");
-    tauriInvoke("oauth_get_client_id", { platform }).then(v => { if (v) cid.value = v; });
-    tauriInvoke("oauth_has_client_secret", { platform }).then(has => {
-      if (has) { csec.placeholder = "•••••••• (saved — leave blank to keep)"; savedNote.textContent = "Client ID and Secret are saved — only fill these in to replace them."; }
-    });
-    frag.append(savedNote);
     const row = el("div", "cv-settings-row");
     row.style.border = "none"; row.style.padding = "0";
-    const btn = el("button", "cv-btn cta", "🔑 Connect Account");
-    btn.onclick = () => connectOAuth(platform, cid.value.trim(), csec.value.trim(), btn);
-    row.append(btn);
+    const status = el("span", "cv-settings-label", "Checking…");
+    row.append(status);
     frag.append(row);
-    const redirectHint = platform === "twitch"
-      ? `Register an app at <a href="#" data-open-url="https://dev.twitch.tv/console/apps">dev.twitch.tv/console/apps</a> with OAuth redirect URL <code>http://localhost:${OAUTH_PORT}/callback</code>.`
-      : `Register an app at <a href="#" data-open-url="https://kick.com/settings/developer">kick.com/settings/developer</a> with redirect URI <code>http://localhost:${OAUTH_PORT}/callback</code>.`;
-    frag.append(hint(redirectHint));
-    return frag;
-  }
-
-  // Connected status + Delete Connection when linked; setup fields directly
-  // visible (uncollapsed) when not — used for Twitch/Kick account login.
-  function accountSection(platform, connectedNote) {
-    const frag = document.createDocumentFragment();
-    const account = oauthAccounts[platform];
-    if (account) {
-      const row = el("div", "cv-settings-row");
-      row.style.border = "none"; row.style.padding = "0";
-      row.append(el("span", "cv-settings-label", "🟢 Connected as " + account.username));
-      const btn = el("button", "cv-btn danger", "Delete Connection");
-      btn.onclick = () => disconnectOAuth(platform);
-      row.append(btn);
-      frag.append(row);
-      if (connectedNote) frag.append(hint(connectedNote));
-      frag.append(disclosure("Setup info", oauthSetupBlock(platform), false));
+    frag.append(hint(`${label} is connected in one place now — open StreamerSuite Settings &rarr; Connections &amp; Keys to connect or manage it. Changes apply here automatically.`));
+    if (tauriInvoke) {
+      tauriInvoke("export_config").then(cfg => {
+        const b = cfg && cfg.broadcaster;
+        const connected = !!(b && b[`${platform}_token`] && b[`${platform}_client`]);
+        status.textContent = connected ? "🟢 Connected via StreamerSuite Settings" : "⚪ Not connected";
+      }).catch(() => { status.textContent = "⚪ Not connected"; });
     } else {
-      frag.append(oauthSetupBlock(platform));
+      status.textContent = "⚪ Not connected";
     }
     return frag;
   }
@@ -1971,13 +1945,13 @@ function buildChannelsDrawer() {
   body.append(platformCard("twitch", "Twitch", [
     input(channels.twitch, "channel name (e.g. beardds)", v => channels.twitch = v),
     hint("Used for anonymous read (no account) and to pick the channel once connected."),
-  ], accountSection("twitch", "Reading chat now uses Twitch's real API (EventSub) instead of anonymous IRC — richer data — and sending is enabled.")));
+  ], centralConnectionNote("twitch", "Twitch")));
 
   body.append(platformCard("kick", "Kick", [
     input(channels.kick, "channel slug (e.g. beardds)", v => channels.kick = v),
     input(channels.kickChatroomId, "chatroom ID (optional — auto-resolve tried first)", v => channels.kickChatroomId = v, true),
     hint("If auto-resolve fails, open <code>kick.com/api/v2/channels/&lt;slug&gt;</code> in a browser tab and paste the <code>chatroom.id</code> number."),
-  ], accountSection("kick", null)));
+  ], centralConnectionNote("kick", "Kick")));
 
   body.append(joystickCard(input, hint));
   body.append(streamerbotCard(input, hint));

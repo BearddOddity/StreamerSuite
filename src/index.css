@@ -339,6 +339,17 @@ select option {
 .animate-float-card-out { animation: float-card-out 0.2s ease-in forwards; }
 .animate-float-backdrop { animation: float-backdrop-in 0.2s ease forwards; }
 
+@keyframes oauth-pulse {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.4);
+  }
+}
+
 /* App-specific background tokens */
 :root {
   --bg-primary: #050505;
@@ -999,6 +1010,15 @@ input[type="range"]::-moz-range-thumb {
 .btn-icon-sm.remove:hover {
   background: rgba(248, 113, 113, 0.2);
   color: #f87171;
+}
+.btn-icon-sm.link {
+  background: rgba(145, 70, 255, 0.1);
+  color: rgba(192, 132, 252, 0.85);
+  border-color: rgba(145, 70, 255, 0.18);
+}
+.btn-icon-sm.link:hover {
+  background: rgba(145, 70, 255, 0.2);
+  color: #c084fc;
 }
 
 /* ── Reusable settings panel card ─────────────────────────────────────────── */

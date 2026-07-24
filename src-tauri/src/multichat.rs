@@ -1,6 +1,5 @@
 use serde::Serialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::time::Duration;
@@ -142,7 +141,7 @@ pub(crate) async fn kick_resolve_broadcaster_id(slug: String) -> Result<i64, Str
 /// than guessed at.
 #[tauri::command]
 pub(crate) async fn kick_channel_stats(slug: String) -> Result<Value, String> {
-    let access_token = kr_get("kick.access_token").ok_or("Kick not connected — connect it in Multi-Chat first")?;
+    let access_token = kr_get("kick.access_token").ok_or("Kick not connected — connect it in StreamerSuite Settings first")?;
 
     async fn get(client: &reqwest::Client, slug: &str, access_token: &str) -> Result<reqwest::Response, String> {
         client
@@ -291,26 +290,117 @@ fn random_token(len: usize) -> String {
         .collect()
 }
 
-fn base64url(bytes: &[u8]) -> String {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-    URL_SAFE_NO_PAD.encode(bytes)
-}
-
-// ── OAuth (Twitch, Kick) — native loopback callback, no external server ────
+// ── OAuth (Twitch, Kick, Joystick) ──────────────────────────────────────────
+// Twitch/Kick/Joystick credentials now live in the shared StatusForge
+// AppConfig (Config.json + the "statusforge.io" OS keychain service) instead
+// of this module's own private keychain — see config.rs's BroadcasterConfig
+// and auth::load_config_at/save_config_at. `streamerbot.password` is the one
+// credential left in this module's own keychain service, since Streamer.bot
+// has no presence in AppConfig at all.
+//
+// kr_get/kr_set/kr_delete keep their original `"{platform}.{field}"` key
+// shape so every call site below (there are dozens) didn't need to change —
+// only the routing underneath did.
 
 fn kr(account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYRING_SERVICE, account).map_err(|e| e.to_string())
 }
+
+fn shared_config() -> Result<crate::config::AppConfig, String> {
+    let base = crate::app_base_dir()?;
+    crate::auth::load_config_at(&base)
+}
+
+fn shared_save(config: &crate::config::AppConfig) -> Result<(), String> {
+    let base = crate::app_base_dir()?;
+    crate::auth::save_config_at(&base, config)
+}
+
+/// Reads a `"{platform}.{field}"` key out of the shared AppConfig. Returns
+/// `None` for an empty/absent field or an unrecognized platform/field pair.
+fn shared_cred_get(key: &str) -> Option<String> {
+    let (platform, field) = key.split_once('.')?;
+    let config = shared_config().ok()?;
+    let b = &config.broadcaster;
+    let val = match (platform, field) {
+        ("twitch", "access_token") => &b.twitch_token,
+        ("twitch", "refresh_token") => &b.twitch_refresh,
+        ("twitch", "client_id") => &b.twitch_client,
+        ("twitch", "client_secret") => &b.twitch_secret,
+        ("twitch", "user_id") => &b.twitch_broadcaster_id,
+        ("kick", "access_token") => &b.kick_token,
+        ("kick", "refresh_token") => &b.kick_refresh,
+        ("kick", "client_id") => &b.kick_client,
+        ("kick", "client_secret") => &b.kick_secret,
+        // Kick has no persisted numeric user id — the channel slug
+        // (kick_channel_id) is the closest analog and is what
+        // kick_resolve_broadcaster_id resolves from anyway.
+        ("kick", "user_id") => &b.kick_channel_id,
+        ("joystick", "access_token") => &b.joystick_token,
+        ("joystick", "refresh_token") => &b.joystick_refresh,
+        ("joystick", "client_id") => &b.joystick_client,
+        ("joystick", "client_secret") => &b.joystick_secret,
+        ("joystick", "username") => &b.joystick_username,
+        _ => return None,
+    };
+    if val.is_empty() {
+        None
+    } else {
+        Some(val.clone())
+    }
+}
+
+fn shared_cred_set(key: &str, value: &str) -> Result<(), String> {
+    let (platform, field) = key
+        .split_once('.')
+        .ok_or_else(|| format!("bad credential key {key}"))?;
+    let mut config = shared_config()?;
+    let b = &mut config.broadcaster;
+    match (platform, field) {
+        ("twitch", "access_token") => b.twitch_token = value.to_string(),
+        ("twitch", "refresh_token") => b.twitch_refresh = value.to_string(),
+        ("twitch", "client_id") => b.twitch_client = value.to_string(),
+        ("twitch", "client_secret") => b.twitch_secret = value.to_string(),
+        ("twitch", "user_id") => b.twitch_broadcaster_id = value.to_string(),
+        ("kick", "access_token") => b.kick_token = value.to_string(),
+        ("kick", "refresh_token") => b.kick_refresh = value.to_string(),
+        ("kick", "client_id") => b.kick_client = value.to_string(),
+        ("kick", "client_secret") => b.kick_secret = value.to_string(),
+        ("joystick", "access_token") => b.joystick_token = value.to_string(),
+        ("joystick", "refresh_token") => b.joystick_refresh = value.to_string(),
+        ("joystick", "client_id") => b.joystick_client = value.to_string(),
+        ("joystick", "client_secret") => b.joystick_secret = value.to_string(),
+        ("joystick", "username") => b.joystick_username = value.to_string(),
+        _ => return Err(format!("unsupported shared credential key {key}")),
+    }
+    shared_save(&config)
+}
+
 fn kr_get(account: &str) -> Option<String> {
-    kr(account).ok().and_then(|e| e.get_password().ok())
+    if account.starts_with("streamerbot.") {
+        return kr(account).ok().and_then(|e| e.get_password().ok());
+    }
+    shared_cred_get(account)
 }
 fn kr_set(account: &str, val: &str) -> Result<(), String> {
-    kr(account)?.set_password(val).map_err(|e| e.to_string())
+    if account.starts_with("streamerbot.") {
+        return kr(account)?.set_password(val).map_err(|e| e.to_string());
+    }
+    shared_cred_set(account, val)
 }
 fn kr_delete(account: &str) {
-    if let Ok(e) = kr(account) {
-        let _ = e.delete_credential();
+    if account.starts_with("streamerbot.") {
+        if let Ok(e) = kr(account) {
+            let _ = e.delete_credential();
+        }
+        return;
     }
+    // Clearing to "" rather than removing the field, but a genuine disconnect
+    // (see oauth_logout below) goes through crate::disconnect_platform
+    // instead, which also purges the OS keychain copy — plain shared_cred_set
+    // here would leave a migrated keychain entry to silently backfill the
+    // field right back in on next load.
+    let _ = shared_cred_set(account, "");
 }
 
 #[derive(Serialize, Clone)]
@@ -416,6 +506,13 @@ fn await_oauth_redirect(expected_state: &str) -> Result<String, String> {
         .map_err(|_| "timed out waiting for browser login (3 min)".to_string())?
 }
 
+/// Joystick-only now — Twitch and Kick both connect through StreamerSuite's
+/// central Settings ("Connections & Keys") instead. This is the one Joystick
+/// OAuth implementation in the app: it writes into the shared AppConfig
+/// (`broadcaster.joystick_*`, see config.rs), so both Multi-Chat's own
+/// Settings panel and the central Settings UI can invoke this same
+/// `oauth_login("joystick", ...)` command and get a connection either one
+/// can see.
 #[tauri::command]
 pub(crate) async fn oauth_login(
     app: tauri::AppHandle,
@@ -423,71 +520,42 @@ pub(crate) async fn oauth_login(
     client_id: String,
     client_secret: String,
 ) -> Result<OAuthAccount, String> {
-    if !["twitch", "kick", "joystick"].contains(&platform.as_str()) {
-        return Err("OAuth login is only available for Twitch, Kick and Joystick.tv".into());
+    if platform != "joystick" {
+        return Err(
+            "OAuth login here is only available for Joystick.tv — connect Twitch/Kick from StreamerSuite Settings → Connections & Keys.".into(),
+        );
     }
     // Blank fields mean "reuse what's already saved" — the UI pre-fills the
     // Client ID but never re-displays a saved secret, so a login retry after
     // app restart shouldn't require retyping either one.
     let client_id = if client_id.is_empty() {
-        kr_get(&format!("{platform}.client_id")).unwrap_or_default()
+        kr_get("joystick.client_id").unwrap_or_default()
     } else {
         client_id
     };
     let client_secret = if client_secret.is_empty() {
-        kr_get(&format!("{platform}.client_secret")).unwrap_or_default()
+        kr_get("joystick.client_secret").unwrap_or_default()
     } else {
         client_secret
     };
     if client_id.is_empty() || client_secret.is_empty() {
         return Err("enter the Client ID and Client Secret first".into());
     }
-    kr_set(&format!("{platform}.client_id"), &client_id)?;
-    kr_set(&format!("{platform}.client_secret"), &client_secret)?;
+    kr_set("joystick.client_id", &client_id)?;
+    kr_set("joystick.client_secret", &client_secret)?;
 
     let state = random_token(24);
-    let verifier = random_token(64);
-    // Twitch/Kick both require the literal host "localhost" for local redirect
-    // URIs — a raw IP like 127.0.0.1 is rejected at app-registration time.
-    // Joystick ignores redirect_uri in the request (it's fixed on the bot's
-    // dashboard config, which we told the user to set to this same URL).
-    let redirect_uri = format!("http://localhost:{OAUTH_PORT}/callback");
 
-    let authorize_url = if platform == "joystick" {
-        // No redirect_uri param — Joystick reads it from the bot's own config.
-        // The old `scope=bot` grants everything and still works, but
-        // Joystick's docs now ask new integrations to request explicit
-        // scopes — chat:moderate is the one that unlocks delete/timeout/ban.
-        format!(
-            "https://joystick.tv/api/oauth/authorize?response_type=code&client_id={}&scope={}&state={}",
-            urlencoding(&client_id),
-            urlencoding("identity:read chat:read chat:write chat:moderate"),
-            state
-        )
-    } else if platform == "twitch" {
-        format!(
-            "https://id.twitch.tv/oauth2/authorize?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}",
-            urlencoding(&client_id),
-            urlencoding(&redirect_uri),
-            // user:read:chat is required for EventSub's channel.chat.message /
-            // channel.chat.notification (API-based chat read); user:write:chat
-            // is the separate scope Helix's send-message endpoint needs — chat:edit
-            // alone (the old IRC-era scope) doesn't cover it and 401s regardless
-            // of how many times the token gets refreshed.
-            urlencoding("chat:edit chat:read user:read:email user:read:chat user:write:chat moderator:manage:chat_messages moderator:manage:banned_users"),
-            state
-        )
-    } else {
-        let challenge = base64url(&Sha256::digest(verifier.as_bytes()));
-        format!(
-            "https://id.kick.com/oauth/authorize?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
-            urlencoding(&client_id),
-            urlencoding(&redirect_uri),
-            urlencoding("user:read channel:read chat:write moderation:ban moderation:chat_message:manage"),
-            state,
-            challenge
-        )
-    };
+    // No redirect_uri param — Joystick reads it from the bot's own config.
+    // The old `scope=bot` grants everything and still works, but Joystick's
+    // docs now ask new integrations to request explicit scopes —
+    // chat:moderate is the one that unlocks delete/timeout/ban.
+    let authorize_url = format!(
+        "https://joystick.tv/api/oauth/authorize?response_type=code&client_id={}&scope={}&state={}",
+        urlencoding(&client_id),
+        urlencoding("identity:read chat:read chat:write chat:moderate"),
+        state
+    );
 
     // tauri-plugin-shell's open() is deprecated in favor of tauri-plugin-opener,
     // but it's the proven pattern already used elsewhere in this codebase (StatusForge).
@@ -505,171 +573,91 @@ pub(crate) async fn oauth_login(
         .map_err(|e| e.to_string())??;
 
     let client = reqwest::Client::new();
-    let account = if platform == "joystick" {
-        // Joystick's token endpoint takes params in the query string (not the
-        // body) and authenticates with HTTP Basic (client_id:client_secret),
-        // not a secret parameter. No user-profile endpoint exists, so the
-        // "username" is just whatever the caller already knows/typed.
-        let resp: Value = client
-            .post("https://api.joystick.tv/api/oauth/token")
-            .query(&[
-                ("redirect_uri", "unused"),
-                ("code", code.as_str()),
-                ("grant_type", "authorization_code"),
-            ])
-            .basic_auth(&client_id, Some(&client_secret))
-            .header("Accept", "application/json")
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        let access_token = resp
-            .get("access_token")
-            .and_then(|v| v.as_str())
-            .ok_or("Joystick didn't return an access token — check the client ID/secret")?
-            .to_string();
-        let refresh_token = resp
-            .get("refresh_token")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        kr_set("joystick.access_token", &access_token)?;
-        kr_set("joystick.refresh_token", &refresh_token)?;
-        kr_set("joystick.username", "installed")?;
-        OAuthAccount { platform: "joystick".into(), username: "installed".into(), user_id: String::new() }
-    } else if platform == "twitch" {
-        let resp: Value = client
-            .post("https://id.twitch.tv/oauth2/token")
-            .form(&[
-                ("client_id", client_id.as_str()),
-                ("client_secret", client_secret.as_str()),
-                ("code", code.as_str()),
-                ("grant_type", "authorization_code"),
-                ("redirect_uri", redirect_uri.as_str()),
-            ])
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        let access_token = resp
-            .get("access_token")
-            .and_then(|v| v.as_str())
-            .ok_or("Twitch didn't return an access token — check the client ID/secret")?
-            .to_string();
-        let refresh_token = resp
-            .get("refresh_token")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let me: Value = client
-            .get("https://api.twitch.tv/helix/users")
-            .bearer_auth(&access_token)
-            .header("Client-Id", &client_id)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        let user = me
-            .pointer("/data/0")
-            .ok_or("couldn't read the Twitch account after login")?;
-        let username = user
-            .get("display_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let user_id = user
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        kr_set("twitch.access_token", &access_token)?;
-        kr_set("twitch.refresh_token", &refresh_token)?;
-        kr_set("twitch.username", &username)?;
-        kr_set("twitch.user_id", &user_id)?;
-        OAuthAccount { platform: "twitch".into(), username, user_id }
-    } else {
-        let resp: Value = client
-            .post("https://id.kick.com/oauth/token")
-            .form(&[
-                ("client_id", client_id.as_str()),
-                ("client_secret", client_secret.as_str()),
-                ("code", code.as_str()),
-                ("grant_type", "authorization_code"),
-                ("redirect_uri", redirect_uri.as_str()),
-                ("code_verifier", verifier.as_str()),
-            ])
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        let access_token = resp
-            .get("access_token")
-            .and_then(|v| v.as_str())
-            .ok_or("Kick didn't return an access token — check the client ID/secret")?
-            .to_string();
-        let refresh_token = resp
-            .get("refresh_token")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let me: Value = client
-            .get("https://api.kick.com/public/v1/users")
-            .bearer_auth(&access_token)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        let user = me
-            .pointer("/data/0")
-            .ok_or("couldn't read the Kick account after login")?;
-        let username = user
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let user_id = user
-            .get("user_id")
-            .and_then(|v| v.as_u64())
-            .map(|n| n.to_string())
-            .unwrap_or_default();
-        kr_set("kick.access_token", &access_token)?;
-        kr_set("kick.refresh_token", &refresh_token)?;
-        kr_set("kick.username", &username)?;
-        kr_set("kick.user_id", &user_id)?;
-        OAuthAccount { platform: "kick".into(), username, user_id }
-    };
-    Ok(account)
+    // Joystick's token endpoint takes params in the query string (not the
+    // body) and authenticates with HTTP Basic (client_id:client_secret), not
+    // a secret parameter. No user-profile endpoint exists, so the "username"
+    // is just a fixed placeholder — the connection itself is what matters.
+    let resp: Value = client
+        .post("https://api.joystick.tv/api/oauth/token")
+        .query(&[
+            ("redirect_uri", "unused"),
+            ("code", code.as_str()),
+            ("grant_type", "authorization_code"),
+        ])
+        .basic_auth(&client_id, Some(&client_secret))
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    let access_token = resp
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or("Joystick didn't return an access token — check the client ID/secret")?
+        .to_string();
+    let refresh_token = resp
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    kr_set("joystick.access_token", &access_token)?;
+    kr_set("joystick.refresh_token", &refresh_token)?;
+    kr_set("joystick.username", "installed")?;
+    Ok(OAuthAccount {
+        platform: "joystick".into(),
+        username: "installed".into(),
+        user_id: String::new(),
+    })
 }
 
 #[tauri::command]
 pub(crate) fn oauth_get_account(platform: String) -> Option<OAuthAccount> {
-    let username = kr_get(&format!("{platform}.username"))?;
-    if username.is_empty() {
+    if platform == "joystick" {
+        let username = kr_get("joystick.username")?;
+        if username.is_empty() {
+            return None;
+        }
+        // A stale/partial write can leave username behind without the token
+        // needed to actually call the API — don't report "connected" if
+        // that's the case, or every subsequent call fails with a confusing error.
+        kr_get("joystick.access_token")?;
+        let user_id = kr_get("joystick.user_id").unwrap_or_default();
+        return Some(OAuthAccount { platform, username, user_id });
+    }
+    // Twitch/Kick live in the shared StatusForge AppConfig now, which has no
+    // display-name field (only the broadcaster id / channel slug) — "has an
+    // access token and client id" is the connected signal here instead of a
+    // username that doesn't exist in that store. Callers in multichat.js
+    // only use `.username` as a last-resort fallback for an already-typed
+    // channel name field, so an empty one is fine.
+    let token = kr_get(&format!("{platform}.access_token"))?;
+    if token.is_empty() {
         return None;
     }
-    // A stale/partial keyring write can leave username behind without the
-    // token needed to actually call the API — don't report "connected" if
-    // that's the case, or every subsequent call fails with a confusing error.
-    kr_get(&format!("{platform}.access_token"))?;
+    kr_get(&format!("{platform}.client_id"))?;
     let user_id = kr_get(&format!("{platform}.user_id")).unwrap_or_default();
-    Some(OAuthAccount { platform, username, user_id })
+    Some(OAuthAccount {
+        platform,
+        username: String::new(),
+        user_id,
+    })
 }
 
 #[tauri::command]
 pub(crate) fn oauth_logout(platform: String) {
     // Disconnect means a clean slate — erase the saved app credentials too,
     // not just the session token, so nothing lingers after the user asks to
-    // remove a connection.
+    // remove a connection. Twitch/Kick/Joystick now live in the shared
+    // StatusForge store, so go through the same disconnect_platform() that
+    // StatusForge's own Settings UI uses — it also purges the migrated OS
+    // keychain copy, which a plain field-clear here would leave behind to
+    // silently backfill right back in on next load (see kr_delete's comment).
+    if ["twitch", "kick", "joystick"].contains(&platform.as_str()) {
+        let _ = crate::disconnect_platform(platform);
+        return;
+    }
     for suffix in ["access_token", "refresh_token", "username", "user_id", "client_id", "client_secret"] {
         kr_delete(&format!("{platform}.{suffix}"));
     }
@@ -682,11 +670,24 @@ pub(crate) fn oauth_logout(platform: String) {
 /// everything" button (via the tauri::command wrapper below) and from the
 /// NSIS uninstaller (see `--clear-credentials` in main.rs, which calls this
 /// plain function directly — no Tauri app instance exists at that point).
+///
+/// Twitch/Kick/Joystick credentials moved to the shared "statusforge.io"
+/// keychain service (see disconnect_platform in lib.rs), so both stores get
+/// wiped here: the current one, and this module's own legacy
+/// "com.bearddoddity.multichat" entries left over from before the move, in
+/// case an older install still has plaintext-adjacent secrets sitting there.
 pub fn wipe_all_credentials() {
     for platform in ["twitch", "kick", "joystick"] {
-        oauth_logout(platform.to_string());
+        for suffix in ["access_token", "refresh_token", "username", "user_id", "client_id", "client_secret"] {
+            if let Ok(entry) = kr(&format!("{platform}.{suffix}")) {
+                let _ = entry.delete_credential();
+            }
+        }
+        let _ = crate::disconnect_platform(platform.to_string());
     }
-    kr_delete("streamerbot.password");
+    if let Ok(entry) = kr("streamerbot.password") {
+        let _ = entry.delete_credential();
+    }
 }
 
 #[tauri::command]

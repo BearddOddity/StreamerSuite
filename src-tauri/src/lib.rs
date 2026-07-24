@@ -1231,6 +1231,11 @@ fn disconnect_platform(platform: String) -> Result<String, String> {
             "kick_refresh_token",
             "kick_client_secret",
         ],
+        "joystick" => &[
+            "joystick_access_token",
+            "joystick_refresh_token",
+            "joystick_client_secret",
+        ],
         _ => return Err(format!("Unknown platform: {}", platform)),
     };
     for name in keychain_names {
@@ -1254,6 +1259,12 @@ fn disconnect_platform(platform: String) -> Result<String, String> {
             config.broadcaster.kick_token.clear();
             config.broadcaster.kick_refresh.clear();
             config.broadcaster.kick_secret.clear();
+        }
+        "joystick" => {
+            config.broadcaster.joystick_token.clear();
+            config.broadcaster.joystick_refresh.clear();
+            config.broadcaster.joystick_secret.clear();
+            config.broadcaster.joystick_username.clear();
         }
         _ => unreachable!("validated above"),
     }
@@ -2582,11 +2593,6 @@ pub fn run() {
             multichat::joystick_delete_message,
             multichat::joystick_moderate_user,
             multichat::wipe_all_credentials_cmd,
-            alerts::alerts_oauth_login,
-            alerts::alerts_oauth_get_account,
-            alerts::alerts_oauth_logout,
-            alerts::alerts_oauth_get_client_id,
-            alerts::alerts_oauth_has_client_secret,
             alerts::alerts_eventsub_subscribe,
             alerts::twitch_stream_stats,
             multichat::kick_channel_stats,

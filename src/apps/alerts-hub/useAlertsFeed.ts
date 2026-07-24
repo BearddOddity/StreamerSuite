@@ -54,11 +54,23 @@ export function useAlertsFeed(settings: AlertsSettings) {
     invoke("overlay_publish_data", { key: "latest_alert", value: `${alert.user} ${alert.message}` }).catch(() => {});
   }, []);
 
+  // Twitch is connected centrally now (Settings → Connections & Keys) — read
+  // the shared AppConfig instead of a separate Alerts Hub OAuth connection.
+  // `username` isn't stored in AppConfig, only the broadcaster id, so this
+  // just reports the connection as present/absent rather than by name.
   const refreshTwitchAccount = useCallback(async () => {
     try {
-      const account = await invoke<TwitchAccount | null>("alerts_oauth_get_account");
-      setTwitchAccount(account);
-      return account;
+      const config = await invoke<{
+        broadcaster?: { twitch_token?: string; twitch_client?: string; twitch_broadcaster_id?: string };
+      }>("export_config");
+      const b = config.broadcaster;
+      if (b?.twitch_token && b?.twitch_client && b?.twitch_broadcaster_id) {
+        const account: TwitchAccount = { username: "Connected", user_id: b.twitch_broadcaster_id };
+        setTwitchAccount(account);
+        return account;
+      }
+      setTwitchAccount(null);
+      return null;
     } catch {
       setTwitchAccount(null);
       return null;

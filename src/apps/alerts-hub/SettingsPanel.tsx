@@ -1,5 +1,3 @@
-import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { PlatformIcon } from "@/components/common/PlatformIcon";
 import type { AlertsSettings, TwitchAccount } from "./types";
 import { Button, Card, Chip, StatusDot } from "../../design-system/components/core";
@@ -19,7 +17,6 @@ export function SettingsPanel({
   onUpdate,
   onToggle,
   twitchAccount,
-  onTwitchAccountChange,
   twitchStatus,
   kickStatus,
   joystickStatus,
@@ -35,30 +32,6 @@ export function SettingsPanel({
   joystickStatus: ConnStatus;
   onClose: () => void;
 }) {
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [connecting, setConnecting] = useState(false);
-  const [error, setError] = useState("");
-
-  async function connectTwitch() {
-    setConnecting(true);
-    setError("");
-    try {
-      await invoke("alerts_oauth_login", { clientId, clientSecret });
-      onTwitchAccountChange();
-      setClientSecret("");
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setConnecting(false);
-    }
-  }
-
-  async function disconnectTwitch() {
-    await invoke("alerts_oauth_logout");
-    onTwitchAccountChange();
-  }
-
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6" onClick={onClose}>
       <Card padding={24} className="w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -76,38 +49,13 @@ export function SettingsPanel({
           </div>
           {twitchAccount ? (
             <div className="flex items-center justify-between bg-white/[0.03] rounded-xl px-3 py-2">
-              <span className="text-[12px] text-white/70">Connected as <b>{twitchAccount.username}</b></span>
-              <button onClick={disconnectTwitch} className="text-[11px] text-red-400 hover:text-red-300">Disconnect</button>
+              <span className="text-[12px] text-white/70">Connected via StreamerSuite Settings</span>
             </div>
           ) : (
-            <div className="space-y-2">
-              <input
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                placeholder="Client ID"
-                className="w-full input-glass text-[12px]"
-              />
-              <input
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
-                placeholder="Client Secret"
-                type="password"
-                className="w-full input-glass text-[12px]"
-              />
-              <Button
-                variant="cta"
-                className="w-full"
-                disabled={connecting || !clientId || !clientSecret}
-                onClick={connectTwitch}
-              >
-                {connecting ? "Connecting…" : "Connect Twitch"}
-              </Button>
-              {error && <p className="text-[10px] text-red-400">{error}</p>}
-              <p className="text-[10px] text-white/30">
-                Register an app at dev.twitch.tv/console/apps with OAuth redirect URL{" "}
-                <code className="text-white/40">http://localhost:61840/callback</code>.
-              </p>
-            </div>
+            <p className="text-[10px] text-white/30">
+              Twitch is connected in one place now — open StreamerSuite Settings → Connections &amp; Keys
+              to connect your Twitch account. Alerts will start flowing here automatically once it's connected.
+            </p>
           )}
           {twitchAccount && (
             <div className="mt-2 flex flex-wrap gap-2">

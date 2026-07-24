@@ -829,6 +829,21 @@ fn backfill_from_keychain(config: &mut AppConfig) {
             config.broadcaster.kick_secret = v;
         }
     }
+    if config.broadcaster.joystick_token.is_empty() {
+        if let Some(v) = read("joystick_access_token") {
+            config.broadcaster.joystick_token = v;
+        }
+    }
+    if config.broadcaster.joystick_refresh.is_empty() {
+        if let Some(v) = read("joystick_refresh_token") {
+            config.broadcaster.joystick_refresh = v;
+        }
+    }
+    if config.broadcaster.joystick_secret.is_empty() {
+        if let Some(v) = read("joystick_client_secret") {
+            config.broadcaster.joystick_secret = v;
+        }
+    }
     if config.api_keys.igdb_token.is_empty() {
         if let Some(v) = read("igdb_api_token") {
             config.api_keys.igdb_token = v;
@@ -915,6 +930,18 @@ pub(crate) fn redact_migrated_secrets(config: &mut AppConfig) {
         "twitch_client_secret",
     );
     sync(&mut config.broadcaster.kick_secret, "kick_client_secret");
+    sync(
+        &mut config.broadcaster.joystick_token,
+        "joystick_access_token",
+    );
+    sync(
+        &mut config.broadcaster.joystick_refresh,
+        "joystick_refresh_token",
+    );
+    sync(
+        &mut config.broadcaster.joystick_secret,
+        "joystick_client_secret",
+    );
     sync(&mut config.api_keys.igdb_token, "igdb_api_token");
     sync(&mut config.api_keys.igdb_secret, "igdb_api_secret");
     sync(&mut config.api_keys.rawg, "rawg_api_key");
@@ -939,8 +966,15 @@ pub fn generate_self_signed_pem() -> Result<(String, String), String> {
 // URL Builders
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Scope list is the union of everyone who now reads this one shared Kick
+/// token: StatusForge's own category push (`channel:write`) plus what
+/// Multi-Chat's chat/moderation commands need (`chat:write`,
+/// `moderation:ban`, `moderation:chat_message:manage`) now that they read
+/// from this same connection instead of their own separate Kick login.
 pub fn build_kick_auth_url(client_id: &str, state: &str, code_challenge: &str) -> String {
-    let scopes = urlencoding::encode("user:read channel:write");
+    let scopes = urlencoding::encode(
+        "user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage",
+    );
     format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&state={}&code_challenge={}&code_challenge_method=S256&scope={}",
         KICK_AUTH_URL,
@@ -952,8 +986,15 @@ pub fn build_kick_auth_url(client_id: &str, state: &str, code_challenge: &str) -
     )
 }
 
+/// Scope list is the union of everyone who now reads this one shared Twitch
+/// token: StatusForge's own category push (`channel:manage:broadcast`),
+/// Multi-Chat's chat/moderation/EventSub-chat commands, and Alerts Hub's
+/// follow/sub/raid/cheer/hype-train EventSub subscriptions — all three used
+/// to hold their own separately-scoped connection; now there's one.
 pub fn build_twitch_auth_url(client_id: &str, state: &str, code_challenge: &str) -> String {
-    let scopes = urlencoding::encode("channel:manage:broadcast");
+    let scopes = urlencoding::encode(
+        "channel:manage:broadcast chat:edit chat:read user:read:email user:read:chat user:write:chat moderator:manage:chat_messages moderator:manage:banned_users moderator:read:followers channel:read:subscriptions bits:read channel:read:hype_train",
+    );
     format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
         TWITCH_AUTH_URL,

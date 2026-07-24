@@ -178,6 +178,16 @@ pub struct BroadcasterConfig {
     pub kick_token: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kick_refresh: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub joystick_client: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub joystick_secret: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub joystick_token: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub joystick_refresh: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub joystick_username: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -760,5 +770,10 @@ mod tests {
         assert_eq!(config.broadcaster.kick_channel_id, "");
         assert_eq!(config.broadcaster.kick_token, "");
         assert_eq!(config.broadcaster.kick_refresh, "");
+        assert_eq!(config.broadcaster.joystick_client, "");
+        assert_eq!(config.broadcaster.joystick_secret, "");
+        assert_eq!(config.broadcaster.joystick_token, "");
+        assert_eq!(config.broadcaster.joystick_refresh, "");
+        assert_eq!(config.broadcaster.joystick_username, "");
     }
 }
