@@ -461,17 +461,21 @@ export default function ApiKeysTab() {
   // fields alone leaves it in place and the next config load just backfills
   // it. Persists right away, unlike removeRouteEntry's "save to confirm".
   const disconnectRoute = async (entry: (typeof ROUTING_CATALOG)[number]) => {
-    try {
-      await tauriApi("disconnect_platform", { platform: entry.key });
-    } catch (e) {
-      toast(`Failed to disconnect ${entry.label}: ${e}`, "error");
+    // tauriApi() never throws — it catches internally and resolves with
+    // { error } instead, so a try/catch here would never actually fire.
+    // A real backend failure has to be checked for explicitly, or it gets
+    // silently swallowed and misreported as a successful disconnect while
+    // the UI reloads the still-connected state underneath it.
+    const disconnectResult = await tauriApi("disconnect_platform", { platform: entry.key });
+    if (disconnectResult && typeof disconnectResult === "object" && "error" in disconnectResult) {
+      toast(`Failed to disconnect ${entry.label}: ${(disconnectResult as { error: string }).error}`, "error");
       return;
     }
     if (editingKey === entry.key) setEditingKey(null);
     // disconnect_platform already persisted the change to disk — reload
     // rather than locally clearing fields, so state matches what's saved.
-    const res = await tauriApi("export_config").catch(() => null);
-    if (res) setConfig(res as AppConfig);
+    const res = await tauriApi("export_config");
+    if (res && typeof res === "object" && !("error" in res)) setConfig(res as AppConfig);
     toast(`${entry.label} disconnected. Reconnect any time in Connections & Keys.`, "success");
   };
 
@@ -479,6 +483,13 @@ export default function ApiKeysTab() {
   // directly instead of launching the OAuth popup — that's the whole point
   // of the "Access Token (Optional)" field as an alternate connection path.
   const connectOrValidate = async (entry: (typeof ROUTING_CATALOG)[number]) => {
+    // Both paths below read Config.json fresh from disk — the OAuth
+    // server's /login route, or the validate-token command — not the
+    // in-memory config state here. Saving is normally debounced 300ms
+    // after an edit, so a field just changed (e.g. Client Secret cleared
+    // right before clicking Connect) could still be stale on disk if that
+    // debounce hasn't fired yet. Force it through now instead of racing it.
+    if (config) await saveConfig(config).catch(() => {});
     const tokenKey = `${entry.key}_token`;
     const hasManualToken = !!bc[tokenKey as keyof typeof bc];
     if (!hasManualToken) {
@@ -960,11 +971,25 @@ export default function ApiKeysTab() {
                 const hasOauth =
                   managedFields?.some((f: { key: string }) => !!bc[f.key as keyof typeof bc]) ??
                   false;
-                const hasValue = userFilled > 0 || hasOauth;
-                const allFilled = userFilled === userTotal;
+                // A manually-pasted access token (no refresh token, so
+                // hasOauth alone misses it) is just as "connected" as a full
+                // OAuth handshake — both let the platform's API calls work.
+                const hasManualToken = !!bc[`${entry.key}_token` as keyof typeof bc];
+                const isConnected = hasOauth || hasManualToken;
+                // Client ID persists after Disconnect on purpose (so
+                // reconnecting doesn't require retyping it) — for an
+                // OAuth-backed entry that alone must never read as "fully
+                // configured", or Disconnect looks like it did nothing: the
+                // dot stays green and the only change is the subtitle text.
+                const hasValue = userFilled > 0 || isConnected;
+                const allFilled = managedFields && managedFields.length > 0
+                  ? isConnected
+                  : userFilled === userTotal;
                 const subFilled = hasOauth
                   ? "Connected via OAuth"
-                  : `${userFilled}/${userTotal} configuration fields filled`;
+                  : hasManualToken
+                    ? "Connected via manual token"
+                    : `${userFilled}/${userTotal} configuration fields filled`;
 
                 return (
                   <div
