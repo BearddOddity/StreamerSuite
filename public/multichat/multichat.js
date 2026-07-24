@@ -1851,16 +1851,15 @@ function connectKick() {
   });
 }
 
-/* Joystick.tv — ActionCable gateway. Auth is Base64(clientId:secret), the
-   same "basic key" the docs call it — computed here so nobody has to hand-
-   encode it themselves. */
+/* Joystick.tv — ActionCable gateway. Auth is the bot's bearer JWT as a
+   ?token= query param (confirmed against github.com/joysticktv/jtv) — not
+   a Base64(client_id:secret) "basic key", which was never a real Joystick
+   auth mechanism. joystick_get_gateway_token refreshes it first if stale. */
 async function connectJoystick() {
-  const clientId = (await tauriInvoke("oauth_get_client_id", { platform: "joystick" }).catch(() => null) || "").trim();
-  const clientSecret = (await tauriInvoke("oauth_get_client_secret", { platform: "joystick" }).catch(() => null) || "").trim();
-  if (!clientId || !clientSecret) return;
-  const key = btoa(`${clientId}:${clientSecret}`);
+  const token = await tauriInvoke("joystick_get_gateway_token").catch(() => null);
+  if (!token) return;
   setHealth("joystick", "reconnecting");
-  const ws = new WebSocket("wss://api.joystick.tv/cable?token=" + encodeURIComponent(key), "actioncable-v1-json");
+  const ws = new WebSocket("wss://joystick.tv/cable?token=" + encodeURIComponent(token), "actioncable-v1-json");
   sockets.joystick = ws;
   ws.onopen = () => {
     ws.send(JSON.stringify({ command: "subscribe", identifier: JSON.stringify({ channel: "GatewayChannel" }) }));
@@ -1869,7 +1868,7 @@ async function connectJoystick() {
     let d; try { d = JSON.parse(ev.data); } catch { return; }
     if (d.type === "ping" || d.type === "welcome") return;
     if (d.type === "confirm_subscription") { connected("joystick"); addSystem("joystick", "gateway subscribed"); return; }
-    if (d.type === "reject_subscription") { setHealth("joystick", "down"); addSystem("joystick", "subscription rejected — check your basic key"); return; }
+    if (d.type === "reject_subscription") { setHealth("joystick", "down"); addSystem("joystick", "subscription rejected — try reconnecting your bot"); return; }
     const msg = d.message;
     // The bot receives chat for every channel it's installed on — if a
     // channel username was typed, lock onto that one specifically and ignore
@@ -2388,19 +2387,14 @@ function joystickCard(input, hint) {
 
   // Stored in the OS keyring, same as Twitch/Kick — never in localStorage.
   // Blank on submit means "reuse what's already saved" (oauth_login's own
-  // convention), so a retry after restart doesn't force retyping either one.
+  // convention), so a retry after restart doesn't force retyping it. No
+  // Client Secret field — Joystick's bot app is a genuine public PKCE
+  // client (confirmed against github.com/joysticktv/jtv), it never has one.
   const cid = el("input", "cv-input mono");
   cid.placeholder = "Client ID";
-  const csec = el("input", "cv-input mono");
-  csec.placeholder = "Client Secret";
-  csec.type = "password";
   tauriInvoke("oauth_get_client_id", { platform: "joystick" }).then(v => { if (v) cid.value = v; });
-  const savedNote = el("div", "cv-hint");
-  tauriInvoke("oauth_has_client_secret", { platform: "joystick" }).then(has => {
-    if (has) { csec.placeholder = "•••••••• (saved — leave blank to keep)"; savedNote.textContent = "Client ID and Secret are saved — only fill these in to replace them."; }
-  });
-  c.append(cid, csec, savedNote);
-  c.append(hint("From your Joystick.tv bot's settings page. The app combines these into the Base64 basic key itself — no manual encoding needed. <b>Never share these with anyone</b> — they identify your bot; whoever holds them can install it on a channel and act as it without your consent. Each person running Multi-Chat needs their own bot (see \"Don't have a bot yet?\" below), never a copy of someone else's."));
+  c.append(cid);
+  c.append(hint("From your Joystick.tv bot's settings page. <b>Never share this with anyone</b> — it identifies your bot; whoever holds it can install it on a channel and act as it without your consent. Each person running Multi-Chat needs their own bot (see \"Don't have a bot yet?\" below), never a copy of someone else's."));
 
   const viewRow = el("div", "cv-settings-row");
   viewRow.style.border = "none"; viewRow.style.padding = "0";
@@ -2430,7 +2424,7 @@ function joystickCard(input, hint) {
   } else {
     row.append(el("span", "cv-settings-label", "Chat not flowing yet?"));
     const btn = el("button", "cv-btn cta", "🔌 Install Bot on This Channel");
-    btn.onclick = () => connectOAuth("joystick", cid.value.trim(), csec.value.trim(), btn);
+    btn.onclick = () => connectOAuth("joystick", cid.value.trim(), btn);
     row.append(btn);
     divider.append(row);
   }
@@ -2446,7 +2440,7 @@ function joystickCard(input, hint) {
   botHelp.append(helpRow);
   const steps = el("div", "cv-hint");
   steps.style.marginTop = "8px";
-  steps.innerHTML = `On joystick.tv/applications → New Chat Bot: pick a Name, set <b>OAuth redirect URL</b> to <code>http://localhost:${OAUTH_PORT}/callback</code> (required by the form even though this app doesn't use it yet), set <b>Client type</b> to <b>Confidential (server-side bot)</b>, and under Permissions check <b>SendMessage</b> and <b>ReadMessages</b> (add DeleteMessage/MuteUser/BlockUser too for future moderation — permissions can't be changed after creation). Create it, then paste the <b>Client ID</b> and <b>Client Secret</b> it shows you into the two fields above — the app encodes them for you.`; // static template, only OAUTH_PORT is interpolated (numeric constant)
+  steps.innerHTML = `On joystick.tv/applications → New Chat Bot: pick a Name, set <b>OAuth redirect URL</b> to <code>http://localhost:${OAUTH_PORT}/callback</code> (this app actually uses it now — must match exactly), set <b>Client type</b> to <b>Public (PKCE)</b>, and under Permissions check <b>SendMessage</b> and <b>ReadMessages</b> (add DeleteMessage/MuteUser/BlockUser too for future moderation — permissions can't be changed after creation). Create it, then paste the <b>Client ID</b> it shows you into the field above.`; // static template, only OAUTH_PORT is interpolated (numeric constant)
   botHelp.append(steps);
 
   divider.append(connected ? disclosure("Bot setup info", botHelp, false) : botHelp);
@@ -2559,13 +2553,13 @@ function streamerbotCard(input, hint) {
   return c;
 }
 
-async function connectOAuth(platform, clientId, clientSecret, btn) {
+async function connectOAuth(platform, clientId, btn) {
   // Blank fields are valid here — Rust falls back to whatever's already
   // saved in the keychain, so a retry after restart doesn't force retyping.
   btn.disabled = true;
   btn.textContent = "Waiting for browser login…";
   try {
-    const account = await tauriInvoke("oauth_login", { platform, clientId, clientSecret });
+    const account = await tauriInvoke("oauth_login", { platform, clientId });
     oauthAccounts[platform] = account;
     showToast(`Signed in to ${PLATFORM_MAP[platform].label} as ${account.username}`);
     if (platform === "twitch") resyncTwitchConnection();

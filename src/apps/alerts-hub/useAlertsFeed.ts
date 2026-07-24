@@ -251,17 +251,16 @@ export function useAlertsFeed(settings: AlertsSettings) {
 
     async function connect() {
       setJoystickStatus("connecting");
-      const [clientId, clientSecret] = await Promise.all([
-        invoke<string | null>("oauth_get_client_id", { platform: "joystick" }).catch(() => null),
-        invoke<string | null>("oauth_get_client_secret", { platform: "joystick" }).catch(() => null),
-      ]);
+      // Bearer JWT, not a Base64(client_id:secret) key — confirmed against
+      // Joystick's own reference client (github.com/joysticktv/jtv). The
+      // Rust side refreshes it first if it looks stale.
+      const token = await invoke<string | null>("joystick_get_gateway_token").catch(() => null);
       if (cancelled) return;
-      if (!clientId || !clientSecret) {
+      if (!token) {
         setJoystickStatus("disconnected");
         return;
       }
-      const key = btoa(`${clientId}:${clientSecret}`);
-      const socket = new WebSocket("wss://api.joystick.tv/cable?token=" + encodeURIComponent(key), "actioncable-v1-json");
+      const socket = new WebSocket("wss://joystick.tv/cable?token=" + encodeURIComponent(token), "actioncable-v1-json");
       ws = socket;
       socket.onopen = () => {
         socket.send(JSON.stringify({ command: "subscribe", identifier: JSON.stringify({ channel: "GatewayChannel" }) }));

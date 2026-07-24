@@ -1,3 +1,4 @@
+use crate::auth::{generate_code_challenge, generate_code_verifier};
 use serde::Serialize;
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
@@ -513,48 +514,50 @@ fn await_oauth_redirect(expected_state: &str) -> Result<String, String> {
 /// Settings panel and the central Settings UI can invoke this same
 /// `oauth_login("joystick", ...)` command and get a connection either one
 /// can see.
+///
+/// Genuine public PKCE client (RFC 7636/8252) — verified against Joystick's
+/// own reference client (github.com/joysticktv/jtv): no client_secret is
+/// ever sent, at login or refresh. An earlier version of this function
+/// assumed a Confidential/Basic-auth flow with a fixed placeholder username;
+/// both were wrong — see the identity fetch below for the real username.
 #[tauri::command]
 pub(crate) async fn oauth_login(
     app: tauri::AppHandle,
     platform: String,
     client_id: String,
-    client_secret: String,
 ) -> Result<OAuthAccount, String> {
     if platform != "joystick" {
         return Err(
             "OAuth login here is only available for Joystick.tv — connect Twitch/Kick from StreamerSuite Settings → Connections & Keys.".into(),
         );
     }
-    // Blank fields mean "reuse what's already saved" — the UI pre-fills the
-    // Client ID but never re-displays a saved secret, so a login retry after
-    // app restart shouldn't require retyping either one.
+    // Blank means "reuse what's already saved" — the UI pre-fills the Client
+    // ID, so a login retry after app restart doesn't require retyping it.
     let client_id = if client_id.is_empty() {
         kr_get("joystick.client_id").unwrap_or_default()
     } else {
         client_id
     };
-    let client_secret = if client_secret.is_empty() {
-        kr_get("joystick.client_secret").unwrap_or_default()
-    } else {
-        client_secret
-    };
-    if client_id.is_empty() || client_secret.is_empty() {
-        return Err("enter the Client ID and Client Secret first".into());
+    if client_id.is_empty() {
+        return Err("enter the Client ID first".into());
     }
     kr_set("joystick.client_id", &client_id)?;
-    kr_set("joystick.client_secret", &client_secret)?;
 
     let state = random_token(24);
+    let verifier = generate_code_verifier();
+    let challenge = generate_code_challenge(&verifier);
+    // Fixed value (not a dynamically-assigned loopback port) because it's
+    // what users are told to register on their bot's OAuth Redirect URL
+    // field — changing it would break every already-configured bot.
+    let redirect_uri = format!("http://localhost:{OAUTH_PORT}/callback");
 
-    // No redirect_uri param — Joystick reads it from the bot's own config.
-    // The old `scope=bot` grants everything and still works, but Joystick's
-    // docs now ask new integrations to request explicit scopes —
-    // chat:moderate is the one that unlocks delete/timeout/ban.
     let authorize_url = format!(
-        "https://joystick.tv/api/oauth/authorize?response_type=code&client_id={}&scope={}&state={}",
+        "https://joystick.tv/oauth/authorize?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
         urlencoding(&client_id),
+        urlencoding(&redirect_uri),
         urlencoding("identity:read chat:read chat:write chat:moderate"),
-        state
+        state,
+        challenge
     );
 
     // tauri-plugin-shell's open() is deprecated in favor of tauri-plugin-opener,
@@ -573,18 +576,15 @@ pub(crate) async fn oauth_login(
         .map_err(|e| e.to_string())??;
 
     let client = reqwest::Client::new();
-    // Joystick's token endpoint takes params in the query string (not the
-    // body) and authenticates with HTTP Basic (client_id:client_secret), not
-    // a secret parameter. No user-profile endpoint exists, so the "username"
-    // is just a fixed placeholder — the connection itself is what matters.
     let resp: Value = client
-        .post("https://api.joystick.tv/api/oauth/token")
-        .query(&[
-            ("redirect_uri", "unused"),
-            ("code", code.as_str()),
+        .post("https://joystick.tv/api/oauth/token")
+        .form(&[
             ("grant_type", "authorization_code"),
+            ("code", code.as_str()),
+            ("redirect_uri", redirect_uri.as_str()),
+            ("client_id", client_id.as_str()),
+            ("code_verifier", verifier.as_str()),
         ])
-        .basic_auth(&client_id, Some(&client_secret))
         .header("Accept", "application/json")
         .send()
         .await
@@ -595,7 +595,7 @@ pub(crate) async fn oauth_login(
     let access_token = resp
         .get("access_token")
         .and_then(|v| v.as_str())
-        .ok_or("Joystick didn't return an access token — check the client ID/secret")?
+        .ok_or("Joystick didn't return an access token — check the client ID")?
         .to_string();
     let refresh_token = resp
         .get("refresh_token")
@@ -604,12 +604,40 @@ pub(crate) async fn oauth_login(
         .to_string();
     kr_set("joystick.access_token", &access_token)?;
     kr_set("joystick.refresh_token", &refresh_token)?;
-    kr_set("joystick.username", "installed")?;
+    let username = fetch_joystick_identity(&access_token)
+        .await
+        .unwrap_or_else(|| "connected".into());
+    kr_set("joystick.username", &username)?;
     Ok(OAuthAccount {
         platform: "joystick".into(),
-        username: "installed".into(),
+        username,
         user_id: String::new(),
     })
+}
+
+/// GET /api/v1/me/identity (requires `identity:read`, already in the scope
+/// list above) — the access token itself is a JWT but only carries bot_id/
+/// channel_id, no human-readable name, so this is the only way to show one.
+/// The exact response shape isn't documented anywhere public; tries a few
+/// plausible field names defensively rather than assuming one.
+async fn fetch_joystick_identity(access_token: &str) -> Option<String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get("https://joystick.tv/api/v1/me/identity")
+        .bearer_auth(access_token)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: Value = resp.json().await.ok()?;
+    ["username", "slug", "display_name", "name"]
+        .iter()
+        .find_map(|key| json.get(key).and_then(|v| v.as_str()))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 #[tauri::command]
@@ -702,20 +730,30 @@ pub(crate) fn oauth_get_client_id(platform: String) -> Option<String> {
     kr_get(&format!("{platform}.client_id")).filter(|s| !s.is_empty())
 }
 
-/// Existence check only — never sends the secret value back to the frontend.
+/// Joystick-only: the realtime gateway (ActionCable over WebSocket) is a
+/// plain browser WebSocket the frontend opens itself, authenticated with
+/// the bot's bearer JWT as a `?token=` query param (confirmed against
+/// github.com/joysticktv/jtv — NOT a Base64(client_id:secret) "basic key",
+/// which was never a real Joystick auth mechanism to begin with). Refreshes
+/// first if the stored token looks stale, so the gateway doesn't get handed
+/// one that's already expired.
 #[tauri::command]
-pub(crate) fn oauth_has_client_secret(platform: String) -> bool {
-    kr_get(&format!("{platform}.client_secret")).is_some_and(|s| !s.is_empty())
-}
-
-/// Joystick-only: unlike Twitch/Kick (where the secret is only ever used
-/// Rust-side, for a token exchange), Joystick's gateway auth is a Base64
-/// basic key the frontend must build itself to open its own WebSocket — so
-/// the raw secret has to come back to JS here. Still strictly better than
-/// the old plaintext-in-localStorage storage it replaces.
-#[tauri::command]
-pub(crate) fn oauth_get_client_secret(platform: String) -> Option<String> {
-    kr_get(&format!("{platform}.client_secret")).filter(|s| !s.is_empty())
+pub(crate) async fn joystick_get_gateway_token() -> Option<String> {
+    let access_token = kr_get("joystick.access_token")?;
+    let client = reqwest::Client::new();
+    let ok = client
+        .get("https://joystick.tv/api/v1/me/identity")
+        .bearer_auth(&access_token)
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false);
+    if ok {
+        return Some(access_token);
+    }
+    refresh_token("joystick", "https://joystick.tv/api/oauth/token")
+        .await
+        .ok()
 }
 
 /// Streamer.bot's WebSocket password (same idea as Joystick's secret above):
@@ -742,23 +780,30 @@ pub(crate) fn streamerbot_clear_password() {
 /// Twitch/Kick access tokens expire after a few hours; the refresh_token
 /// doesn't. Exchanging it silently — instead of forcing a full browser
 /// re-login — is what makes "connect once" actually mean once.
+///
+/// client_secret is only sent when present: Twitch/Kick are confidential
+/// clients and always have one, but Joystick is a genuine public PKCE
+/// client (verified against github.com/joysticktv/jtv) that never has one
+/// and would get its refresh rejected by an unexpected empty param.
 async fn refresh_token(platform: &str, token_url: &str) -> Result<String, String> {
     let client_id = kr_get(&format!("{platform}.client_id"))
         .ok_or_else(|| format!("not connected to {platform} — connect your account first"))?;
-    let client_secret = kr_get(&format!("{platform}.client_secret"))
-        .ok_or_else(|| format!("not connected to {platform} — connect your account first"))?;
+    let client_secret = kr_get(&format!("{platform}.client_secret")).unwrap_or_default();
     let refresh_token = kr_get(&format!("{platform}.refresh_token"))
         .filter(|s| !s.is_empty())
         .ok_or_else(|| format!("your saved {platform} login has expired — reconnect your account"))?;
     let client = reqwest::Client::new();
+    let mut params = vec![
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token.as_str()),
+        ("client_id", client_id.as_str()),
+    ];
+    if !client_secret.is_empty() {
+        params.push(("client_secret", client_secret.as_str()));
+    }
     let resp: Value = client
         .post(token_url)
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token.as_str()),
-            ("client_id", client_id.as_str()),
-            ("client_secret", client_secret.as_str()),
-        ])
+        .form(&params)
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -1020,13 +1065,13 @@ pub(crate) async fn joystick_delete_message(message_id: String) -> Result<(), St
     let client = reqwest::Client::new();
     for attempt in 0..2 {
         let resp = client
-            .delete(format!("https://api.joystick.tv/api/v1/chat/messages/{message_id}"))
+            .delete(format!("https://joystick.tv/api/v1/chat/messages/{message_id}"))
             .bearer_auth(&access_token)
             .send()
             .await
             .map_err(|e| e.to_string())?;
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
-            access_token = refresh_token("joystick", "https://api.joystick.tv/api/oauth/token").await?;
+            access_token = refresh_token("joystick", "https://joystick.tv/api/oauth/token").await?;
             continue;
         }
         if !resp.status().is_success() {
@@ -1048,13 +1093,13 @@ pub(crate) async fn joystick_moderate_user(message_id: String, ban: bool) -> Res
     let action = if ban { "ban" } else { "mute" };
     for attempt in 0..2 {
         let resp = client
-            .post(format!("https://api.joystick.tv/api/v1/chat/messages/{message_id}/{action}"))
+            .post(format!("https://joystick.tv/api/v1/chat/messages/{message_id}/{action}"))
             .bearer_auth(&access_token)
             .send()
             .await
             .map_err(|e| e.to_string())?;
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
-            access_token = refresh_token("joystick", "https://api.joystick.tv/api/oauth/token").await?;
+            access_token = refresh_token("joystick", "https://joystick.tv/api/oauth/token").await?;
             continue;
         }
         if !resp.status().is_success() {

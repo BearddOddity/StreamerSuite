@@ -233,13 +233,15 @@ const ROUTING_CATALOG: {
     // of through OAuthConnectModal. Empty here just means "no connectUrl
     // popup for this platform."
     connectUrl: "",
+    // No Client Secret field — Joystick's bot app is a genuine public PKCE
+    // client (RFC 7636/8252, confirmed against github.com/joysticktv/jtv),
+    // it never has one. An earlier version of this app assumed otherwise.
     userFields: [
       { key: "joystick_client", label: "Client ID" },
-      { key: "joystick_secret", label: "Client Secret" },
       {
         key: "joystick_token",
         label: "Access Token (Optional)",
-        hint: "Alternate to Client ID and Client Secret — paste a token here if you generate one yourself. No client secret is exposed cross-tool this way.",
+        hint: "Alternate to Client ID — paste a token here if you generate one yourself.",
         optional: true,
         manualAlt: true,
       },
@@ -541,15 +543,14 @@ export default function ApiKeysTab() {
   // means there's exactly one Joystick OAuth implementation, reachable both
   // from this tab and from Multi-Chat's own Settings.
   const connectJoystick = async () => {
-    if (!bc.joystick_client || !bc.joystick_secret) {
-      toast("Enter a Joystick Client ID and Client Secret first", "error");
+    if (!bc.joystick_client) {
+      toast("Enter a Joystick Client ID first", "error");
       return;
     }
     setValidatingPlatform("joystick");
     const res = await tauriApi("oauth_login", {
       platform: "joystick",
       clientId: bc.joystick_client,
-      clientSecret: bc.joystick_secret,
     });
     setValidatingPlatform(null);
     if (res && typeof res === "object" && "error" in res) {
