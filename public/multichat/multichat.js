@@ -907,6 +907,18 @@ function isMention(m) {
   return !!me && m.text.toLowerCase().includes("@" + me);
 }
 
+// Visual size step for a repeated-emote stack within one message ("Kappa
+// Kappa Kappa" -> one emote image + "x3" badge instead of 3 separate
+// images) — grows with the duplicate count but caps out well before an
+// absurd x100 spam becomes a giant unreadable image.
+function emoteStackScale(count) {
+  if (count >= 50) return 2.5;
+  if (count >= 25) return 2.2;
+  if (count >= 10) return 1.9;
+  if (count >= 5) return 1.6;
+  return 1.3;
+}
+
 // A message whose only content is one emote — the unit an emote-combo streak is built from.
 function singleEmoteAlt(m) {
   if (!m.emoteParts) return null;
@@ -998,15 +1010,34 @@ function msgNode(m, small, isCont) {
   const text = el("div", "cv-msg-text");
   if (small) text.style.fontSize = "13px";
   if (m.emoteParts) {
-    m.emoteParts.forEach(p => {
-      if (p.type === "emote") {
-        const img = el("img", p.giant ? "cv-emote-img cv-emote-giant" : "cv-emote-img");
-        img.src = p.url; img.alt = p.alt; img.title = p.alt; img.loading = "lazy";
-        text.append(img);
-      } else if (p.text) {
-        text.append(document.createTextNode(p.text));
+    // Consecutive occurrences of the same emote code ("Kappa Kappa Kappa")
+    // collapse into a single image + an "x{count}" badge instead of piling
+    // up identical images side by side — same "spam it" pattern the
+    // cross-message Combo chip handles, just within one message.
+    const parts = m.emoteParts;
+    for (let i = 0; i < parts.length; ) {
+      const p = parts[i];
+      if (p.type !== "emote") {
+        if (p.text) text.append(document.createTextNode(p.text));
+        i++;
+        continue;
       }
-    });
+      let count = 1;
+      while (i + count < parts.length && parts[i + count].type === "emote" && parts[i + count].alt === p.alt) count++;
+      const img = el("img", p.giant ? "cv-emote-img cv-emote-giant" : "cv-emote-img");
+      img.src = p.url; img.loading = "lazy";
+      if (count > 1) {
+        img.alt = p.alt; img.title = `${p.alt} ×${count}`;
+        img.style.setProperty("--emote-stack-scale", String(emoteStackScale(count)));
+        const stack = el("span", "cv-emote-stack");
+        stack.append(img, el("span", "cv-emote-count", "x" + count));
+        text.append(stack);
+      } else {
+        img.alt = p.alt; img.title = p.alt;
+        text.append(img);
+      }
+      i += count;
+    }
   } else {
     text.textContent = m.text;
   }
