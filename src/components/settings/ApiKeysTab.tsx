@@ -132,6 +132,9 @@ const ROUTING_CATALOG: {
    * to paste there. Omitted for platforms (Joystick) whose OAuth flow
    * doesn't take a redirect_uri param at all. */
   redirectUri?: string;
+  /** Secondary "manage this elsewhere" link — e.g. Twitch's Prime Gaming
+   * subscription link. Opens externally; not part of the OAuth setup flow. */
+  externalManageUrl?: { label: string; url: string };
   userFields: { key: string; label: string; hint?: string; optional?: boolean }[];
   managedFields?: { key: string; label: string }[];
 }[] = [
@@ -150,6 +153,7 @@ const ROUTING_CATALOG: {
     color: "#9146FF",
     connectUrl: "http://127.0.0.1:53735/twitch/login",
     redirectUri: "https://127.0.0.1:53735/oauth/callback/twitch",
+    externalManageUrl: { label: "Manage Prime Gaming Twitch Link ↗", url: "https://gaming.amazon.com/links/twitch/manage" },
     userFields: [
       { key: "twitch_client", label: "Client ID" },
       {
@@ -1121,6 +1125,15 @@ export default function ApiKeysTab() {
                                 </span>
                               </button>
                             </div>
+                          )}
+
+                          {entry.externalManageUrl && (
+                            <button
+                              onClick={() => openUrl(entry.externalManageUrl!.url).catch(() => {})}
+                              className="btn-ghost w-full"
+                            >
+                              {entry.externalManageUrl.label}
+                            </button>
                           )}
 
                           {managedFields && managedFields.length > 0 && (
