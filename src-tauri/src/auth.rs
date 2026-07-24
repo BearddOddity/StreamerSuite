@@ -272,11 +272,16 @@ async fn handle_kick_callback(
 
     let client_id = &config.broadcaster.kick_client;
     let client_secret = &config.broadcaster.kick_secret;
-    if client_id.is_empty() || client_secret.is_empty() {
+    // client_secret is optional — a Kick app registered as a "Public" OAuth
+    // client (RFC 6749 §2.1: a native app can't keep a secret confidential)
+    // has none, and PKCE (code_verifier, already validated above) is what
+    // secures the exchange instead. exchange_kick_token only sends the
+    // param at all when it's non-empty.
+    if client_id.is_empty() {
         return Html(build_popup_response(
             "kick",
             false,
-            "Kick client_id or secret not configured",
+            "Kick client_id not configured",
         ));
     }
 
@@ -340,11 +345,13 @@ async fn handle_twitch_callback(
 
     let client_id = &config.broadcaster.twitch_client;
     let client_secret = &config.broadcaster.twitch_secret;
-    if client_id.is_empty() || client_secret.is_empty() {
+    // Same public-client accommodation as Kick's handler above — a Twitch
+    // app registered as "Public" has no secret, and PKCE covers it instead.
+    if client_id.is_empty() {
         return Html(build_popup_response(
             "twitch",
             false,
-            "Twitch client_id or secret not configured",
+            "Twitch client_id not configured",
         ));
     }
 
@@ -399,14 +406,19 @@ async fn exchange_kick_token(
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let params = [
+    let mut params = vec![
         ("grant_type", "authorization_code"),
         ("client_id", client_id),
-        ("client_secret", client_secret),
         ("redirect_uri", KICK_REDIRECT_URI),
         ("code", code),
         ("code_verifier", code_verifier),
     ];
+    // Omitted entirely (not sent as "") for a public client — Kick's token
+    // endpoint treats a present-but-empty client_secret as an auth attempt
+    // and rejects it, rather than falling back to PKCE-only.
+    if !client_secret.is_empty() {
+        params.push(("client_secret", client_secret));
+    }
 
     let resp = client
         .post(KICK_TOKEN_URL)
@@ -444,14 +456,17 @@ async fn exchange_twitch_token(
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let params = [
+    let mut params = vec![
         ("grant_type", "authorization_code"),
         ("client_id", client_id),
-        ("client_secret", client_secret),
         ("redirect_uri", TWITCH_REDIRECT_URI),
         ("code", code),
         ("code_verifier", code_verifier),
     ];
+    // Same public-client accommodation as Kick's exchange above.
+    if !client_secret.is_empty() {
+        params.push(("client_secret", client_secret));
+    }
 
     let resp = client
         .post(TWITCH_TOKEN_URL)
@@ -516,7 +531,7 @@ pub fn refresh_kick_token(config: &AppConfig) -> Result<String, String> {
         &config.broadcaster.kick_secret,
         &config.broadcaster.kick_refresh,
     );
-    if client_id.is_empty() || client_secret.is_empty() || refresh_token.is_empty() {
+    if client_id.is_empty() || refresh_token.is_empty() {
         return Err("Missing Kick credentials for token refresh".to_string());
     }
 
@@ -525,14 +540,18 @@ pub fn refresh_kick_token(config: &AppConfig) -> Result<String, String> {
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
+    let mut params = vec![
+        ("grant_type", "refresh_token"),
+        ("client_id", client_id.as_str()),
+        ("refresh_token", refresh_token.as_str()),
+    ];
+    if !client_secret.is_empty() {
+        params.push(("client_secret", client_secret.as_str()));
+    }
+
     let resp = client
         .post(KICK_TOKEN_URL)
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("client_id", client_id.as_str()),
-            ("client_secret", client_secret.as_str()),
-            ("refresh_token", refresh_token.as_str()),
-        ])
+        .form(&params)
         .send()
         .map_err(|e| format!("Kick refresh failed: {}", e))?;
 
@@ -552,7 +571,7 @@ pub fn refresh_twitch_token(config: &AppConfig) -> Result<String, String> {
         &config.broadcaster.twitch_secret,
         &config.broadcaster.twitch_refresh,
     );
-    if client_id.is_empty() || client_secret.is_empty() || refresh_token.is_empty() {
+    if client_id.is_empty() || refresh_token.is_empty() {
         return Err("Missing Twitch credentials for token refresh".to_string());
     }
 
@@ -561,14 +580,18 @@ pub fn refresh_twitch_token(config: &AppConfig) -> Result<String, String> {
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
+    let mut params = vec![
+        ("grant_type", "refresh_token"),
+        ("client_id", client_id.as_str()),
+        ("refresh_token", refresh_token.as_str()),
+    ];
+    if !client_secret.is_empty() {
+        params.push(("client_secret", client_secret.as_str()));
+    }
+
     let resp = client
         .post(TWITCH_TOKEN_URL)
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("client_id", client_id.as_str()),
-            ("client_secret", client_secret.as_str()),
-            ("refresh_token", refresh_token.as_str()),
-        ])
+        .form(&params)
         .send()
         .map_err(|e| format!("Twitch refresh failed: {}", e))?;
 

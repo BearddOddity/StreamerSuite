@@ -152,7 +152,12 @@ const ROUTING_CATALOG: {
     redirectUri: "https://127.0.0.1:53735/oauth/callback/twitch",
     userFields: [
       { key: "twitch_client", label: "Client ID" },
-      { key: "twitch_secret", label: "Client Secret" },
+      {
+        key: "twitch_secret",
+        label: "Client Secret (Optional)",
+        hint: "Only needed if your Twitch app is registered as a Confidential client. A Public client (the type native/desktop apps are meant to use) has no secret — leave this blank and PKCE covers it instead.",
+        optional: true,
+      },
       {
         key: "twitch_token",
         label: "Access Token (Optional)",
@@ -183,7 +188,12 @@ const ROUTING_CATALOG: {
     redirectUri: "http://localhost:53735/oauth/callback/kick",
     userFields: [
       { key: "kick_client", label: "Client ID" },
-      { key: "kick_secret", label: "Client Secret" },
+      {
+        key: "kick_secret",
+        label: "Client Secret (Optional)",
+        hint: "Only needed if your Kick app is registered as a Confidential client. A Public client (the type native/desktop apps are meant to use) has no secret — leave this blank and PKCE covers it instead.",
+        optional: true,
+      },
       { key: "kick_channel_id", label: "Channel ID" },
       {
         key: "kick_token",
