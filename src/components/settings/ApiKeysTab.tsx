@@ -127,6 +127,11 @@ const ROUTING_CATALOG: {
   color: string;
   connectUrl: string;
   keyUrl: string;
+  /** The URL to register as this platform's OAuth redirect/callback — shown
+   * in the card so a user setting up their own dev-console app knows what
+   * to paste there. Omitted for platforms (Joystick) whose OAuth flow
+   * doesn't take a redirect_uri param at all. */
+  redirectUri?: string;
   userFields: { key: string; label: string; hint?: string; optional?: boolean }[];
   managedFields?: { key: string; label: string }[];
 }[] = [
@@ -144,6 +149,7 @@ const ROUTING_CATALOG: {
     ),
     color: "#9146FF",
     connectUrl: "http://127.0.0.1:53735/twitch/login",
+    redirectUri: "https://127.0.0.1:53735/oauth/callback/twitch",
     userFields: [
       { key: "twitch_client", label: "Client ID" },
       { key: "twitch_secret", label: "Client Secret" },
@@ -174,6 +180,7 @@ const ROUTING_CATALOG: {
     ),
     color: "#00e676",
     connectUrl: "http://127.0.0.1:53735/kick/login",
+    redirectUri: "http://localhost:53735/oauth/callback/kick",
     userFields: [
       { key: "kick_client", label: "Client ID" },
       { key: "kick_secret", label: "Client Secret" },
@@ -231,6 +238,13 @@ export default function ApiKeysTab() {
   );
   const [validatingPlatform, setValidatingPlatform] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ msg: string; type: ToastType } | null>(null);
+  const [copiedRedirect, setCopiedRedirect] = useState<string | null>(null);
+
+  const copyRedirectUri = (platformKey: string, uri: string) => {
+    navigator.clipboard?.writeText(uri);
+    setCopiedRedirect(platformKey);
+    setTimeout(() => setCopiedRedirect((v) => (v === platformKey ? null : v)), 1500);
+  };
   const floatingRef = useRef<HTMLDivElement>(null);
   const skipSave = useRef(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1049,6 +1063,29 @@ export default function ApiKeysTab() {
                                 ? "Connecting…"
                                 : `🔗 Connect ${entry.label}`}
                             </button>
+                          )}
+
+                          {entry.redirectUri && (
+                            <div className="rounded-lg bg-white/[0.03] border border-white/[0.06] px-3 py-2.5">
+                              <span className="block text-[10px] uppercase tracking-wider text-white/40 mb-1.5 font-semibold">
+                                OAuth Redirect URL
+                              </span>
+                              <p className="text-[10px] text-white/25 leading-snug mb-1.5">
+                                Register this as the callback URL on {entry.label}'s developer console when
+                                setting up your own app.
+                              </p>
+                              <button
+                                onClick={() => copyRedirectUri(entry.key, entry.redirectUri!)}
+                                className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-black/40 border border-white/10 cursor-pointer hover:border-white/20 transition-all"
+                              >
+                                <code className="text-[10px] text-white/70 font-mono truncate">
+                                  {entry.redirectUri}
+                                </code>
+                                <span className="text-[10px] text-white/40 shrink-0">
+                                  {copiedRedirect === entry.key ? "Copied ✓" : "Copy"}
+                                </span>
+                              </button>
+                            </div>
                           )}
 
                           {managedFields && managedFields.length > 0 && (
