@@ -1227,18 +1227,36 @@ function emoteStackScale(count) {
   return 1.3;
 }
 
-// A message whose only content is one emote — the unit an emote-combo streak is built from.
-function singleEmoteAlt(m) {
-  if (!m.emoteParts) return null;
-  const meaningful = m.emoteParts.filter(p => p.type === "emote" || (p.type === "text" && p.text.trim()));
-  return meaningful.length === 1 && meaningful[0].type === "emote" ? meaningful[0] : null;
+// Canonical dedup key for a message's full content (emotes + text), not
+// just a lone emote — "SNOWY [emote][emote]" repeated verbatim is exactly
+// as much chat spam as one emote repeated alone, and used to render as a
+// wall of near-identical bubbles since the old lone-emote-only check
+// bailed out the moment any text was mixed in.
+function messageContentSignature(m) {
+  if (m.emoteParts) {
+    return m.emoteParts
+      .map(p => (p.type === "emote" ? `e:${p.alt}` : `t:${(p.text || "").trim().toLowerCase()}`))
+      .filter(part => part !== "t:")
+      .join("|");
+  }
+  return "t:" + (m.text || "").trim().toLowerCase();
 }
-function comboChipNode(platform, emote) {
+function comboChipNode(platform, m) {
   const c = el("div", "cf-combo");
   c.dataset.platform = platform;
-  const wrap = el("span", "cf-combo-emote");
-  const img = el("img"); img.src = emote.url; img.alt = emote.alt; img.title = emote.alt;
-  wrap.append(img);
+  const wrap = el("span", "cf-combo-content");
+  if (m.emoteParts) {
+    m.emoteParts.forEach(p => {
+      if (p.type === "emote") {
+        const img = el("img"); img.src = p.url; img.alt = p.alt; img.title = p.alt;
+        wrap.append(img);
+      } else if (p.text && p.text.trim()) {
+        wrap.append(document.createTextNode(p.text));
+      }
+    });
+  } else {
+    wrap.append(document.createTextNode(m.text));
+  }
   c.append(wrap, el("span", "cf-combo-count", "x2"), el("span", "cf-combo-tag", "Combo"));
   return c;
 }
@@ -1384,13 +1402,17 @@ function msgNode(m, small, isCont) {
 function appendMsgTo(container, m, small) {
   const meta = feedMeta.get(container) || { lastKey: null };
 
-  // Emote-combo streak: the 2nd+ consecutive lone-emote repeat collapses into
-  // one incrementing chip instead of piling up identical bubbles.
+  // Message-combo streak: the 2nd+ consecutive identical-content repeat
+  // collapses into one incrementing chip instead of piling up near-duplicate
+  // bubbles — content is emotes + text together now, not just a lone emote,
+  // so "SNOWY [emote][emote]" spammed verbatim collapses too.
   if (!m.system && !m.event) {
-    const emote = singleEmoteAlt(m);
-    // Keyed by emote, not user — a combo is many chatters spamming the same
-    // emote in a row, same as Twitch/Kick chat's own "spam it in unison" norm.
-    const comboKey = emote ? m.platform + "|" + emote.alt : null;
+    const signature = messageContentSignature(m);
+    // Keyed by content, not user — a combo is many chatters spamming the
+    // same thing in a row, same as Twitch/Kick chat's own "spam it in
+    // unison" norm. An empty/whitespace-only signature isn't meaningful
+    // content to collapse on.
+    const comboKey = signature ? m.platform + "|" + signature : null;
     if (comboKey && meta.comboKey === comboKey && meta.comboEl) {
       meta.comboCount++;
       meta.comboEl.querySelector(".cf-combo-count").textContent = "x" + meta.comboCount;
@@ -1399,19 +1421,19 @@ function appendMsgTo(container, m, small) {
       if (pinned) container.scrollTop = container.scrollHeight;
       return;
     }
-    if (comboKey && meta.lastSingleEmoteKey === comboKey) {
-      const chip = comboChipNode(m.platform, emote);
+    if (comboKey && meta.lastComboKey === comboKey) {
+      const chip = comboChipNode(m.platform, m);
       const pinned = isPinnedToBottom(container);
       container.append(chip);
       meta.comboKey = comboKey; meta.comboCount = 2; meta.comboEl = chip;
-      meta.lastSingleEmoteKey = null; meta.lastKey = null;
+      meta.lastComboKey = null; meta.lastKey = null;
       feedMeta.set(container, meta);
       if (pinned) container.scrollTop = container.scrollHeight;
       else $("jumpBtn").dataset.show = "true";
       return;
     }
     meta.comboKey = null; meta.comboEl = null;
-    meta.lastSingleEmoteKey = comboKey || null;
+    meta.lastComboKey = comboKey || null;
   }
 
   const key = (m.system || m.event || (m.flagged && !m.reviewed)) ? null : m.platform + "|" + m.user;

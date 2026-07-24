@@ -212,10 +212,10 @@ img.cv-avatar { object-fit: cover; background: transparent; border-color: transp
 .cf-hype-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #ffd84d, #ffb300); }
 .cf-hype-pct { font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: #e4e4e7; }
 
-.cf-combo { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px 5px 8px; border-radius: 999px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); animation: cf-in 0.35s cubic-bezier(0.16,1,0.3,1); width: fit-content; }
-.cf-combo-emote { font-size: 16px; line-height: 0; }
-.cf-combo-emote img { height: 20px; width: auto; vertical-align: middle; }
-.cf-combo-count { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: #fff; }
+.cf-combo { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px 5px 8px; border-radius: 999px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); animation: cf-in 0.35s cubic-bezier(0.16,1,0.3,1); width: fit-content; max-width: 100%; }
+.cf-combo-content { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; line-height: 20px; color: var(--text-body); max-width: 220px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cf-combo-content img { height: 20px; width: auto; vertical-align: middle; flex-shrink: 0; }
+.cf-combo-count { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0; }
 .cf-combo-tag { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--bd-accent); }
 
 .cf-announce { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border-radius: 999px; background: color-mix(in srgb, var(--bd-accent) 16%, transparent); border: 1px solid color-mix(in srgb, var(--bd-accent) 40%, transparent); animation: cf-in 0.35s cubic-bezier(0.16,1,0.3,1); width: fit-content; }
@@ -255,7 +255,8 @@ img.cv-avatar { object-fit: cover; background: transparent; border-color: transp
 .cf-reply-tag svg { width: 15px; height: 15px; }
 .cf-hype-label, .cf-hype-pct { font-size: 12px; }
 .cf-hype-track { width: 80px; height: 8px; }
-.cf-combo-emote img { height: 26px; }
+.cf-combo-content { max-width: 320px; }
+.cf-combo-content img { height: 26px; }
 .cf-combo-count { font-size: 15px; }
 .cf-combo-tag { font-size: 11px; }
 
