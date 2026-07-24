@@ -1298,6 +1298,74 @@ pub(crate) async fn twitch_resolve_clip(slug: String) -> Result<Value, String> {
     Err("Twitch clip lookup failed even after refreshing the token — reconnect your account".into())
 }
 
+/// Resolve a plain Twitch channel link (not a clip) to a preview: live
+/// stream thumbnail + title if currently live, otherwise the channel's
+/// profile image + display name. Powers the lightweight link-preview card
+/// for `twitch.tv/<channel>` links — separate from twitch_resolve_clip,
+/// which only covers clip URLs.
+#[tauri::command]
+pub(crate) async fn twitch_resolve_channel_preview(login: String) -> Result<Value, String> {
+    let mut access_token = kr_get("twitch.access_token").ok_or("not connected to Twitch")?;
+    let client_id = kr_get("twitch.client_id").ok_or("not connected to Twitch")?;
+    let client = reqwest::Client::new();
+    for attempt in 0..2 {
+        let stream_resp = client
+            .get("https://api.twitch.tv/helix/streams")
+            .query(&[("user_login", login.as_str())])
+            .bearer_auth(&access_token)
+            .header("Client-Id", &client_id)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if stream_resp.status() == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
+            access_token = refresh_token("twitch", "https://id.twitch.tv/oauth2/token").await?;
+            continue;
+        }
+        if !stream_resp.status().is_success() {
+            return Err(format!("Twitch channel lookup failed: {}", stream_resp.status()));
+        }
+        let stream_body: Value = stream_resp.json().await.map_err(|e| e.to_string())?;
+        if let Some(stream) = stream_body.pointer("/data/0") {
+            let thumb = stream
+                .get("thumbnail_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .replace("{width}", "320")
+                .replace("{height}", "180");
+            return Ok(serde_json::json!({
+                "title": stream.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                "thumbnail_url": thumb,
+                "display_name": stream.get("user_name").and_then(|v| v.as_str()).unwrap_or(&login),
+                "is_live": true,
+            }));
+        }
+
+        // Not live — fall back to the channel's profile image + display name.
+        let user_resp = client
+            .get("https://api.twitch.tv/helix/users")
+            .query(&[("login", login.as_str())])
+            .bearer_auth(&access_token)
+            .header("Client-Id", &client_id)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !user_resp.status().is_success() {
+            return Err(format!("Twitch channel lookup failed: {}", user_resp.status()));
+        }
+        let user_body: Value = user_resp.json().await.map_err(|e| e.to_string())?;
+        let user = user_body
+            .pointer("/data/0")
+            .ok_or_else(|| "channel not found".to_string())?;
+        return Ok(serde_json::json!({
+            "title": "Offline",
+            "thumbnail_url": user.get("profile_image_url").and_then(|v| v.as_str()).unwrap_or(""),
+            "display_name": user.get("display_name").and_then(|v| v.as_str()).unwrap_or(&login),
+            "is_live": false,
+        }));
+    }
+    Err("Twitch channel lookup failed even after refreshing the token — reconnect your account".into())
+}
+
 /// Batch-resolve real Kick profile pictures via the official public API
 /// (requires Kick OAuth — bypasses the Cloudflare-protected unofficial
 /// kick.com/api/v2/channels endpoint entirely). Returns user_id -> profile_picture.

@@ -53,6 +53,13 @@ const YT_RE = /(?:youtu\.be\/|youtube\.com\/watch\?v=)([\w-]{11})/;
 const SPOTIFY_RE = /open\.spotify\.com\/(track|album|playlist|episode|show)\/([a-zA-Z0-9]+)/;
 const TWITCH_CLIP_RE = /(?:clips\.twitch\.tv\/(?:embed\?clip=)?|twitch\.tv\/\w+\/clip\/)([A-Za-z0-9-]+)/i;
 const KICK_CLIP_RE = /kick\.com\/[\w-]+\/clips\/([A-Za-z0-9-]+)/i;
+// Channel link, not clip — checked after TWITCH_CLIP_RE so a clip URL
+// (twitch.tv/<channel>/clip/<slug>) is never mistaken for a channel link.
+// Excludes twitch.tv's own non-channel top-level paths.
+const TWITCH_CHANNEL_RE = /twitch\.tv\/([a-zA-Z0-9_]{3,25})(?:[/?#]|$)/i;
+const TWITCH_RESERVED_PATHS = new Set(["directory", "videos", "settings", "subscriptions", "wallet", "jobs", "p", "downloads", "prime", "turbo", "friends", "inventory", "messages", "payments", "search", "store"]);
+const DISCORD_INVITE_RE = /discord(?:\.gg|(?:app)?\.com\/invite)\/([a-zA-Z0-9-]+)/i;
+const URL_RE = /https?:\/\/[^\s<>"']+/g;
 function extractGiphyId(text) {
   let m = /giphy\.com\/media\d?\/([a-zA-Z0-9]+)\//.exec(text);
   if (m) return m[1];
@@ -423,6 +430,146 @@ function buildEmbedNode(m) {
     return wrap;
   }
   return null;
+}
+
+// Lightweight thumbnail+title link previews — unlike buildEmbedNode's rich
+// iframe/gif embeds, these are NOT gated to mods/VIPs/host: a plain YouTube
+// link, Twitch channel link, or Discord invite from anyone should be
+// recognizable at a glance, not just for privileged chatters. Each returns
+// a placeholder synchronously and fills itself in once its lookup resolves
+// (or falls back to a plain "open it" chip so the link is always at least
+// clickable, even if the preview data never loads).
+const ytOembedCache = new Map();       // youtube video id -> oEmbed response | null
+const discordInviteCache = new Map();  // invite code -> invite response | null
+const twitchChannelPreviewCache = new Map(); // login(lower) -> preview | null
+
+function linkPreviewWrap(kind, tagText, url) {
+  const wrap = el("div", `cv-linkpreview cv-linkpreview-${kind}`);
+  wrap.append(el("div", "cv-linkpreview-tag", tagText));
+  const body = el("a", "cv-linkpreview-body");
+  body.href = url;
+  body.dataset.openUrl = url;
+  body.append(el("div", "cv-linkpreview-loading", "Loading preview…"));
+  wrap.append(body);
+  return { wrap, body };
+}
+// Swaps the loading placeholder for either the real preview (thumbnail +
+// title/sub) or, on failure, a plain "open it" fallback — the link itself
+// (body's href/data-open-url) already works either way.
+function fillLinkPreview(body, data, buildContent, fallbackLabel) {
+  body.innerHTML = "";
+  if (data) body.append(...buildContent(data));
+  else body.append(el("div", "cv-linkpreview-loading", fallbackLabel));
+}
+
+function linkPreviewYoutube(videoId, url) {
+  const target = url || `https://youtu.be/${videoId}`;
+  const { wrap, body } = linkPreviewWrap("youtube", "▶ YouTube", target);
+  const apply = data => fillLinkPreview(body, data, d => {
+    const img = el("img", "cv-linkpreview-thumb");
+    img.src = d.thumbnail_url; img.alt = d.title || "YouTube video"; img.loading = "lazy";
+    const info = el("div", "cv-linkpreview-info");
+    info.append(el("div", "cv-linkpreview-title", d.title || "YouTube video"), el("div", "cv-linkpreview-sub", d.author_name || ""));
+    return [img, info];
+  }, "Open video ↗");
+  const cached = ytOembedCache.get(videoId);
+  if (cached !== undefined) { apply(cached); return wrap; }
+  fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(`https://youtu.be/${videoId}`)}&format=json`)
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { ytOembedCache.set(videoId, d); apply(d); })
+    .catch(() => { ytOembedCache.set(videoId, null); apply(null); });
+  return wrap;
+}
+
+function linkPreviewDiscordInvite(code, url) {
+  const target = url || `https://discord.gg/${code}`;
+  const { wrap, body } = linkPreviewWrap("discord", "🔗 Discord Invite", target);
+  const apply = data => fillLinkPreview(body, data, d => {
+    const guild = d.guild || {};
+    let icon;
+    if (guild.icon) {
+      icon = el("img", "cv-linkpreview-thumb cv-linkpreview-thumb-round");
+      icon.src = `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128`;
+      icon.alt = guild.name || "Discord server"; icon.loading = "lazy";
+    } else {
+      icon = el("div", "cv-linkpreview-thumb cv-linkpreview-thumb-round cv-linkpreview-fallback", (guild.name || "?")[0].toUpperCase());
+    }
+    const memberBits = [];
+    if (typeof d.approximate_member_count === "number") memberBits.push(`${d.approximate_member_count.toLocaleString()} members`);
+    if (typeof d.approximate_presence_count === "number") memberBits.push(`${d.approximate_presence_count.toLocaleString()} online`);
+    const info = el("div", "cv-linkpreview-info");
+    info.append(el("div", "cv-linkpreview-title", guild.name || "Discord Server"), el("div", "cv-linkpreview-sub", memberBits.join(" · ") || "Invite"));
+    return [icon, info];
+  }, "Open invite ↗");
+  const cached = discordInviteCache.get(code);
+  if (cached !== undefined) { apply(cached); return wrap; }
+  fetch(`https://discord.com/api/v10/invites/${encodeURIComponent(code)}?with_counts=true`)
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { discordInviteCache.set(code, d); apply(d); })
+    .catch(() => { discordInviteCache.set(code, null); apply(null); });
+  return wrap;
+}
+
+// Twitch has no public unauthenticated endpoint for this (unlike Discord's
+// invite API) — needs the shared connected account, same as clip thumbnails.
+// Skips entirely (no card) when not connected, rather than show a preview
+// that can never load; the base linkify pass still makes the plain URL
+// clickable either way.
+function linkPreviewTwitchChannel(login, url) {
+  if (!tauriInvoke || !oauthAccounts.twitch) return null;
+  const target = url || `https://twitch.tv/${login}`;
+  const { wrap, body } = linkPreviewWrap("twitch", "🎥 Twitch", target);
+  const apply = data => fillLinkPreview(body, data, d => {
+    const img = el("img", "cv-linkpreview-thumb");
+    img.src = d.thumbnail_url; img.alt = d.title || d.display_name; img.loading = "lazy";
+    const info = el("div", "cv-linkpreview-info");
+    info.append(
+      el("div", "cv-linkpreview-title", d.title || d.display_name),
+      el("div", "cv-linkpreview-sub", d.is_live ? `🔴 Live · ${d.display_name}` : `${d.display_name} · Offline`)
+    );
+    return [img, info];
+  }, "Open channel ↗");
+  const key = login.toLowerCase();
+  const cached = twitchChannelPreviewCache.get(key);
+  if (cached !== undefined) { apply(cached); return wrap; }
+  tauriInvoke("twitch_resolve_channel_preview", { login })
+    .then(d => { twitchChannelPreviewCache.set(key, d); apply(d); })
+    .catch(() => { twitchChannelPreviewCache.set(key, null); apply(null); });
+  return wrap;
+}
+
+function buildLinkPreviewNode(m) {
+  if (!settings.embedsEnabled) return null;
+  const text = m.text;
+  let match;
+  if ((match = YT_RE.exec(text))) return linkPreviewYoutube(match[1], firstUrl(text));
+  if ((match = DISCORD_INVITE_RE.exec(text))) return linkPreviewDiscordInvite(match[1], firstUrl(text));
+  if (!TWITCH_CLIP_RE.test(text) && (match = TWITCH_CHANNEL_RE.exec(text)) && !TWITCH_RESERVED_PATHS.has(match[1].toLowerCase())) {
+    return linkPreviewTwitchChannel(match[1], firstUrl(text));
+  }
+  return null;
+}
+
+// Splits plain text on raw URLs and appends each piece — text runs as text
+// nodes, URLs as clickable chips via the same [data-open-url] delegated
+// handler every other link in this app already uses. Without this, a
+// message's URL was inert text; every chatter's link is now at least
+// clickable even when it doesn't qualify for a rich embed or preview card.
+function appendLinkifiedText(container, str) {
+  URL_RE.lastIndex = 0;
+  let last = 0, match;
+  while ((match = URL_RE.exec(str))) {
+    if (match.index > last) container.append(document.createTextNode(str.slice(last, match.index)));
+    const url = match[0];
+    const a = el("a", "cv-msg-link", url);
+    a.href = url;
+    a.dataset.openUrl = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    container.append(a);
+    last = match.index + url.length;
+  }
+  if (last < str.length) container.append(document.createTextNode(str.slice(last)));
 }
 
 function passesFilters(m) {
@@ -1018,7 +1165,7 @@ function msgNode(m, small, isCont) {
     for (let i = 0; i < parts.length; ) {
       const p = parts[i];
       if (p.type !== "emote") {
-        if (p.text) text.append(document.createTextNode(p.text));
+        if (p.text) appendLinkifiedText(text, p.text);
         i++;
         continue;
       }
@@ -1039,7 +1186,7 @@ function msgNode(m, small, isCont) {
       i += count;
     }
   } else {
-    text.textContent = m.text;
+    appendLinkifiedText(text, m.text);
   }
   body.append(text);
   if (m.translatedText) {
@@ -1047,8 +1194,10 @@ function msgNode(m, small, isCont) {
     tr.append(el("span", "cv-translation-label", "🌐 "), document.createTextNode(m.translatedText));
     body.append(tr);
   }
-  // Link embeds (Giphy/YouTube/Spotify/clips) — mods/VIPs/host + allowlist
-  const embedNode = !m.system && !m.event ? buildEmbedNode(m) : null;
+  // Rich embeds (Giphy/YouTube/Spotify/clips iframe or gif) for mods/VIPs/
+  // host + allowlist; everyone else still gets a lightweight thumbnail+title
+  // preview card for YouTube/Twitch/Discord links via buildLinkPreviewNode.
+  const embedNode = !m.system && !m.event ? (buildEmbedNode(m) || buildLinkPreviewNode(m)) : null;
   if (embedNode) body.append(embedNode);
   row.append(body);
 

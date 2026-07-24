@@ -2573,6 +2573,7 @@ pub fn run() {
             multichat::kick_resolve_avatars,
             multichat::kick_resolve_broadcaster_id,
             multichat::twitch_resolve_clip,
+            multichat::twitch_resolve_channel_preview,
             multichat::oauth_login,
             multichat::oauth_get_account,
             multichat::oauth_logout,
