@@ -132,9 +132,6 @@ const ROUTING_CATALOG: {
    * to paste there. Omitted for platforms (Joystick) whose OAuth flow
    * doesn't take a redirect_uri param at all. */
   redirectUri?: string;
-  /** Secondary "manage this elsewhere" link — e.g. Twitch's Prime Gaming
-   * subscription link. Opens externally; not part of the OAuth setup flow. */
-  externalManageUrl?: { label: string; url: string };
   userFields: { key: string; label: string; hint?: string; optional?: boolean }[];
   managedFields?: { key: string; label: string }[];
 }[] = [
@@ -153,7 +150,6 @@ const ROUTING_CATALOG: {
     color: "#9146FF",
     connectUrl: "http://127.0.0.1:53735/twitch/login",
     redirectUri: "https://127.0.0.1:53735/oauth/callback/twitch",
-    externalManageUrl: { label: "Manage Prime Gaming Twitch Link ↗", url: "https://gaming.amazon.com/links/twitch/manage" },
     userFields: [
       { key: "twitch_client", label: "Client ID" },
       {
@@ -1034,13 +1030,19 @@ export default function ApiKeysTab() {
                         onToggleEdit={() => setEditingKey(isEditing ? null : entry.key)}
                         onOpenLink={entry.keyUrl ? () => openUrl(entry.keyUrl).catch(() => {}) : undefined}
                         onRemove={() =>
-                          managedFields && managedFields.length > 0
+                          // "Disconnect" (clear tokens, keep Client ID for a
+                          // fast reconnect) only makes sense while actually
+                          // connected. Not connected — even with Client ID
+                          // filled in — has nothing to preserve, so it's a
+                          // full "Remove" instead: clears every field so the
+                          // card goes back to a clean slate in "+ Add
+                          // Integration" rather than being stuck showing
+                          // "1/1 fields filled" forever with no way out.
+                          isConnected
                             ? disconnectRoute(entry as (typeof ROUTING_CATALOG)[number])
                             : removeRouteEntry(entry as (typeof ROUTING_CATALOG)[number])
                         }
-                        removeLabel={
-                          managedFields && managedFields.length > 0 ? "Disconnect" : "Remove"
-                        }
+                        removeLabel={isConnected ? "Disconnect" : "Remove"}
                       />
                     </div>
 
@@ -1125,15 +1127,6 @@ export default function ApiKeysTab() {
                                 </span>
                               </button>
                             </div>
-                          )}
-
-                          {entry.externalManageUrl && (
-                            <button
-                              onClick={() => openUrl(entry.externalManageUrl!.url).catch(() => {})}
-                              className="btn-ghost w-full"
-                            >
-                              {entry.externalManageUrl.label}
-                            </button>
                           )}
 
                           {managedFields && managedFields.length > 0 && (

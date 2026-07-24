@@ -59,6 +59,7 @@ const KICK_CLIP_RE = /kick\.com\/[\w-]+\/clips\/([A-Za-z0-9-]+)/i;
 const TWITCH_CHANNEL_RE = /twitch\.tv\/([a-zA-Z0-9_]{3,25})(?:[/?#]|$)/i;
 const TWITCH_RESERVED_PATHS = new Set(["directory", "videos", "settings", "subscriptions", "wallet", "jobs", "p", "downloads", "prime", "turbo", "friends", "inventory", "messages", "payments", "search", "store"]);
 const DISCORD_INVITE_RE = /discord(?:\.gg|(?:app)?\.com\/invite)\/([a-zA-Z0-9-]+)/i;
+const PRIME_GAMING_RE = /gaming\.amazon\.com\/\S*/i;
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
 function extractGiphyId(text) {
   let m = /giphy\.com\/media\d?\/([a-zA-Z0-9]+)\//.exec(text);
@@ -538,12 +539,28 @@ function linkPreviewTwitchChannel(login, url) {
   return wrap;
 }
 
+// Amazon's Prime Gaming pages (linking, loot claims) need an authenticated
+// session and have no public API — there's nothing to fetch a real
+// thumbnail/title from, unlike YouTube/Discord/Twitch above. This is just a
+// static, recognizable chip pointing at whatever gaming.amazon.com link
+// was posted, same as the clip chips fall back to when no thumbnail exists.
+function linkPreviewPrimeGaming(url) {
+  const { wrap, body } = linkPreviewWrap("prime", "🎮 Prime Gaming", url);
+  body.innerHTML = "";
+  const icon = el("div", "cv-linkpreview-thumb cv-linkpreview-thumb-round cv-linkpreview-fallback", "P");
+  const info = el("div", "cv-linkpreview-info");
+  info.append(el("div", "cv-linkpreview-title", "Prime Gaming"), el("div", "cv-linkpreview-sub", "Open link ↗"));
+  body.append(icon, info);
+  return wrap;
+}
+
 function buildLinkPreviewNode(m) {
   if (!settings.embedsEnabled) return null;
   const text = m.text;
   let match;
   if ((match = YT_RE.exec(text))) return linkPreviewYoutube(match[1], firstUrl(text));
   if ((match = DISCORD_INVITE_RE.exec(text))) return linkPreviewDiscordInvite(match[1], firstUrl(text));
+  if (PRIME_GAMING_RE.test(text)) return linkPreviewPrimeGaming(firstUrl(text));
   if (!TWITCH_CLIP_RE.test(text) && (match = TWITCH_CHANNEL_RE.exec(text)) && !TWITCH_RESERVED_PATHS.has(match[1].toLowerCase())) {
     return linkPreviewTwitchChannel(match[1], firstUrl(text));
   }
