@@ -23,9 +23,21 @@ Every vendored-tool repo carries two branches:
   `main` so standalone improvements flow into the integrated version — never
   the other way around.
 
-There is no automated sync script yet — bringing a repo's
-`streamersuite-integration` branch into StreamerSuite is a manual, reviewed
-copy today. Automating that is future work.
+## Syncing
+
+`scripts/sync-vendored-tools.py` pulls each repo's `streamersuite-integration`
+branch (never `main`) into place here. It clones each repo shallow into a
+temp directory and copies the files listed in its `MANIFEST`, then cleans
+up — no local checkouts of the tool repos required.
+
+```sh
+python3 scripts/sync-vendored-tools.py                # sync everything
+python3 scripts/sync-vendored-tools.py notes-commands  # sync one tool
+python3 scripts/sync-vendored-tools.py --check         # report diffs only, write nothing
+```
+
+It's still a manual, reviewed step — run it, review the diff, commit like
+any other change. Nothing runs it automatically (e.g. in CI) yet.
 
 ## Repo map
 
