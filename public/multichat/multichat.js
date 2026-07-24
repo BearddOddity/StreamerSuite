@@ -60,6 +60,11 @@ const TWITCH_CHANNEL_RE = /twitch\.tv\/([a-zA-Z0-9_]{3,25})(?:[/?#]|$)/i;
 const TWITCH_RESERVED_PATHS = new Set(["directory", "videos", "settings", "subscriptions", "wallet", "jobs", "p", "downloads", "prime", "turbo", "friends", "inventory", "messages", "payments", "search", "store"]);
 const DISCORD_INVITE_RE = /discord(?:\.gg|(?:app)?\.com\/invite)\/([a-zA-Z0-9-]+)/i;
 const PRIME_GAMING_RE = /gaming\.amazon\.com\/\S*/i;
+// X's own non-profile top-level paths (twitter.com still redirects there).
+const X_RE = /(?:x\.com|twitter\.com)\/(\w{1,15})(?:[/?#]|$)/i;
+const X_RESERVED_PATHS = new Set(["home", "explore", "notifications", "messages", "i", "intent", "search", "settings", "compose", "login", "signup", "share", "hashtag"]);
+const YOUTUBE_CHANNEL_RE = /youtube\.com\/@([\w.-]+)/i;
+const TIKTOK_RE = /tiktok\.com\/@([\w.-]+)/i;
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
 function extractGiphyId(text) {
   let m = /giphy\.com\/media\d?\/([a-zA-Z0-9]+)\//.exec(text);
@@ -544,13 +549,49 @@ function linkPreviewTwitchChannel(login, url) {
 // thumbnail/title from, unlike YouTube/Discord/Twitch above. This is just a
 // static, recognizable chip pointing at whatever gaming.amazon.com link
 // was posted, same as the clip chips fall back to when no thumbnail exists.
-function linkPreviewPrimeGaming(url) {
-  const { wrap, body } = linkPreviewWrap("prime", "🎮 Prime Gaming", url);
+function linkPreviewStaticChip(kind, tag, title, sub, url, fallbackLetter) {
+  const { wrap, body } = linkPreviewWrap(kind, tag, url);
   body.innerHTML = "";
-  const icon = el("div", "cv-linkpreview-thumb cv-linkpreview-thumb-round cv-linkpreview-fallback", "P");
+  const icon = el("div", "cv-linkpreview-thumb cv-linkpreview-thumb-round cv-linkpreview-fallback", fallbackLetter);
   const info = el("div", "cv-linkpreview-info");
-  info.append(el("div", "cv-linkpreview-title", "Prime Gaming"), el("div", "cv-linkpreview-sub", "Open link ↗"));
+  info.append(el("div", "cv-linkpreview-title", title), el("div", "cv-linkpreview-sub", sub));
   body.append(icon, info);
+  return wrap;
+}
+function linkPreviewPrimeGaming(url) {
+  return linkPreviewStaticChip("prime", "🎮 Prime Gaming", "Prime Gaming", "Open link ↗", url, "P");
+}
+// X has had no public, unauthenticated profile-info API since 2023 — static
+// chip only, same reasoning as Prime Gaming above.
+function linkPreviewX(handle, url) {
+  return linkPreviewStaticChip("x", "𝕏 X", `@${handle}`, "Open profile ↗", url, "𝕏");
+}
+// YouTube's oEmbed only covers video/playlist URLs, not channel pages —
+// static chip for the same reason X is.
+function linkPreviewYoutubeChannel(handle, url) {
+  return linkPreviewStaticChip("youtube", "▶ YouTube", `@${handle}`, "Open channel ↗", url, "▶");
+}
+
+// TikTok's oEmbed *does* work for plain profile URLs (not just videos),
+// unlike YouTube's — real thumbnail + display name when it resolves, same
+// loading-then-fallback pattern as the YouTube/Discord previews above.
+const tiktokOembedCache = new Map(); // handle(lower) -> oEmbed response | null
+function linkPreviewTikTok(handle, url) {
+  const { wrap, body } = linkPreviewWrap("tiktok", "🎵 TikTok", url);
+  const apply = data => fillLinkPreview(body, data, d => {
+    const img = el("img", "cv-linkpreview-thumb cv-linkpreview-thumb-round");
+    img.src = d.thumbnail_url; img.alt = d.author_name || `@${handle}`; img.loading = "lazy";
+    const info = el("div", "cv-linkpreview-info");
+    info.append(el("div", "cv-linkpreview-title", d.author_name ? `@${d.author_name}` : `@${handle}`), el("div", "cv-linkpreview-sub", "TikTok"));
+    return [img, info];
+  }, "Open profile ↗");
+  const key = handle.toLowerCase();
+  const cached = tiktokOembedCache.get(key);
+  if (cached !== undefined) { apply(cached); return wrap; }
+  fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { tiktokOembedCache.set(key, d); apply(d); })
+    .catch(() => { tiktokOembedCache.set(key, null); apply(null); });
   return wrap;
 }
 
@@ -561,6 +602,11 @@ function buildLinkPreviewNode(m) {
   if ((match = YT_RE.exec(text))) return linkPreviewYoutube(match[1], firstUrl(text));
   if ((match = DISCORD_INVITE_RE.exec(text))) return linkPreviewDiscordInvite(match[1], firstUrl(text));
   if (PRIME_GAMING_RE.test(text)) return linkPreviewPrimeGaming(firstUrl(text));
+  if ((match = YOUTUBE_CHANNEL_RE.exec(text))) return linkPreviewYoutubeChannel(match[1], firstUrl(text));
+  if ((match = TIKTOK_RE.exec(text))) return linkPreviewTikTok(match[1], firstUrl(text));
+  if ((match = X_RE.exec(text)) && !X_RESERVED_PATHS.has(match[1].toLowerCase())) {
+    return linkPreviewX(match[1], firstUrl(text));
+  }
   if (!TWITCH_CLIP_RE.test(text) && (match = TWITCH_CHANNEL_RE.exec(text)) && !TWITCH_RESERVED_PATHS.has(match[1].toLowerCase())) {
     return linkPreviewTwitchChannel(match[1], firstUrl(text));
   }
