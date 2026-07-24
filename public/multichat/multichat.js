@@ -2698,11 +2698,7 @@ function buildSettingsDrawer() {
     tpRow.append(tp);
     body.append(tpRow);
   }
-  if (!tauriInvoke) {
-    // Embedded in StreamerSuite, chat font follows the shared Appearance ->
-    // Chat settings (see applyChatStyle) instead of this panel's own copy —
-    // only the standalone overlay (no Tauri context, no shared settings to
-    // draw from) needs its own font controls.
+  {
     const fsRow = el("div", "cv-settings-row");
     fsRow.append(el("span", "cv-settings-label", "Font Size"));
     const fs = el("input", "cv-num");
@@ -2723,7 +2719,7 @@ function buildSettingsDrawer() {
   msRow.append(ms);
   body.append(msRow);
 
-  if (!tauriInvoke) {
+  {
     const ffRow = el("div", "cv-settings-row");
     ffRow.append(el("span", "cv-settings-label", "Font Family"));
     const ff = el("input", "cv-input");
@@ -2961,21 +2957,13 @@ function hexToRgba(hex, pct) {
 }
 function applyChatStyle() {
   const shell = $("shell");
-  if (tauriInvoke) {
-    // Embedded in StreamerSuite: follow the shared Appearance -> Chat font
-    // settings live via CSS variable reference (already applied to :root by
-    // SharedSettingsContext) instead of this panel's own separate
-    // fontSize/fontFamily, which are hidden in the settings drawer here and
-    // only meaningful for the standalone overlay use case below. Referencing
-    // rather than resolving-and-copying means a theme change while Multi-Chat
-    // is mounted in the background takes effect without re-running this.
-    shell.style.setProperty("--chat-font-size", "var(--user-chat-font-size, 14px)");
-    shell.style.setProperty("--chat-font-family", "var(--user-chat-font-family, var(--font-ui))");
-  } else {
-    shell.style.setProperty("--chat-font-size", Math.max(11, Math.min(24, Number(settings.fontSize) || 14)) + "px");
-    const fam = (settings.fontFamily || "").trim();
-    shell.style.setProperty("--chat-font-family", fam ? `"${fam}", var(--font-ui)` : "var(--font-ui)");
-  }
+  // Multi-Chat owns its own font size/family regardless of whether it's
+  // running standalone or embedded in StreamerSuite — the centralized
+  // Appearance settings' Chat/Preview controls were removed since this is
+  // the one place that actually needs them configured per-tool.
+  shell.style.setProperty("--chat-font-size", Math.max(11, Math.min(24, Number(settings.fontSize) || 14)) + "px");
+  const fam = (settings.fontFamily || "").trim();
+  shell.style.setProperty("--chat-font-family", fam ? `"${fam}", var(--font-ui)` : "var(--font-ui)");
   shell.style.setProperty("--bottom-pad", (Number(settings.bottomPad) || 0) + "px");
   shell.style.setProperty("--glass-blur", (Number(settings.glassBlur) || 0) + "px");
   shell.style.setProperty("--glass-alpha", Math.max(0, Math.min(100, Number(settings.glassOpacity) || 0)) / 100);
