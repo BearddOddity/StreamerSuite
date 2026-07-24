@@ -912,6 +912,11 @@ fn backfill_from_keychain(config: &mut AppConfig) {
             config.api_keys.steamgrid = v;
         }
     }
+    if config.api_keys.huggingface.is_empty() {
+        if let Some(v) = read("huggingface_api_token") {
+            config.api_keys.huggingface = v;
+        }
+    }
 }
 
 pub fn save_config_at(base_dir: &std::path::Path, config: &AppConfig) -> Result<(), String> {
@@ -1008,6 +1013,7 @@ pub(crate) fn redact_migrated_secrets(config: &mut AppConfig) {
     sync(&mut config.api_keys.igdb_secret, "igdb_api_secret");
     sync(&mut config.api_keys.rawg, "rawg_api_key");
     sync(&mut config.api_keys.steamgrid, "steamgrid_api_key");
+    sync(&mut config.api_keys.huggingface, "huggingface_api_token");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

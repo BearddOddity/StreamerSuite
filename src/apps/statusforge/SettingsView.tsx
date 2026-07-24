@@ -1021,6 +1021,7 @@ const defaultConfig: AppConfig = {
     igdb_secret: "",
     igdb_token: "",
     thegamesdb: "",
+    huggingface: "",
   },
   broadcaster: {
     routing_mode: "native" as const,

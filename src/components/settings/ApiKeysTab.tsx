@@ -24,6 +24,7 @@ const defaultConfig: AppConfig = {
     igdb_secret: "",
     igdb_token: "",
     thegamesdb: "",
+    huggingface: "",
   },
   broadcaster: {
     routing_mode: "native" as const,
@@ -117,6 +118,13 @@ const KEY_CATALOG: {
     desc: "Community-run game database — strong coverage for older/retro console games",
     icon: "🕹️",
     keyUrl: "https://thegamesdb.net/",
+  },
+  {
+    key: "huggingface",
+    label: "Hugging Face",
+    desc: "Free open-source model access for AI Co-Host's persona/response generation",
+    icon: "🤗",
+    keyUrl: "https://huggingface.co/settings/tokens",
   },
 ];
 

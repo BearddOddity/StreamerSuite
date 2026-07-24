@@ -41,6 +41,12 @@ pub struct ApiKeys {
     pub igdb_token: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub thegamesdb: String,
+    /// Hugging Face API token for the AI Co-Host tool's model calls (free
+    /// Serverless Inference API / Inference Providers gateway — see
+    /// huggingface.co/docs/inference-providers). Same skip-empty-on-
+    /// serialize + keychain-migration treatment as every other key here.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub huggingface: String,
 }
 
 /// Engine/runtime settings
@@ -568,6 +574,9 @@ impl AppConfig {
         if self.api_keys.igdb_secret.len() > 200 {
             errors.push("igdb_secret too long".to_string());
         }
+        if self.api_keys.huggingface.len() > 200 {
+            errors.push("huggingface key too long".to_string());
+        }
 
         if errors.is_empty() {
             Ok(())
@@ -610,6 +619,7 @@ impl AppConfig {
         self.api_keys.igdb_client.truncate(100);
         self.api_keys.igdb_secret.truncate(200);
         self.api_keys.igdb_token.truncate(200);
+        self.api_keys.huggingface.truncate(200);
     }
 }
 
@@ -776,6 +786,7 @@ mod tests {
         assert_eq!(config.api_keys.igdb_client, "");
         assert_eq!(config.api_keys.igdb_secret, "");
         assert_eq!(config.api_keys.igdb_token, "");
+        assert_eq!(config.api_keys.huggingface, "");
 
         assert_eq!(config.broadcaster.twitch_client, "");
         assert_eq!(config.broadcaster.twitch_secret, "");

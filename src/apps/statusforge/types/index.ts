@@ -42,6 +42,7 @@ export interface ApiKeys {
   igdb_secret: string;
   igdb_token: string;
   thegamesdb: string;
+  huggingface: string;
 }
 
 export interface EngineSettings {

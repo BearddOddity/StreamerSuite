@@ -1,6 +1,7 @@
 // Import all apps to register them
 import "./multi-chat";
 import "./chatbot";
+import "./ai-cohost";
 import "./stream-timer";
 import "./scene-switcher";
 import "./stream-stats";
