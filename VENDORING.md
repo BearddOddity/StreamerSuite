@@ -8,12 +8,19 @@ theme/settings and (where applicable) shared Rust backend.
 
 ## Branch policy
 
+**Hard rule: `main` is the standalone product, full stop. StreamerSuite (or
+any other consuming app) must never modify it — not a merge, not a direct
+commit, not a "quick fix" while working on the integration. `main` only ever
+changes from work that is actually about the standalone tool itself.** This
+holds for every repo in the map below, including the two — StatusForge.io
+and multichat — that are real products with real users independent of
+StreamerSuite entirely.
+
 Every vendored-tool repo carries two branches:
 
-- **`main`** — the standalone product. Only standalone-focused work lands
-  here (bug fixes, new features for people running the tool on its own).
-  Never push StreamerSuite-specific adaptations to this branch — that risks
-  breaking the tool for people using it outside StreamerSuite.
+- **`main`** — the standalone product, and the *only* branch anyone builds
+  or ships from for standalone use. Only standalone-focused work lands here
+  (bug fixes, new features for people running the tool on its own).
 - **`streamersuite-integration`** — the StreamerSuite-adapted version:
   import paths rewired onto StreamerSuite's shared settings/theme context,
   and (for tools that need it) hooked into StreamerSuite's shared Rust
