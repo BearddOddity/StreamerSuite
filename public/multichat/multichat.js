@@ -47,8 +47,22 @@ const THEME_PRESETS = {
   minimal:  { bgColor: "#000000", bgOpacity: 100, fontSize: 13, fontFamily: "" },
   overlay:  { bgColor: "#050505", bgOpacity: 0,   fontSize: 15, fontFamily: "" },
 };
-// ponytail: local heuristic only — real auto-mod needs each platform's mod API
-const BANNED_PATTERNS = [/free\s*(v-?bucks|robux|followers|nitro)/i, /crypto\s*giveaway/i, /discord\.gg\/\S*free/i, /\bdm me\b.*\b(link|free)\b/i];
+// ponytail: local heuristic only — real auto-mod needs each platform's mod API.
+// The lookalike-domain patterns below aren't exhaustive (typosquats mutate
+// constantly), just the recurring substrings that actually show up in real
+// Twitch/Kick chat spam — fake Steam trade/gift sites, fake Discord Nitro
+// generators, and fake giveaway domains impersonating the platforms this
+// app now recognizes real links from (Twitch/Kick/Steam/Discord).
+const BANNED_PATTERNS = [
+  /free\s*(v-?bucks|robux|followers|nitro)/i,
+  /crypto\s*giveaway/i,
+  /discord\.gg\/\S*free/i,
+  /\bdm me\b.*\b(link|free)\b/i,
+  /steamcomm?un[ie]ty\.(ru|xyz|top|club|info|cc|tk)/i,
+  /steam-?(gift|trade|community)\.(net|org|xyz|top|club|info|cc|tk)/i,
+  /discord-?nitro|nitro-?generator|free-?nitro\.(net|org|xyz|top|cc|tk)/i,
+  /(kick|twitch)-?(gift|free|giveaway)\.(net|org|xyz|top|club|info|cc|tk)/i,
+];
 const YT_RE = /(?:youtu\.be\/|youtube\.com\/watch\?v=)([\w-]{11})/;
 const SPOTIFY_RE = /open\.spotify\.com\/(track|album|playlist|episode|show)\/([a-zA-Z0-9]+)/;
 const TWITCH_CLIP_RE = /(?:clips\.twitch\.tv\/(?:embed\?clip=)?|twitch\.tv\/\w+\/clip\/)([A-Za-z0-9-]+)/i;
@@ -1260,6 +1274,22 @@ function comboChipNode(platform, m) {
   c.append(wrap, el("span", "cf-combo-count", "x2"), el("span", "cf-combo-tag", "Combo"));
   return c;
 }
+// A short "pop" on every increment plus a warmer glow past x10/x25 — gives
+// a big spam streak some of the hype-train energy the other celebration
+// chips already have, without bringing back the visual clutter this whole
+// combo/emote-stacking feature set exists to collapse away.
+const comboBumpTimers = new WeakMap(); // chip element -> its own pending bump-removal timer
+function applyComboHeat(chip, count) {
+  chip.classList.toggle("cf-combo-hot", count >= 10);
+  chip.classList.toggle("cf-combo-blazing", count >= 25);
+  chip.classList.remove("cf-combo-bump");
+  // Force a reflow so re-adding the class restarts the animation even if
+  // the previous bump (from the last increment) hasn't finished yet.
+  void chip.offsetWidth;
+  chip.classList.add("cf-combo-bump");
+  clearTimeout(comboBumpTimers.get(chip));
+  comboBumpTimers.set(chip, setTimeout(() => chip.classList.remove("cf-combo-bump"), 260));
+}
 
 function msgNode(m, small, isCont) {
   if (m.system) {
@@ -1416,6 +1446,7 @@ function appendMsgTo(container, m, small) {
     if (comboKey && meta.comboKey === comboKey && meta.comboEl) {
       meta.comboCount++;
       meta.comboEl.querySelector(".cf-combo-count").textContent = "x" + meta.comboCount;
+      applyComboHeat(meta.comboEl, meta.comboCount);
       feedMeta.set(container, meta);
       const pinned = isPinnedToBottom(container);
       if (pinned) container.scrollTop = container.scrollHeight;

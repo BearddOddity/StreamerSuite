@@ -217,6 +217,14 @@ img.cv-avatar { object-fit: cover; background: transparent; border-color: transp
 .cf-combo-content img { height: 20px; width: auto; vertical-align: middle; flex-shrink: 0; }
 .cf-combo-count { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0; }
 .cf-combo-tag { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--bd-accent); }
+.cf-combo-bump { animation: cf-combo-bump 0.26s ease-out; }
+.cf-combo-hot { border-color: rgba(255,196,0,0.45); box-shadow: 0 0 0 1px rgba(255,196,0,0.15), 0 0 16px rgba(255,196,0,0.25); animation: cf-in 0.35s cubic-bezier(0.16,1,0.3,1), cf-combo-pulse 1.6s ease-in-out infinite; }
+.cf-combo-hot .cf-combo-tag { color: #ffc400; }
+.cf-combo-blazing { border-color: rgba(255,107,0,0.55); box-shadow: 0 0 0 1px rgba(255,107,0,0.2), 0 0 22px rgba(255,107,0,0.4); animation: cf-in 0.35s cubic-bezier(0.16,1,0.3,1), cf-combo-pulse-hot 1.2s ease-in-out infinite; }
+.cf-combo-blazing .cf-combo-tag { color: #ff6b00; }
+@keyframes cf-combo-bump { 0% { transform: scale(1); } 35% { transform: scale(1.09); } 100% { transform: scale(1); } }
+@keyframes cf-combo-pulse { 0%, 100% { box-shadow: 0 0 0 1px rgba(255,196,0,0.15), 0 0 16px rgba(255,196,0,0.25); } 50% { box-shadow: 0 0 0 1px rgba(255,196,0,0.3), 0 0 24px rgba(255,196,0,0.45); } }
+@keyframes cf-combo-pulse-hot { 0%, 100% { box-shadow: 0 0 0 1px rgba(255,107,0,0.2), 0 0 22px rgba(255,107,0,0.4); } 50% { box-shadow: 0 0 0 1px rgba(255,107,0,0.4), 0 0 32px rgba(255,107,0,0.6); } }
 
 .cf-announce { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border-radius: 999px; background: color-mix(in srgb, var(--bd-accent) 16%, transparent); border: 1px solid color-mix(in srgb, var(--bd-accent) 40%, transparent); animation: cf-in 0.35s cubic-bezier(0.16,1,0.3,1); width: fit-content; }
 .cf-announce-ico { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: linear-gradient(135deg, var(--bd-accent), color-mix(in srgb, var(--bd-accent) 55%, #fff)); font-size: 11px; flex-shrink: 0; }
