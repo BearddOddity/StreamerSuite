@@ -154,9 +154,8 @@ const ROUTING_CATALOG: {
       { key: "twitch_client", label: "Client ID" },
       {
         key: "twitch_secret",
-        label: "Client Secret (Optional)",
-        hint: "Only needed if your Twitch app is registered as a Confidential client. A Public client (the type native/desktop apps are meant to use) has no secret — leave this blank and PKCE covers it instead.",
-        optional: true,
+        label: "Client Secret",
+        hint: "Required — Twitch's authorization-code exchange rejects the request without it, even for apps that also send PKCE.",
       },
       {
         key: "twitch_token",
@@ -190,9 +189,8 @@ const ROUTING_CATALOG: {
       { key: "kick_client", label: "Client ID" },
       {
         key: "kick_secret",
-        label: "Client Secret (Optional)",
-        hint: "Only needed if your Kick app is registered as a Confidential client. A Public client (the type native/desktop apps are meant to use) has no secret — leave this blank and PKCE covers it instead.",
-        optional: true,
+        label: "Client Secret",
+        hint: "Required — Kick's authorization-code exchange rejects the request without it, even though PKCE is also sent.",
       },
       { key: "kick_channel_id", label: "Channel ID" },
       {
@@ -493,6 +491,14 @@ export default function ApiKeysTab() {
     const tokenKey = `${entry.key}_token`;
     const hasManualToken = !!bc[tokenKey as keyof typeof bc];
     if (!hasManualToken) {
+      const secretKey = `${entry.key}_secret`;
+      if (!bc[secretKey as keyof typeof bc]) {
+        toast(
+          `Enter a ${entry.label} Client ID and Client Secret first — Client Secret is required, not optional, for ${entry.label}'s token exchange.`,
+          "error"
+        );
+        return;
+      }
       setOauthModal({ platform: entry.key as "twitch" | "kick", url: entry.connectUrl });
       return;
     }
