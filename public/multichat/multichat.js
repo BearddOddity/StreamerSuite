@@ -1869,7 +1869,13 @@ function buildChannelsDrawer() {
   // here — this module reads the same shared AppConfig those write to
   // (see multichat.rs's shared_cred_get), so this is just a status readout
   // + pointer rather than its own OAuth form.
-  function centralConnectionNote(platform, label) {
+  // channelField/configKey let this also backfill the platform's channel
+  // input from the centralized config the first time it's empty — Twitch's
+  // channel field defaults to twitch_username (the connected account's own
+  // channel), Kick's to kick_channel_id (which doubles as its slug — see
+  // shared_cred_get in multichat.rs) — so connecting once in StreamerSuite
+  // Settings is enough; nobody has to type the same channel name twice.
+  function centralConnectionNote(platform, label, channelField, configKey) {
     const frag = document.createDocumentFragment();
     const row = el("div", "cv-settings-row");
     row.style.border = "none"; row.style.padding = "0";
@@ -1882,6 +1888,12 @@ function buildChannelsDrawer() {
         const b = cfg && cfg.broadcaster;
         const connected = !!(b && b[`${platform}_token`] && b[`${platform}_client`]);
         status.textContent = connected ? "🟢 Connected via StreamerSuite Settings" : "⚪ Not connected";
+        const centralValue = b && configKey && b[configKey];
+        if (channelField && centralValue && !channels[platform]) {
+          channels[platform] = centralValue;
+          channelField.value = centralValue;
+          saveCh();
+        }
       }).catch(() => { status.textContent = "⚪ Not connected"; });
     } else {
       status.textContent = "⚪ Not connected";
@@ -1942,16 +1954,18 @@ function buildChannelsDrawer() {
     return;
   }
 
+  const twitchChannelInput = input(channels.twitch, "channel name (e.g. beardds)", v => channels.twitch = v);
   body.append(platformCard("twitch", "Twitch", [
-    input(channels.twitch, "channel name (e.g. beardds)", v => channels.twitch = v),
-    hint("Used for anonymous read (no account) and to pick the channel once connected."),
-  ], centralConnectionNote("twitch", "Twitch")));
+    twitchChannelInput,
+    hint("Used for anonymous read (no account) and to pick the channel once connected. Defaults to your connected Twitch account's own channel."),
+  ], centralConnectionNote("twitch", "Twitch", twitchChannelInput, "twitch_username")));
 
+  const kickChannelInput = input(channels.kick, "channel slug (e.g. beardds)", v => channels.kick = v);
   body.append(platformCard("kick", "Kick", [
-    input(channels.kick, "channel slug (e.g. beardds)", v => channels.kick = v),
+    kickChannelInput,
     input(channels.kickChatroomId, "chatroom ID (optional — auto-resolve tried first)", v => channels.kickChatroomId = v, true),
-    hint("If auto-resolve fails, open <code>kick.com/api/v2/channels/&lt;slug&gt;</code> in a browser tab and paste the <code>chatroom.id</code> number."),
-  ], centralConnectionNote("kick", "Kick")));
+    hint("If auto-resolve fails, open <code>kick.com/api/v2/channels/&lt;slug&gt;</code> in a browser tab and paste the <code>chatroom.id</code> number. Defaults to your connected Kick account's own channel."),
+  ], centralConnectionNote("kick", "Kick", kickChannelInput, "kick_channel_id")));
 
   body.append(joystickCard(input, hint));
   body.append(streamerbotCard(input, hint));

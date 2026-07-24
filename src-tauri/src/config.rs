@@ -168,6 +168,13 @@ pub struct BroadcasterConfig {
     pub twitch_refresh: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub twitch_broadcaster_id: String,
+    /// Login/display name — not needed for Twitch's own API calls (those
+    /// use the numeric broadcaster id above), but it's what Multi-Chat
+    /// needs to know which channel to join for chat. Backfilled from the
+    /// OAuth connect flow so Multi-Chat can default its own channel field
+    /// to it instead of requiring the same channel typed in twice.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub twitch_username: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kick_client: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -765,6 +772,7 @@ mod tests {
         assert_eq!(config.broadcaster.twitch_token, "");
         assert_eq!(config.broadcaster.twitch_refresh, "");
         assert_eq!(config.broadcaster.twitch_broadcaster_id, "");
+        assert_eq!(config.broadcaster.twitch_username, "");
         assert_eq!(config.broadcaster.kick_client, "");
         assert_eq!(config.broadcaster.kick_secret, "");
         assert_eq!(config.broadcaster.kick_channel_id, "");

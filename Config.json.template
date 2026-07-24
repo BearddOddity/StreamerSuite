@@ -22,7 +22,8 @@
     "twitch_client": "",
     "twitch_refresh": "",
     "twitch_secret": "",
-    "twitch_token": ""
+    "twitch_token": "",
+    "twitch_username": ""
   },
   "engine_settings": {
     "auto_push": false,

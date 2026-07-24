@@ -1554,8 +1554,9 @@ async fn kick_validate_token() -> Result<String, String> {
 }
 
 /// Validates a manually-pasted Twitch access token (the "alternate to
-/// Connect Twitch" path) and backfills twitch_broadcaster_id, which
-/// pusher.rs requires alongside the token for category pushes to work.
+/// Connect Twitch" path) and backfills twitch_broadcaster_id (which
+/// pusher.rs requires alongside the token for category pushes to work) and
+/// twitch_username (which Multi-Chat defaults its own channel field to).
 /// Returns the connected user's display name for a success toast.
 #[tauri::command]
 async fn twitch_validate_token() -> Result<String, String> {
@@ -1572,6 +1573,9 @@ async fn twitch_validate_token() -> Result<String, String> {
     let (name, broadcaster_id) = auth::validate_twitch_token(&token, &client_id).await?;
     let mut updated = config;
     updated.broadcaster.twitch_broadcaster_id = broadcaster_id;
+    if !name.is_empty() {
+        updated.broadcaster.twitch_username = name.clone();
+    }
     auth::save_config_at(&base_dir, &updated)?;
     Ok(name)
 }

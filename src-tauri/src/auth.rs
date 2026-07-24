@@ -294,6 +294,20 @@ async fn handle_kick_callback(
 
     config.broadcaster.kick_token = token_resp.access_token.clone();
     config.broadcaster.kick_refresh = token_resp.refresh_token.clone().unwrap_or_default();
+    // Backfill the channel slug the same way the manual-token path does —
+    // Multi-Chat defaults its own channel field to this, so the popup
+    // "Connect Kick" flow should leave it just as ready to use.
+    {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build();
+        if let Ok(client) = client {
+            let slug = fetch_kick_channel_slug(&client, &token_resp.access_token).await;
+            if !slug.is_empty() {
+                config.broadcaster.kick_channel_id = slug;
+            }
+        }
+    }
     if let Err(e) = save_config_at(base_dir, config) {
         log::warn!("[AUTH] Failed to save Kick tokens: {}", e);
     }
@@ -361,20 +375,26 @@ async fn handle_twitch_callback(
             Err(e) => return Html(build_popup_response("twitch", false, &e)),
         };
 
-    // Fetch broadcaster ID
+    // Fetch broadcaster ID + display name
     let access_token = token_resp.access_token.clone();
-    let broadcaster_id = match fetch_twitch_broadcaster_id(&access_token, client_id).await {
-        Ok(id) => id,
-        Err(e) => {
-            log::warn!("[AUTH] Failed to fetch Twitch broadcaster ID: {}", e);
-            String::new()
-        }
-    };
+    let (broadcaster_id, display_name) =
+        match fetch_twitch_broadcaster_id(&access_token, client_id).await {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("[AUTH] Failed to fetch Twitch broadcaster ID: {}", e);
+                (String::new(), String::new())
+            }
+        };
 
     config.broadcaster.twitch_token = access_token;
     config.broadcaster.twitch_refresh = token_resp.refresh_token.clone().unwrap_or_default();
     if !broadcaster_id.is_empty() {
         config.broadcaster.twitch_broadcaster_id = broadcaster_id;
+    }
+    // Multi-Chat defaults its own channel field to this — see
+    // twitch_username's doc comment on BroadcasterConfig.
+    if !display_name.is_empty() {
+        config.broadcaster.twitch_username = display_name;
     }
     if let Err(e) = save_config_at(base_dir, config) {
         log::warn!("[AUTH] Failed to save Twitch tokens: {}", e);
@@ -493,10 +513,13 @@ async fn exchange_twitch_token(
     })
 }
 
+/// Returns (broadcaster_id, display_name). The id is what Twitch's own API
+/// calls need; the display name is what Multi-Chat needs to know which
+/// channel to join for chat — see twitch_username on BroadcasterConfig.
 async fn fetch_twitch_broadcaster_id(
     access_token: &str,
     client_id: &str,
-) -> Result<String, String> {
+) -> Result<(String, String), String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
@@ -518,7 +541,12 @@ async fn fetch_twitch_broadcaster_id(
         .json()
         .await
         .map_err(|e| format!("Twitch users parse error: {}", e))?;
-    Ok(json["data"][0]["id"].as_str().unwrap_or("").to_string())
+    let id = json["data"][0]["id"].as_str().unwrap_or("").to_string();
+    let display_name = json["data"][0]["display_name"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    Ok((id, display_name))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -649,16 +677,25 @@ pub async fn validate_kick_token(token: &str) -> Result<(String, String), String
         return Err("Kick token has no associated user".to_string());
     }
 
-    // Best-effort: the channel slug isn't required for a valid connection,
-    // just nice to have for the Channel ID field.
-    let slug = client
+    let slug = fetch_kick_channel_slug(&client, token).await;
+
+    Ok((name, slug))
+}
+
+/// Best-effort: the channel slug isn't required for a valid Kick
+/// connection, just nice to have for the Channel ID field (which doubles
+/// as Multi-Chat's default channel — see shared_cred_get in multichat.rs).
+/// Shared by the OAuth callback and the manual-token validation path so
+/// both backfill it the same way.
+async fn fetch_kick_channel_slug(client: &reqwest::Client, token: &str) -> String {
+    let resp = client
         .get("https://api.kick.com/public/v1/channels")
         .bearer_auth(token)
         .send()
         .await
         .ok()
         .filter(|r| r.status().is_success());
-    let slug = match slug {
+    match resp {
         Some(r) => r
             .json::<serde_json::Value>()
             .await
@@ -666,9 +703,7 @@ pub async fn validate_kick_token(token: &str) -> Result<(String, String), String
             .and_then(|j| j["data"][0]["slug"].as_str().map(str::to_string))
             .unwrap_or_default(),
         None => String::new(),
-    };
-
-    Ok((name, slug))
+    }
 }
 
 /// Validates a manually-pasted Twitch access token via `GET /helix/users`.
