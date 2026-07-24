@@ -1071,6 +1071,7 @@ const defaultConfig: AppConfig = {
     score_fullscreen: true,
     score_window_title: true,
     score_ram: true,
+    adult_content_enabled: false,
   },
 };
 

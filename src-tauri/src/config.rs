@@ -116,6 +116,12 @@ pub struct EngineSettings {
     pub score_window_title: bool,
     #[serde(default = "default_score_ram")]
     pub score_ram: bool,
+    /// Master gate for 18+ platforms (currently just Joystick.tv) across
+    /// every tool — Connections & Keys, Multi-Chat, Chatbot, AI Co-Host,
+    /// Alerts Hub. Off by default; the General settings tab is the only
+    /// place that flips it, behind an explicit confirmation.
+    #[serde(default)]
+    pub adult_content_enabled: bool,
 }
 
 impl Default for EngineSettings {
@@ -148,6 +154,7 @@ impl Default for EngineSettings {
             score_fullscreen: default_score_fullscreen(),
             score_window_title: default_score_window_title(),
             score_ram: default_score_ram(),
+            adult_content_enabled: false,
         }
     }
 }

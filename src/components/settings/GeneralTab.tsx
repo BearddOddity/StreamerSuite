@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { SystemConfig } from "@/settings";
 import {
   Toggle,
@@ -5,6 +6,8 @@ import {
   CollapsibleSection,
   GlassSelect,
 } from "./SettingsComponents";
+import { fetchConfig, saveConfig } from "@statusforge/hooks/useTauriApi";
+import type { AppConfig } from "@statusforge/types";
 
 interface Props extends SystemConfig {
   onFieldChange: <K extends keyof SystemConfig>(key: K, value: SystemConfig[K]) => void;
@@ -33,6 +36,99 @@ const logLevelOptions = [
   { value: "info", label: "Info" },
   { value: "debug", label: "Debug" },
 ];
+
+/// Self-contained (own fetch/save) rather than threaded through SystemConfig
+/// like the rest of this tab — the flag lives in the shared AppConfig
+/// (engine_settings.adult_content_enabled) since every tool that hides
+/// Joystick.tv on it (Connections & Keys, Multi-Chat, Chatbot, AI Co-Host,
+/// Alerts Hub) reads that same config, not the browser-local SystemConfig.
+function AdultContentSection() {
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmClosing, setConfirmClosing] = useState(false);
+
+  useEffect(() => {
+    fetchConfig().then(setConfig);
+  }, []);
+
+  const enabled = config?.engine_settings.adult_content_enabled ?? false;
+
+  const closeConfirm = () => {
+    setConfirmClosing(true);
+    setTimeout(() => {
+      setConfirmOpen(false);
+      setConfirmClosing(false);
+    }, 200);
+  };
+
+  const setEnabled = async (next: boolean) => {
+    if (!config) return;
+    const updated: AppConfig = {
+      ...config,
+      engine_settings: { ...config.engine_settings, adult_content_enabled: next },
+    };
+    setConfig(updated);
+    await saveConfig(updated);
+  };
+
+  const confirmEnable = async () => {
+    await setEnabled(true);
+    closeConfirm();
+  };
+
+  return (
+    <CollapsibleSection title="Adult Content & Platforms" icon="🔞">
+      <SettingsRow
+        label="Show 18+ Platforms"
+        description="Joystick.tv (and any future 18+ platform) is completely hidden — Connections & Keys, Multi-Chat, Chatbot, AI Co-Host, Alerts Hub — until this is on. Off by default."
+      >
+        {enabled ? (
+          <Toggle on={true} onToggle={() => setEnabled(false)} />
+        ) : (
+          <button onClick={() => setConfirmOpen(true)} className="btn-cta text-[11px] px-3 py-1.5">
+            Show 18+ Platforms
+          </button>
+        )}
+      </SettingsRow>
+
+      {confirmOpen && (
+        <div
+          className={`fixed inset-0 z-[100] flex items-center justify-center bg-black/50 ${
+            confirmClosing ? "" : "animate-float-backdrop"
+          }`}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeConfirm();
+          }}
+        >
+          <div
+            className={`relative w-[420px] bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-6 ${
+              confirmClosing ? "animate-float-card-out" : "animate-float-card-in"
+            }`}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-2xl">🔞</span>
+              <h3 className="text-white font-semibold text-sm">Show 18+ platforms?</h3>
+            </div>
+            <p className="text-[12px] text-white/50 mb-5 leading-relaxed">
+              Joystick.tv is an adult-oriented platform. Turning this on makes it visible across every
+              tool in StreamerSuite — Connections & Keys, Multi-Chat, Chatbot, AI Co-Host, and Alerts Hub
+              — including its chat, moderation, and tip-alert surfaces. You can hide it again anytime from
+              this same setting.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={closeConfirm} className="btn-ghost text-[11px] px-3 py-1.5">
+                Cancel
+              </button>
+              <button onClick={confirmEnable} className="btn-cta text-[11px] px-3 py-1.5">
+                Yes, show them
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </CollapsibleSection>
+  );
+}
 
 export default function GeneralTab(props: Props) {
   const { onFieldChange: u } = props;
@@ -117,6 +213,8 @@ export default function GeneralTab(props: Props) {
           <Toggle on={props.configBackupEnabled} onToggle={() => toggle("configBackupEnabled")} />
         </SettingsRow>
       </CollapsibleSection>
+
+      <AdultContentSection />
     </div>
   );
 }

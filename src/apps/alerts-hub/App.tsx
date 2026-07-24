@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PlatformIcon } from "@/components/common/PlatformIcon";
 import { useAlertsSettings } from "./useAlertsSettings";
 import { useAlertsFeed } from "./useAlertsFeed";
@@ -6,6 +6,7 @@ import { SettingsPanel } from "./SettingsPanel";
 import type { AlertEvent, AlertKind } from "./types";
 import "../../design-system/styles.css";
 import { Button, Card, SectionHead, StatusDot } from "../../design-system/components/core";
+import { fetchConfig } from "@statusforge/hooks/useTauriApi";
 
 const KIND_STYLE: Record<AlertKind, { icon: string; color: string }> = {
   follow: { icon: "💜", color: "border-purple-500/25 bg-purple-500/10" },
@@ -36,8 +37,16 @@ export default function AlertsHubApp() {
   const { settings, update, toggle } = useAlertsSettings();
   const { alerts, push, clear, twitchAccount, refreshTwitchAccount, twitchStatus, kickStatus, joystickStatus } = useAlertsFeed(settings);
   const [showSettings, setShowSettings] = useState(false);
+  // Off by default (General -> Adult Content & Platforms) — zero mention of
+  // Joystick.tv anywhere in this tool until it's explicitly turned on there.
+  const [adultContentEnabled, setAdultContentEnabled] = useState(false);
 
-  const anyLive = twitchStatus === "live" || kickStatus === "live" || joystickStatus === "live";
+  useEffect(() => {
+    fetchConfig().then((cfg) => setAdultContentEnabled(!!cfg?.engine_settings.adult_content_enabled));
+  }, []);
+
+  const anyLive = twitchStatus === "live" || kickStatus === "live" || (adultContentEnabled && joystickStatus === "live");
+  const testEvents = adultContentEnabled ? TEST_EVENTS : TEST_EVENTS.filter((e) => e.platform !== "joystick");
 
   return (
     <div className="h-full flex flex-col p-6 overflow-y-auto">
@@ -46,7 +55,7 @@ export default function AlertsHubApp() {
           <SectionHead
             icon="🔔"
             title="Alerts & Events"
-            desc={`${anyLive ? "🟢 Live — " : ""}Follows, subs, raids, cheers, and tips across Twitch, Kick, and Joystick.tv`}
+            desc={`${anyLive ? "🟢 Live — " : ""}Follows, subs, raids, cheers, and tips across Twitch, Kick${adultContentEnabled ? ", and Joystick.tv" : ""}`}
             right={
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => update({ soundEnabled: !settings.soundEnabled })}>
@@ -63,12 +72,14 @@ export default function AlertsHubApp() {
         <div className="flex items-center gap-4 mb-6">
           <span className="flex items-center gap-1.5"><PlatformIcon platform="twitch" size="xs" /><StatusDot status={toDotStatus(twitchStatus)} label={twitchStatus} /></span>
           <span className="flex items-center gap-1.5"><PlatformIcon platform="kick" size="xs" /><StatusDot status={toDotStatus(kickStatus)} label={kickStatus} /></span>
-          <span className="flex items-center gap-1.5"><PlatformIcon platform="joystick" size="xs" /><StatusDot status={toDotStatus(joystickStatus)} label={joystickStatus} /></span>
+          {adultContentEnabled && (
+            <span className="flex items-center gap-1.5"><PlatformIcon platform="joystick" size="xs" /><StatusDot status={toDotStatus(joystickStatus)} label={joystickStatus} /></span>
+          )}
         </div>
 
         {/* Quick trigger — local test alerts, doesn't touch any platform */}
         <div className="flex gap-2 mb-6 flex-wrap">
-          {TEST_EVENTS.map((e, i) => (
+          {testEvents.map((e, i) => (
             <button
               key={i}
               onClick={() => push(e)}
@@ -118,6 +129,7 @@ export default function AlertsHubApp() {
           twitchStatus={twitchStatus}
           kickStatus={kickStatus}
           joystickStatus={joystickStatus}
+          adultContentEnabled={adultContentEnabled}
           onClose={() => setShowSettings(false)}
         />
       )}

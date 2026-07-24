@@ -32,18 +32,14 @@ const PLATFORM_LABELS: { key: keyof ChatCommand["platforms"]; label: string; ico
  * pattern used everywhere else this app centralizes a connection. Whether
  * the bot can actually run on a platform depends on this, so it's worth
  * showing honestly even though command execution itself isn't wired up yet. */
-function ConnectionStatus() {
-  const [config, setConfig] = useState<AppConfig | null>(null);
-
-  useEffect(() => {
-    fetchConfig().then(setConfig);
-  }, []);
-
+function ConnectionStatus({ config, adultContentEnabled }: { config: AppConfig | null; adultContentEnabled: boolean }) {
   const bc = config?.broadcaster;
   const rows = [
     { key: "twitch", label: "Twitch", connected: !!(bc?.twitch_token && bc?.twitch_client) },
     { key: "kick", label: "Kick", connected: !!(bc?.kick_token && bc?.kick_client) },
-    { key: "joystick", label: "Joystick.tv", connected: !!(bc?.joystick_refresh && bc?.joystick_client) },
+    ...(adultContentEnabled
+      ? [{ key: "joystick", label: "Joystick.tv", connected: !!(bc?.joystick_refresh && bc?.joystick_client) }]
+      : []),
     { key: "streamerbot", label: "Streamer.bot", connected: !!(bc?.streamerbot_host && bc?.streamerbot_port) },
   ];
 
@@ -71,12 +67,15 @@ function CommandEditor({
   cmd,
   onChange,
   onDelete,
+  adultContentEnabled,
 }: {
   cmd: ChatCommand;
   onChange: (patch: Partial<ChatCommand>) => void;
   onDelete: () => void;
+  adultContentEnabled: boolean;
 }) {
   const [aliasInput, setAliasInput] = useState(cmd.aliases.join(", "));
+  const platformOptions = PLATFORM_LABELS.filter((p) => p.key !== "joystick" || adultContentEnabled);
 
   return (
     <Card padding={16} className={`transition-all ${cmd.enabled ? "" : "opacity-50"}`}>
@@ -186,7 +185,7 @@ function CommandEditor({
 
       <div className="flex items-center justify-between">
         <div className="flex gap-1.5 flex-wrap">
-          {PLATFORM_LABELS.map((p) => (
+          {platformOptions.map((p) => (
             <Chip
               key={p.key}
               selected={cmd.platforms[p.key]}
@@ -204,6 +203,16 @@ function CommandEditor({
 
 export default function ChatbotApp() {
   const { commands, addCommand, updateCommand, removeCommand } = useChatbot();
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
+
+  useEffect(() => {
+    fetchConfig().then(setAppConfig);
+  }, []);
+
+  // Off by default (General -> Adult Content & Platforms) — Joystick.tv
+  // stays out of every platform picker/status readout in this tool until
+  // it's explicitly turned on there.
+  const adultContentEnabled = appConfig?.engine_settings.adult_content_enabled ?? false;
 
   return (
     <div className="h-full flex flex-col p-6 overflow-y-auto">
@@ -229,7 +238,7 @@ export default function ChatbotApp() {
           </p>
         </div>
 
-        <ConnectionStatus />
+        <ConnectionStatus config={appConfig} adultContentEnabled={adultContentEnabled} />
 
         <div className="flex flex-col gap-3">
           {commands.length === 0 ? (
@@ -241,6 +250,7 @@ export default function ChatbotApp() {
                 cmd={cmd}
                 onChange={(patch) => updateCommand(cmd.id, patch)}
                 onDelete={() => removeCommand(cmd.id)}
+                adultContentEnabled={adultContentEnabled}
               />
             ))
           )}

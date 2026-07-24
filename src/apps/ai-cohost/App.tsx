@@ -17,18 +17,14 @@ const PLATFORM_LABELS: { key: keyof CoHostPlatforms; label: string; icon: string
 /** Real readout — same pattern as Chatbot's ConnectionStatus, plus the
  * Hugging Face API token (Connections & Keys → API Keys, not a broadcaster
  * connection) since that's what actually gates whether this could run. */
-function ConnectionStatus() {
-  const [config, setConfig] = useState<AppConfig | null>(null);
-
-  useEffect(() => {
-    fetchConfig().then(setConfig);
-  }, []);
-
+function ConnectionStatus({ config, adultContentEnabled }: { config: AppConfig | null; adultContentEnabled: boolean }) {
   const bc = config?.broadcaster;
   const rows = [
     { key: "twitch", label: "Twitch", connected: !!(bc?.twitch_token && bc?.twitch_client) },
     { key: "kick", label: "Kick", connected: !!(bc?.kick_token && bc?.kick_client) },
-    { key: "joystick", label: "Joystick.tv", connected: !!(bc?.joystick_refresh && bc?.joystick_client) },
+    ...(adultContentEnabled
+      ? [{ key: "joystick", label: "Joystick.tv", connected: !!(bc?.joystick_refresh && bc?.joystick_client) }]
+      : []),
     { key: "huggingface", label: "Hugging Face", connected: !!config?.api_keys?.huggingface },
   ];
 
@@ -54,6 +50,17 @@ function ConnectionStatus() {
 
 export default function CoHostApp() {
   const { config, update, updateGuardrails, toggleTrigger, togglePlatform, toggleTool } = useCoHost();
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
+
+  useEffect(() => {
+    fetchConfig().then(setAppConfig);
+  }, []);
+
+  // Off by default (General -> Adult Content & Platforms) — Joystick.tv
+  // stays out of every platform picker/status readout in this tool until
+  // it's explicitly turned on there.
+  const adultContentEnabled = appConfig?.engine_settings.adult_content_enabled ?? false;
+  const platformOptions = PLATFORM_LABELS.filter((p) => p.key !== "joystick" || adultContentEnabled);
 
   return (
     <div className="h-full flex flex-col p-6 overflow-y-auto">
@@ -79,7 +86,7 @@ export default function CoHostApp() {
           </p>
         </div>
 
-        <ConnectionStatus />
+        <ConnectionStatus config={appConfig} adultContentEnabled={adultContentEnabled} />
 
         {/* Persona */}
         <Card padding={16} className="mb-4">
@@ -223,7 +230,7 @@ export default function CoHostApp() {
             Platforms
           </span>
           <div className="flex gap-1.5 flex-wrap">
-            {PLATFORM_LABELS.map((p) => (
+            {platformOptions.map((p) => (
               <Chip key={p.key} selected={config.platforms[p.key]} onClick={() => togglePlatform(p.key)}>
                 {p.icon} {p.label}
               </Chip>

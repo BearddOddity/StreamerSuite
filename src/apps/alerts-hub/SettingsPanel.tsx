@@ -20,6 +20,7 @@ export function SettingsPanel({
   twitchStatus,
   kickStatus,
   joystickStatus,
+  adultContentEnabled,
   onClose,
 }: {
   settings: AlertsSettings;
@@ -30,6 +31,7 @@ export function SettingsPanel({
   twitchStatus: ConnStatus;
   kickStatus: ConnStatus;
   joystickStatus: ConnStatus;
+  adultContentEnabled: boolean;
   onClose: () => void;
 }) {
   return (
@@ -93,22 +95,25 @@ export function SettingsPanel({
           </div>
         </section>
 
-        {/* Joystick */}
-        <section className="mb-6">
-          <div className="flex items-center gap-2 mb-2">
-            <PlatformIcon platform="joystick" size="sm" />
-            <span className="text-[12px] font-semibold text-white/70">Joystick.tv</span>
-            <StatusDot status={toDotStatus(joystickStatus)} />
-          </div>
-          <p className="text-[10px] text-white/30">
-            Uses the same Joystick.tv bot connection as Multi-Chat — connect it there first. Tips show up here as alerts.
-          </p>
-          <div className="mt-2">
-            <Chip selected={settings.enabled.joystickTip} onClick={() => onToggle("joystickTip")}>
-              Tips
-            </Chip>
-          </div>
-        </section>
+        {/* Joystick — off by default (General -> Adult Content & Platforms),
+            zero mention anywhere in this tool until turned on there. */}
+        {adultContentEnabled && (
+          <section className="mb-6">
+            <div className="flex items-center gap-2 mb-2">
+              <PlatformIcon platform="joystick" size="sm" />
+              <span className="text-[12px] font-semibold text-white/70">Joystick.tv</span>
+              <StatusDot status={toDotStatus(joystickStatus)} />
+            </div>
+            <p className="text-[10px] text-white/30">
+              Uses the same Joystick.tv bot connection as Multi-Chat — connect it there first. Tips show up here as alerts.
+            </p>
+            <div className="mt-2">
+              <Chip selected={settings.enabled.joystickTip} onClick={() => onToggle("joystickTip")}>
+                Tips
+              </Chip>
+            </div>
+          </section>
+        )}
 
         <section>
           <button

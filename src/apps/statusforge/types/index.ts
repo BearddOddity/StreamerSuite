@@ -77,6 +77,9 @@ export interface EngineSettings {
   score_fullscreen: boolean;
   score_window_title: boolean;
   score_ram: boolean;
+  /** Master gate for 18+ platforms (Joystick.tv) across every tool. Off by
+   * default — see the General settings tab's Adult Content section. */
+  adult_content_enabled: boolean;
 }
 
 export type RoutingMode = "streamer_bot" | "native";

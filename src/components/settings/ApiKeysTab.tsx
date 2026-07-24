@@ -74,6 +74,7 @@ const defaultConfig: AppConfig = {
     score_fullscreen: true,
     score_window_title: true,
     score_ram: true,
+    adult_content_enabled: false,
   },
 };
 
@@ -142,6 +143,9 @@ const ROUTING_CATALOG: {
    * to paste there. Omitted for platforms (Joystick) whose OAuth flow
    * doesn't take a redirect_uri param at all. */
   redirectUri?: string;
+  /** 18+ platform — hidden everywhere (not just here) unless General ->
+   * Adult Content & Platforms is turned on. Off by default. */
+  adult?: boolean;
   userFields: {
     key: string;
     label: string;
@@ -233,6 +237,7 @@ const ROUTING_CATALOG: {
     key: "joystick",
     label: "Joystick.tv",
     desc: "OAuth2 via Joystick.tv — chat, moderation, and tip alerts",
+    adult: true,
     keyUrl: "https://joystick.tv/applications",
     icon: <PlatformIcon platform="joystick" size="sm" variant="light" />,
     color: "#76e1f0",
@@ -608,7 +613,10 @@ export default function ApiKeysTab() {
     return allKeys.some((k) => k in config.broadcaster);
   };
 
-  const availableRoutes = ROUTING_CATALOG.filter((e) => !isRouteEntryActive(e));
+  const adultContentEnabled = config?.engine_settings.adult_content_enabled ?? false;
+  const availableRoutes = ROUTING_CATALOG.filter(
+    (e) => !isRouteEntryActive(e) && (!e.adult || adultContentEnabled)
+  );
   const filteredAvailableRoutes = search
     ? availableRoutes.filter(
         (e) =>
@@ -868,7 +876,9 @@ export default function ApiKeysTab() {
   // ── Routing display data ───────────────────────────
   const bc = config.broadcaster || ({} as AppConfig["broadcaster"]);
 
-  const displayRouteEntries = ROUTING_CATALOG.filter((entry) => isRouteEntryActive(entry));
+  const displayRouteEntries = ROUTING_CATALOG.filter(
+    (entry) => isRouteEntryActive(entry) && (!entry.adult || config.engine_settings.adult_content_enabled)
+  );
   const routeCatalogKeys = new Set(
     ROUTING_CATALOG.flatMap((e) => [
       ...e.userFields.map((f) => f.key),

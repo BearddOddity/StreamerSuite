@@ -1589,10 +1589,25 @@ function renderPinned() {
 }
 
 /* Platform toggles + health */
+// Off by default (StreamerSuite Settings -> General -> Adult Content &
+// Platforms) — zero mention of an 18+ platform (currently just Joystick.tv)
+// anywhere in this app until it's explicitly turned on there. Filtering
+// centrally here (the one function every platform-list UI — toggle row,
+// command palette, reorder — already goes through) means nothing downstream
+// needs its own check.
+let adultContentEnabled = false;
+async function loadAdultContentFlag() {
+  if (!tauriInvoke) return;
+  const cfg = await tauriInvoke("export_config").catch(() => null);
+  adultContentEnabled = !!cfg?.engine_settings?.adult_content_enabled;
+  renderPlatformToggles();
+}
 function orderedPlatforms() {
   const order = (settings.platformOrder || []).filter(id => PLATFORM_MAP[id]);
   PLATFORMS.forEach(p => { if (!order.includes(p.id)) order.push(p.id); });
-  return order.map(id => PLATFORM_MAP[id]);
+  return order
+    .map(id => PLATFORM_MAP[id])
+    .filter(p => p.id !== "joystick" || adultContentEnabled);
 }
 let _dragId = null;
 function reorderPlatforms(dragId, dropId) {
@@ -2338,7 +2353,7 @@ function buildChannelsDrawer() {
     note.style.margin = "16px 4px 0";
     note.textContent = "Sending messages and account login require the Multi-Chat desktop app — this browser tab is read-only.";
     body.append(note);
-    body.append(joystickCard(hint));
+    if (adultContentEnabled) body.append(joystickCard(hint));
     return;
   }
 
@@ -2355,7 +2370,7 @@ function buildChannelsDrawer() {
     hint("If auto-resolve fails, open <code>kick.com/api/v2/channels/&lt;slug&gt;</code> in a browser tab and paste the <code>chatroom.id</code> number. Defaults to your connected Kick account's own channel."),
   ], centralConnectionNote("kick", "Kick", kickChannelInput, "kick_channel_id")));
 
-  body.append(joystickCard(hint));
+  if (adultContentEnabled) body.append(joystickCard(hint));
   body.append(streamerbotCard(hint));
 }
 
@@ -2842,7 +2857,8 @@ function buildSettingsDrawer() {
     const resetBtn = el("button", "cv-btn danger", "🧨 Reset all credentials");
     resetBtn.onclick = async () => {
       if (!tauriInvoke) { showToast("Requires the desktop app"); return; }
-      if (!confirm("Erase every saved Client ID/Secret and login token (Twitch, Kick, Joystick.tv, Streamer.bot)? You'll need to reconnect each one from scratch.")) return;
+      const resetPlatforms = ["Twitch", "Kick", ...(adultContentEnabled ? ["Joystick.tv"] : []), "Streamer.bot"];
+      if (!confirm(`Erase every saved Client ID/Secret and login token (${resetPlatforms.join(", ")})? You'll need to reconnect each one from scratch.`)) return;
       ["twitch", "kick", "joystick", "streamerbot"].forEach(p => disconnect(p));
       oauthAccounts.twitch = oauthAccounts.kick = oauthAccounts.joystick = null;
       await tauriInvoke("wipe_all_credentials_cmd");
@@ -3072,9 +3088,12 @@ if (isOverlay) {
   buildChannelsDrawer();
   applyConnections();
   if (tauriInvoke) {
-    Promise.all(["twitch", "kick", "joystick"].map(p =>
-      tauriInvoke("oauth_get_account", { platform: p }).then(acc => { oauthAccounts[p] = acc; })
-    )).then(() => { buildChannelsDrawer(); buildComposeBar(); });
+    Promise.all([
+      loadAdultContentFlag(),
+      ...["twitch", "kick", "joystick"].map(p =>
+        tauriInvoke("oauth_get_account", { platform: p }).then(acc => { oauthAccounts[p] = acc; })
+      ),
+    ]).then(() => { buildChannelsDrawer(); buildComposeBar(); });
   } else {
     buildComposeBar();
   }
