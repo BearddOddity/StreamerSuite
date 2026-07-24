@@ -5,7 +5,7 @@ registerApp({
   id: "scene-switcher",
   name: "Scene Switcher",
   icon: "🎬",
-  description: "Control Meld Studio scenes, audio, and streaming remotely over its WebSocket API.",
+  description: "Control OBS Studio or Meld Studio scenes, audio, and streaming remotely.",
   category: "tools",
   component: SceneSwitcherApp,
 });

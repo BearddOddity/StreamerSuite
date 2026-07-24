@@ -1,4 +1,7 @@
-import { useMeldConnection } from "./useMeldConnection";
+import { useState } from "react";
+import { useSceneSwitcherConnection } from "./useSceneSwitcherConnection";
+import { useSceneSwitcherSettings } from "./useSceneSwitcherSettings";
+import { SettingsPanel } from "./SettingsPanel";
 import "../../design-system/styles.css";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
 
@@ -12,9 +15,12 @@ const SCENE_COLORS = [
 ];
 
 export default function SceneSwitcherApp() {
+  const { settings, update } = useSceneSwitcherSettings();
+  const [showSettings, setShowSettings] = useState(false);
   const { status, error, scenes, tracks, isStreaming, isRecording, connect, showScene, toggleMute, toggleStream, toggleRecord } =
-    useMeldConnection();
+    useSceneSwitcherConnection(settings.platform, { host: settings.obsHost, port: settings.obsPort, password: settings.obsPassword });
   const connected = status === "connected";
+  const platformName = settings.platform === "obs" ? "OBS" : "Meld";
 
   return (
     <div className="h-full flex flex-col p-6 overflow-y-auto">
@@ -24,11 +30,16 @@ export default function SceneSwitcherApp() {
           <SectionHead
             icon="🔀"
             title="Scene Switcher"
-            desc="Control Meld Studio scenes remotely"
+            desc="Control OBS Studio or Meld Studio scenes remotely"
             right={
-              <Button variant={connected ? "success" : "ghost"} disabled={status === "connecting"} onClick={connect}>
-                {connected ? "🟢 Connected" : status === "connecting" ? "Connecting…" : "⚪ Connect to Meld"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setShowSettings(true)}>
+                  ⚙️
+                </Button>
+                <Button variant={connected ? "success" : "ghost"} disabled={status === "connecting"} onClick={connect}>
+                  {connected ? `🟢 Connected to ${platformName}` : status === "connecting" ? "Connecting…" : `⚪ Connect to ${platformName}`}
+                </Button>
+              </div>
             }
           />
         </div>
@@ -36,16 +47,26 @@ export default function SceneSwitcherApp() {
         {/* Connection info */}
         {!connected && (
           <Card padding={16} className="mb-6">
-            <p className="text-[11px] text-amber-400/70 leading-relaxed">
-              ⚠️ Meld Studio needs to be running with its API server enabled (Settings → Integrations → API) on{" "}
-              <code>ws://127.0.0.1:13376</code>.{error && <span className="block mt-1 text-red-400/70">{error}</span>}
-            </p>
+            {settings.platform === "obs" ? (
+              <p className="text-[11px] text-amber-400/70 leading-relaxed">
+                ⚠️ OBS Studio needs to be running with its WebSocket server enabled (Tools → WebSocket Server Settings) on{" "}
+                <code>
+                  ws://{settings.obsHost}:{settings.obsPort}
+                </code>
+                . {error && <span className="block mt-1 text-red-400/70">{error}</span>}
+              </p>
+            ) : (
+              <p className="text-[11px] text-amber-400/70 leading-relaxed">
+                ⚠️ Meld Studio needs to be running with its API server enabled (Settings → Integrations → API) on{" "}
+                <code>ws://127.0.0.1:13376</code>.{error && <span className="block mt-1 text-red-400/70">{error}</span>}
+              </p>
+            )}
           </Card>
         )}
 
         {/* Scene grid */}
         {connected && scenes.length === 0 ? (
-          <div className="text-center py-12 text-white/20 text-sm">No scenes found in the current Meld session.</div>
+          <div className="text-center py-12 text-white/20 text-sm">No scenes found in the current {platformName} session.</div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {(connected ? scenes : []).map((scene, i) => (
@@ -111,6 +132,8 @@ export default function SceneSwitcherApp() {
           </Card>
         )}
       </div>
+
+      {showSettings && <SettingsPanel settings={settings} onUpdate={update} onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
