@@ -65,6 +65,16 @@ const X_RE = /(?:x\.com|twitter\.com)\/(\w{1,15})(?:[/?#]|$)/i;
 const X_RESERVED_PATHS = new Set(["home", "explore", "notifications", "messages", "i", "intent", "search", "settings", "compose", "login", "signup", "share", "hashtag"]);
 const YOUTUBE_CHANNEL_RE = /youtube\.com\/@([\w.-]+)/i;
 const TIKTOK_RE = /tiktok\.com\/@([\w.-]+)/i;
+const KOFI_RE = /ko-fi\.com\/([\w.-]+)/i;
+const FOURTHWALL_RE = /fourthwall\.com/i;
+const STREAMLABS_TIP_RE = /streamlabs\.com\/([\w-]+)\/tip/i;
+const STREAMELEMENTS_TIP_RE = /streamelements\.com\/([\w-]+)\/tip/i;
+const PATREON_RE = /patreon\.com\/([\w-]+)/i;
+const THRONE_RE = /throne\.(?:com|me)\/([\w-]+)/i;
+const INSTAGRAM_RE = /instagram\.com\/([\w.]+)/i;
+const INSTAGRAM_RESERVED_PATHS = new Set(["p", "reel", "reels", "stories", "explore", "accounts", "direct", "tv"]);
+const BLUESKY_RE = /bsky\.app\/profile\/([\w.:-]+)/i;
+const STEAM_APP_RE = /store\.steampowered\.com\/app\/(\d+)/i;
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
 function extractGiphyId(text) {
   let m = /giphy\.com\/media\d?\/([a-zA-Z0-9]+)\//.exec(text);
@@ -571,6 +581,83 @@ function linkPreviewX(handle, url) {
 function linkPreviewYoutubeChannel(handle, url) {
   return linkPreviewStaticChip("youtube", "▶ YouTube", `@${handle}`, "Open channel ↗", url, "▶");
 }
+// Ko-fi, Fourthwall, Streamlabs/StreamElements tip pages, Patreon, Throne,
+// and Instagram all have no public unauthenticated API to pull a real
+// preview from (confirmed for each before building this) — static chips.
+function linkPreviewKofi(handle, url) {
+  return linkPreviewStaticChip("kofi", "☕ Ko-fi", `@${handle}`, "Support on Ko-fi ↗", url, "K");
+}
+function linkPreviewFourthwall(url) {
+  return linkPreviewStaticChip("fourthwall", "🛍️ Fourthwall", "Fourthwall Shop", "Open shop ↗", url, "4W");
+}
+function linkPreviewStreamlabsTip(handle, url) {
+  return linkPreviewStaticChip("streamlabs", "💜 Streamlabs", `Tip @${handle}`, "Open tip page ↗", url, "S");
+}
+function linkPreviewStreamElementsTip(handle, url) {
+  return linkPreviewStaticChip("streamelements", "💚 StreamElements", `Tip @${handle}`, "Open tip page ↗", url, "SE");
+}
+function linkPreviewPatreon(handle, url) {
+  return linkPreviewStaticChip("patreon", "🧡 Patreon", `@${handle}`, "Support on Patreon ↗", url, "P");
+}
+function linkPreviewThrone(handle, url) {
+  return linkPreviewStaticChip("throne", "👑 Throne", `@${handle}`, "Open wishlist ↗", url, "T");
+}
+function linkPreviewInstagram(handle, url) {
+  return linkPreviewStaticChip("instagram", "📷 Instagram", `@${handle}`, "Open profile ↗", url, "IG");
+}
+
+// Bluesky's AT Protocol AppView is genuinely public/unauthenticated — real
+// avatar + display name, same fetch-then-fallback pattern as TikTok above.
+const bskyProfileCache = new Map(); // handle(lower) -> profile | null
+function linkPreviewBluesky(handle, url) {
+  const { wrap, body } = linkPreviewWrap("bluesky", "🦋 Bluesky", url);
+  const apply = data => fillLinkPreview(body, data, d => {
+    let icon;
+    if (d.avatar) {
+      icon = el("img", "cv-linkpreview-thumb cv-linkpreview-thumb-round");
+      icon.src = d.avatar; icon.alt = d.displayName || handle; icon.loading = "lazy";
+    } else {
+      icon = el("div", "cv-linkpreview-thumb cv-linkpreview-thumb-round cv-linkpreview-fallback", (d.displayName || handle)[0].toUpperCase());
+    }
+    const info = el("div", "cv-linkpreview-info");
+    info.append(el("div", "cv-linkpreview-title", d.displayName || `@${handle}`), el("div", "cv-linkpreview-sub", `@${d.handle || handle}`));
+    return [icon, info];
+  }, "Open profile ↗");
+  const key = handle.toLowerCase();
+  const cached = bskyProfileCache.get(key);
+  if (cached !== undefined) { apply(cached); return wrap; }
+  fetch(`https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(handle)}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { bskyProfileCache.set(key, d); apply(d); })
+    .catch(() => { bskyProfileCache.set(key, null); apply(null); });
+  return wrap;
+}
+
+// Steam's app-details endpoint is also genuinely public/unauthenticated.
+const steamAppCache = new Map(); // appid -> app data | null
+function linkPreviewSteam(appid, url) {
+  const { wrap, body } = linkPreviewWrap("steam", "🎮 Steam", url);
+  const apply = data => fillLinkPreview(body, data, d => {
+    const img = el("img", "cv-linkpreview-thumb");
+    img.src = d.header_image; img.alt = d.name; img.loading = "lazy";
+    const priceText = d.is_free ? "Free to Play" : (d.price_overview && d.price_overview.final_formatted) || "";
+    const info = el("div", "cv-linkpreview-info");
+    info.append(el("div", "cv-linkpreview-title", d.name), el("div", "cv-linkpreview-sub", priceText));
+    return [img, info];
+  }, "Open store page ↗");
+  const cached = steamAppCache.get(appid);
+  if (cached !== undefined) { apply(cached); return wrap; }
+  fetch(`https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(appid)}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(json => {
+      const entry = json && json[appid];
+      const data = entry && entry.success ? entry.data : null;
+      steamAppCache.set(appid, data);
+      apply(data);
+    })
+    .catch(() => { steamAppCache.set(appid, null); apply(null); });
+  return wrap;
+}
 
 // TikTok's oEmbed *does* work for plain profile URLs (not just videos),
 // unlike YouTube's — real thumbnail + display name when it resolves, same
@@ -607,6 +694,17 @@ function buildLinkPreviewNode(m) {
   if ((match = X_RE.exec(text)) && !X_RESERVED_PATHS.has(match[1].toLowerCase())) {
     return linkPreviewX(match[1], firstUrl(text));
   }
+  if ((match = KOFI_RE.exec(text))) return linkPreviewKofi(match[1], firstUrl(text));
+  if (FOURTHWALL_RE.test(text)) return linkPreviewFourthwall(firstUrl(text));
+  if ((match = STREAMLABS_TIP_RE.exec(text))) return linkPreviewStreamlabsTip(match[1], firstUrl(text));
+  if ((match = STREAMELEMENTS_TIP_RE.exec(text))) return linkPreviewStreamElementsTip(match[1], firstUrl(text));
+  if ((match = PATREON_RE.exec(text))) return linkPreviewPatreon(match[1], firstUrl(text));
+  if ((match = THRONE_RE.exec(text))) return linkPreviewThrone(match[1], firstUrl(text));
+  if ((match = INSTAGRAM_RE.exec(text)) && !INSTAGRAM_RESERVED_PATHS.has(match[1].toLowerCase())) {
+    return linkPreviewInstagram(match[1], firstUrl(text));
+  }
+  if ((match = BLUESKY_RE.exec(text))) return linkPreviewBluesky(match[1], firstUrl(text));
+  if ((match = STEAM_APP_RE.exec(text))) return linkPreviewSteam(match[1], firstUrl(text));
   if (!TWITCH_CLIP_RE.test(text) && (match = TWITCH_CHANNEL_RE.exec(text)) && !TWITCH_RESERVED_PATHS.has(match[1].toLowerCase())) {
     return linkPreviewTwitchChannel(match[1], firstUrl(text));
   }
