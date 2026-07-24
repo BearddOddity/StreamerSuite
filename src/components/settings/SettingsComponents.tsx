@@ -89,7 +89,9 @@ export function CollapsibleSection({
         }`}
       >
         <div className="overflow-hidden">
-          <div className="p-5">{children}</div>
+          <div className="p-5 flex flex-col" style={{ gap: "var(--user-density, 1rem)" }}>
+            {children}
+          </div>
         </div>
       </div>
     </div>

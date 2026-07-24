@@ -1,4 +1,4 @@
-import type { ThemeConfig, Density, RadiusPreset, TransitionSpeed, ChatDensity } from "@/settings";
+import type { ThemeConfig, Density, RadiusPreset, TransitionSpeed } from "@/settings";
 import { compressImage } from "@/settings";
 import {
   Toggle,
@@ -206,51 +206,6 @@ export default function ThemeTab(props: Props) {
         <SettingsRow label="Spacing Density" description="Set overall element padding and row gap sizes">
           <GlassSelect value={props.density} options={densityOptions} onChange={(v) => u("density", v as Density)} />
         </SettingsRow>
-        <SettingsRow label="Sidebar Icons Only" description="Condense sidebar navigation, hiding text labels">
-          <Toggle on={props.sidebarIconOnly} onToggle={() => toggle("sidebarIconOnly")} />
-        </SettingsRow>
-      </CollapsibleSection>
-
-      {/* Chat */}
-      <CollapsibleSection title="Chat" icon="💬">
-        <SettingsRow label="Chat Font Size" description="Text size for chat messages">
-          <div className="flex items-center gap-2">
-            <button onClick={() => u("chatFontSize", Math.max(10, props.chatFontSize - 1))}
-              className="w-6 h-6 rounded-lg bg-white/[0.04] border border-white/[0.06] text-white/40 text-[10px] flex items-center justify-center hover:bg-white/[0.08] transition-all cursor-pointer">−</button>
-            <span className="text-[11px] text-white/60 font-mono w-6 text-center">{props.chatFontSize}</span>
-            <button onClick={() => u("chatFontSize", Math.min(20, props.chatFontSize + 1))}
-              className="w-6 h-6 rounded-lg bg-white/[0.04] border border-white/[0.06] text-white/40 text-[10px] flex items-center justify-center hover:bg-white/[0.08] transition-all cursor-pointer">+</button>
-          </div>
-        </SettingsRow>
-        <SettingsRow label="Chat Font Family" description="Font family for chat messages — any Google Font or system font">
-          <input type="text" value={props.chatFontFamily} onChange={(e) => u("chatFontFamily", e.target.value)}
-            placeholder="e.g. 'Inter', system-ui, 'Roboto Mono'" className="input-glass !w-[140px]" />
-        </SettingsRow>
-        <SettingsRow label="Chat Font Weight" description="Font weight for chat messages">
-          <GlassSelect value={props.chatFontWeight} options={fontWeightOptions} onChange={(v) => u("chatFontWeight", v)} />
-        </SettingsRow>
-        <SettingsRow label="Chat Density" description="Spacing between chat messages">
-          <div className="flex items-center gap-1 bg-white/[0.03] border border-white/[0.06] rounded-xl p-0.5">
-            {(["compact", "normal", "comfortable"] as const).map((d) => (
-              <button key={d} onClick={() => u("chatDensity", d as ChatDensity)}
-                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all capitalize cursor-pointer border-none ${
-                  props.chatDensity === d ? "bg-white/[0.08] text-white/80" : "text-white/25 hover:text-white/45 bg-transparent"
-                }`}>{d}</button>
-            ))}
-          </div>
-        </SettingsRow>
-        <SettingsRow label="Show Timestamps" description="Display time next to messages">
-          <Toggle on={props.showTimestamps} onToggle={() => toggle("showTimestamps")} />
-        </SettingsRow>
-        <SettingsRow label="Show Badges" description="Display user badges in chat">
-          <Toggle on={props.showBadges} onToggle={() => toggle("showBadges")} />
-        </SettingsRow>
-        <SettingsRow label="Chat Bubbles" description="Display messages as rounded bubble cards">
-          <Toggle on={props.chatBubbles} onToggle={() => toggle("chatBubbles")} />
-        </SettingsRow>
-        <SettingsRow label="Platform Badges && Icons" description="Show platform-specific icons next to messages in chat">
-          <Toggle on={props.platformBadges} onToggle={() => toggle("platformBadges")} />
-        </SettingsRow>
       </CollapsibleSection>
 
       {/* Effects */}
@@ -301,26 +256,6 @@ export default function ThemeTab(props: Props) {
         <SettingsRow label="Button Hover Effects" description="Hover effects on buttons">
           <Toggle on={props.buttonHoverEffects} onToggle={() => toggle("buttonHoverEffects")} />
         </SettingsRow>
-      </CollapsibleSection>
-
-      {/* Preview */}
-      <CollapsibleSection title="Preview" icon="👁">
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="status-dot on" />
-            <span className="text-[11px] text-white/50">Active indicator</span>
-          </div>
-          <button className="btn-cta">Primary Button</button>
-          <div className="progress-track">
-            <div className="progress-fill bg-gradient-to-r from-purple-500 to-indigo-500" style={{ width: "66%" }} />
-          </div>
-          <div className="flex items-center gap-2 pt-1">
-            <span className="text-[9px] text-white/20 font-mono">12:34</span>
-            <span className="text-[10px] text-white/40">PreviewUser</span>
-            <span className="badge badge-ghost">BADGE</span>
-            <span className="text-[11px] text-white/30">Sample message text</span>
-          </div>
-        </div>
       </CollapsibleSection>
     </div>
   );
