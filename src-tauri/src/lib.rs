@@ -2598,8 +2598,6 @@ pub fn run() {
             multichat::twitch_resolve_channel_preview,
             multichat::oauth_login,
             multichat::oauth_get_account,
-            multichat::oauth_logout,
-            multichat::oauth_get_client_id,
             multichat::joystick_get_gateway_token,
             multichat::send_twitch_message,
             multichat::send_kick_message,

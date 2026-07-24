@@ -396,11 +396,12 @@ fn kr_delete(account: &str) {
         }
         return;
     }
-    // Clearing to "" rather than removing the field, but a genuine disconnect
-    // (see oauth_logout below) goes through crate::disconnect_platform
-    // instead, which also purges the OS keychain copy — plain shared_cred_set
-    // here would leave a migrated keychain entry to silently backfill the
-    // field right back in on next load.
+    // Clearing to "" rather than removing the field — a genuine disconnect
+    // goes through crate::disconnect_platform instead (the centralized
+    // Connections & Keys tab's Disconnect button), which also purges the OS
+    // keychain copy — plain shared_cred_set here would leave a migrated
+    // keychain entry to silently backfill the field right back in on next
+    // load.
     let _ = shared_cred_set(account, "");
 }
 
@@ -508,12 +509,12 @@ fn await_oauth_redirect(expected_state: &str) -> Result<String, String> {
 }
 
 /// Joystick-only now — Twitch and Kick both connect through StreamerSuite's
-/// central Settings ("Connections & Keys") instead. This is the one Joystick
-/// OAuth implementation in the app: it writes into the shared AppConfig
-/// (`broadcaster.joystick_*`, see config.rs), so both Multi-Chat's own
-/// Settings panel and the central Settings UI can invoke this same
-/// `oauth_login("joystick", ...)` command and get a connection either one
-/// can see.
+/// central Settings ("Connections & Keys") instead. Joystick setup lives in
+/// exactly one place too: this command is only ever called from
+/// ApiKeysTab.tsx's Connections & Keys tab. It writes into the shared
+/// AppConfig (`broadcaster.joystick_*`, see config.rs), so Multi-Chat and
+/// Alerts Hub just read the resulting connection (oauth_get_account /
+/// joystick_get_gateway_token) — they have no OAuth UI of their own.
 ///
 /// Genuine public PKCE client (RFC 7636/8252) — verified against Joystick's
 /// own reference client (github.com/joysticktv/jtv): no client_secret is
@@ -673,24 +674,6 @@ pub(crate) fn oauth_get_account(platform: String) -> Option<OAuthAccount> {
     })
 }
 
-#[tauri::command]
-pub(crate) fn oauth_logout(platform: String) {
-    // Disconnect means a clean slate — erase the saved app credentials too,
-    // not just the session token, so nothing lingers after the user asks to
-    // remove a connection. Twitch/Kick/Joystick now live in the shared
-    // StatusForge store, so go through the same disconnect_platform() that
-    // StatusForge's own Settings UI uses — it also purges the migrated OS
-    // keychain copy, which a plain field-clear here would leave behind to
-    // silently backfill right back in on next load (see kr_delete's comment).
-    if ["twitch", "kick", "joystick"].contains(&platform.as_str()) {
-        let _ = crate::disconnect_platform(platform);
-        return;
-    }
-    for suffix in ["access_token", "refresh_token", "username", "user_id", "client_id", "client_secret"] {
-        kr_delete(&format!("{platform}.{suffix}"));
-    }
-}
-
 /// Wipes every credential this app has ever written to the OS keyring —
 /// Windows Credential Manager isn't touched by a normal uninstall, so
 /// without this, Client IDs/Secrets and tokens for every platform silently
@@ -721,13 +704,6 @@ pub fn wipe_all_credentials() {
 #[tauri::command]
 pub(crate) fn wipe_all_credentials_cmd() {
     wipe_all_credentials();
-}
-
-/// The Client ID isn't secret — safe to read back and pre-fill the form so a
-/// saved login doesn't need retyping after an app restart.
-#[tauri::command]
-pub(crate) fn oauth_get_client_id(platform: String) -> Option<String> {
-    kr_get(&format!("{platform}.client_id")).filter(|s| !s.is_empty())
 }
 
 /// Joystick-only: the realtime gateway (ActionCable over WebSocket) is a

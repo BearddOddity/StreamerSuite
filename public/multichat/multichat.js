@@ -2208,20 +2208,6 @@ $("openSettings").onclick = () => openDrawer("settings");
 window.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer("channels"); closeDrawer("settings"); } });
 
 /* Channels drawer */
-/* Small collapsible section — used to tuck credential fields + setup
-   instructions out of the way once a platform is already connected. */
-function disclosure(label, content, defaultOpen) {
-  const wrap = el("div", "cv-disclosure");
-  wrap.dataset.open = String(!!defaultOpen);
-  const btn = el("button", "cv-disclosure-toggle");
-  btn.append(el("span", "cv-disclosure-arrow", "▸"), document.createTextNode(" " + label));
-  btn.onclick = () => { wrap.dataset.open = String(wrap.dataset.open !== "true"); };
-  const bodyEl = el("div", "cv-disclosure-body");
-  bodyEl.append(content);
-  wrap.append(btn, bodyEl);
-  return wrap;
-}
-
 /* Collapsible connection cards — click the title row to fold away everything
    below it (channel fields, account section, setup info) for more room when
    you've got several platforms configured. State persists per card. */
@@ -2343,7 +2329,7 @@ function buildChannelsDrawer() {
     note.style.margin = "16px 4px 0";
     note.textContent = "Sending messages and account login require the Multi-Chat desktop app — this browser tab is read-only.";
     body.append(note);
-    body.append(joystickCard(input, hint));
+    body.append(joystickCard(hint));
     return;
   }
 
@@ -2360,22 +2346,23 @@ function buildChannelsDrawer() {
     hint("If auto-resolve fails, open <code>kick.com/api/v2/channels/&lt;slug&gt;</code> in a browser tab and paste the <code>chatroom.id</code> number. Defaults to your connected Kick account's own channel."),
   ], centralConnectionNote("kick", "Kick", kickChannelInput, "kick_channel_id")));
 
-  body.append(joystickCard(input, hint));
+  body.append(joystickCard(hint));
   body.append(streamerbotCard(input, hint));
 }
 
-/* Joystick's Client ID/Secret power BOTH the live chat connection and the
-   install button (unlike Twitch/Kick, where anonymous view and account
-   login are separate) — so those fields stay visible even once connected;
-   only the "how to create a bot" instructions collapse away. */
-function joystickCard(input, hint) {
+/* Joystick connects through StreamerSuite's centralized Settings now, same
+   as Twitch/Kick (see centralConnectionNote above) — this is just a status
+   readout + pointer, not its own OAuth form. Installing the bot on a
+   channel and viewing its chat here are still the same act for Joystick
+   (unlike Twitch/Kick's separate anonymous-view/account-login), so
+   "connected" here means both. */
+function joystickCard(hint) {
   const saveCh = () => store.save("bd-mc-channels", channels);
   const c = el("div", "cv-conn-card");
   c.dataset.platform = "joystick";
   const head = el("div", "cv-conn-title");
   const ic = el("span", "cv-conn-icon"); ic.innerHTML = PLATFORM_MAP.joystick.icon;
   head.append(ic, el("span", "", "Joystick.tv"));
-  const connected = !!oauthAccounts.joystick; // account-linked, used below for install/setup UI — NOT the chat status pill
   // Status reflects the real chat connection (state.health), same reasoning
   // as Twitch/Kick's cards — a linked bot install with chat off/dead/
   // reconnecting should never read as "CONNECTED".
@@ -2384,17 +2371,6 @@ function joystickCard(input, hint) {
   status.dataset.p = "joystick";
   head.append(status);
   c.append(head);
-
-  // Stored in the OS keyring, same as Twitch/Kick — never in localStorage.
-  // Blank on submit means "reuse what's already saved" (oauth_login's own
-  // convention), so a retry after restart doesn't force retyping it. No
-  // Client Secret field — Joystick's bot app is a genuine public PKCE
-  // client (confirmed against github.com/joysticktv/jtv), it never has one.
-  const cid = el("input", "cv-input mono");
-  cid.placeholder = "Client ID";
-  tauriInvoke("oauth_get_client_id", { platform: "joystick" }).then(v => { if (v) cid.value = v; });
-  c.append(cid);
-  c.append(hint("From your Joystick.tv bot's settings page. <b>Never share this with anyone</b> — it identifies your bot; whoever holds it can install it on a channel and act as it without your consent. Each person running Multi-Chat needs their own bot (see \"Don't have a bot yet?\" below), never a copy of someone else's."));
 
   const viewRow = el("div", "cv-settings-row");
   viewRow.style.border = "none"; viewRow.style.padding = "0";
@@ -2407,43 +2383,21 @@ function joystickCard(input, hint) {
   c.append(viewRow);
 
   const divider = el("div", "cv-divider");
-  if (!tauriInvoke) {
-    divider.append(hint("Installing the bot requires the Multi-Chat desktop app."));
-    c.append(divider);
-    makeCardCollapsible(c, head, "joystick");
-    return c;
-  }
-  const row = el("div", "cv-settings-row");
-  row.style.border = "none"; row.style.padding = "0";
-  if (connected) {
-    row.append(el("span", "cv-settings-label", "🟢 Connected — bot installed on this channel"));
-    const btn = el("button", "cv-btn danger", "Delete Connection");
-    btn.onclick = () => disconnectOAuth("joystick");
-    row.append(btn);
-    divider.append(row);
+  const noteRow = el("div", "cv-settings-row");
+  noteRow.style.border = "none"; noteRow.style.padding = "0";
+  const noteStatus = el("span", "cv-settings-label", "Checking…");
+  noteRow.append(noteStatus);
+  divider.append(noteRow);
+  divider.append(hint("Joystick.tv is connected in one place now — open StreamerSuite Settings &rarr; Connections &amp; Keys to install the bot or manage it. Changes apply here automatically."));
+  if (tauriInvoke) {
+    tauriInvoke("oauth_get_account", { platform: "joystick" }).then(acc => {
+      oauthAccounts.joystick = acc;
+      noteStatus.textContent = acc ? "🟢 Connected via StreamerSuite Settings" : "⚪ Not connected";
+    }).catch(() => { noteStatus.textContent = "⚪ Not connected"; });
   } else {
-    row.append(el("span", "cv-settings-label", "Chat not flowing yet?"));
-    const btn = el("button", "cv-btn cta", "🔌 Install Bot on This Channel");
-    btn.onclick = () => connectOAuth("joystick", cid.value.trim(), btn);
-    row.append(btn);
-    divider.append(row);
+    noteStatus.textContent = "⚪ Not connected";
+    divider.append(hint("Installing the bot requires the Multi-Chat desktop app."));
   }
-
-  const botHelp = document.createDocumentFragment();
-  const helpRow = el("div", "cv-settings-row");
-  helpRow.style.border = "none"; helpRow.style.padding = "0";
-  helpRow.append(el("span", "cv-settings-label", "Don't have a bot yet?"));
-  const createBtn = el("button", "cv-btn", "🎮 Create a Bot");
-  const link = el("a"); link.href = "#"; link.dataset.openUrl = "https://joystick.tv/applications";
-  link.append(createBtn); // click handled by the delegated [data-open-url] listener
-  helpRow.append(link);
-  botHelp.append(helpRow);
-  const steps = el("div", "cv-hint");
-  steps.style.marginTop = "8px";
-  steps.innerHTML = `On joystick.tv/applications → New Chat Bot: pick a Name, set <b>OAuth redirect URL</b> to <code>http://localhost:${OAUTH_PORT}/callback</code> (this app actually uses it now — must match exactly), set <b>Client type</b> to <b>Public (PKCE)</b>, and under Permissions check <b>SendMessage</b> and <b>ReadMessages</b> (add DeleteMessage/MuteUser/BlockUser too for future moderation — permissions can't be changed after creation). Create it, then paste the <b>Client ID</b> it shows you into the field above.`; // static template, only OAUTH_PORT is interpolated (numeric constant)
-  botHelp.append(steps);
-
-  divider.append(connected ? disclosure("Bot setup info", botHelp, false) : botHelp);
   c.append(divider);
   makeCardCollapsible(c, head, "joystick");
   return c;
@@ -2553,30 +2507,6 @@ function streamerbotCard(input, hint) {
   return c;
 }
 
-async function connectOAuth(platform, clientId, btn) {
-  // Blank fields are valid here — Rust falls back to whatever's already
-  // saved in the keychain, so a retry after restart doesn't force retyping.
-  btn.disabled = true;
-  btn.textContent = "Waiting for browser login…";
-  try {
-    const account = await tauriInvoke("oauth_login", { platform, clientId });
-    oauthAccounts[platform] = account;
-    showToast(`Signed in to ${PLATFORM_MAP[platform].label} as ${account.username}`);
-    if (platform === "twitch") resyncTwitchConnection();
-  } catch (e) {
-    showToast(`${PLATFORM_MAP[platform].label} login failed: ${e}`);
-  }
-  buildChannelsDrawer();
-  buildComposeBar();
-}
-async function disconnectOAuth(platform) {
-  await tauriInvoke("oauth_logout", { platform });
-  oauthAccounts[platform] = null;
-  if (platform === "twitch") resyncTwitchConnection();
-  buildChannelsDrawer();
-  buildComposeBar();
-  showToast(`Disconnected ${PLATFORM_MAP[platform].label}`);
-}
 document.addEventListener("click", e => {
   const link = e.target.closest("[data-open-url]");
   if (!link) return;
