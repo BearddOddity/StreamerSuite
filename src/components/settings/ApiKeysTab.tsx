@@ -223,7 +223,7 @@ const ROUTING_CATALOG: {
     key: "joystick",
     label: "Joystick.tv",
     desc: "OAuth2 via Joystick.tv — chat, moderation, and tip alerts",
-    keyUrl: "https://developer.joystick.tv/",
+    keyUrl: "https://joystick.tv/applications",
     icon: <PlatformIcon platform="joystick" size="sm" variant="light" />,
     color: "#76e1f0",
     // No popup-based connect flow like Twitch/Kick (those go through the
@@ -233,11 +233,16 @@ const ROUTING_CATALOG: {
     // of through OAuthConnectModal. Empty here just means "no connectUrl
     // popup for this platform."
     connectUrl: "",
+    redirectUri: "http://localhost:61823/callback",
     // No Client Secret field — Joystick's bot app is a genuine public PKCE
     // client (RFC 7636/8252, confirmed against github.com/joysticktv/jtv),
     // it never has one. An earlier version of this app assumed otherwise.
     userFields: [
-      { key: "joystick_client", label: "Client ID" },
+      {
+        key: "joystick_client",
+        label: "Client ID",
+        hint: 'From joystick.tv/applications → New Chat Bot. Set "OAuth redirect URL" to the exact value shown below, "Client type" to Public (PKCE), and check the SendMessage/ReadMessages permissions (add DeleteMessage/MuteUser/BlockUser for moderation — permissions can\'t change after creation). No Client Secret is issued for a Public client, and none is needed here.',
+      },
       {
         key: "joystick_token",
         label: "Access Token (Optional)",
