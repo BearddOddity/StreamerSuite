@@ -952,12 +952,26 @@ pub fn save_config_at(base_dir: &std::path::Path, config: &AppConfig) -> Result<
 /// of which code path loaded (and keychain-backfilled) this config first.
 pub(crate) fn redact_migrated_secrets(config: &mut AppConfig) {
     let sync = |field: &mut String, keychain_name: &str| {
-        if field.is_empty() {
-            return;
-        }
         let Ok(entry) = keyring::Entry::new(crate::KEYRING_SERVICE, keychain_name) else {
             return;
         };
+        if field.is_empty() {
+            // A field arriving here empty (this runs on every save, after
+            // the frontend has had a chance to edit what export_config
+            // backfilled from the keychain) means the user explicitly
+            // cleared it — delete the stale keychain entry too, or the next
+            // load's backfill would silently resurrect the old value and
+            // make the "clear" look like it did nothing.
+            match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => {}
+                Err(e) => log::warn!(
+                    "[KEYCHAIN] Failed to clear {} from OS keychain ({})",
+                    keychain_name,
+                    e
+                ),
+            }
+            return;
+        }
         // Only redact if this field was already migrated — an entry existing
         // is exactly that signal. A never-migrated field saves as plaintext,
         // same as before this fix existed.
