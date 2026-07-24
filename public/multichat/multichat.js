@@ -105,7 +105,8 @@ const DEFAULT_CHANNELS = {
   // whichever of Twitch/Kick/YouTube the user opts to route through it
   // instead of their own direct connection (mainly to sidestep Kick's
   // Cloudflare block, and to get YouTube without its OAuth setup friction).
-  streamerbotHost: "127.0.0.1", streamerbotPort: "8080",
+  // Its host/port live in the shared AppConfig now (Connections & Keys),
+  // not here — only which platforms it handles is a Multi-Chat-local choice.
   streamerbotFor: { twitch: false, kick: false, youtube: false },
 };
 // OAuth client IDs/secrets are never stored here — Rust keeps them in the OS keychain.
@@ -2069,8 +2070,16 @@ function sbotRoleFromBadges(names) {
     : names.includes("subscriber") ? "sub" : null;
 }
 async function connectStreamerbot() {
-  const host = channels.streamerbotHost.trim() || "127.0.0.1";
-  const port = channels.streamerbotPort.trim() || "8080";
+  // Host/port now live in the shared AppConfig (StreamerSuite Settings ->
+  // Connections & Keys) instead of this module's own local channels store —
+  // same reasoning as Twitch/Kick/Joystick all reading shared config now.
+  let host = "127.0.0.1", port = "8080";
+  if (tauriInvoke) {
+    const cfg = await tauriInvoke("export_config").catch(() => null);
+    const b = cfg && cfg.broadcaster;
+    if (b && b.streamerbot_host) host = b.streamerbot_host;
+    if (b && b.streamerbot_port) port = b.streamerbot_port;
+  }
   const wantKick = channels.streamerbotFor.kick;
   const wantTwitch = channels.streamerbotFor.twitch;
   const wantYoutube = channels.streamerbotFor.youtube;
@@ -2347,7 +2356,7 @@ function buildChannelsDrawer() {
   ], centralConnectionNote("kick", "Kick", kickChannelInput, "kick_channel_id")));
 
   body.append(joystickCard(hint));
-  body.append(streamerbotCard(input, hint));
+  body.append(streamerbotCard(hint));
 }
 
 /* Joystick connects through StreamerSuite's centralized Settings now, same
@@ -2407,7 +2416,7 @@ function joystickCard(hint) {
    chat (mainly to route around Kick's Cloudflare blocking). No "View Chat"
    switch here; visibility stays governed by the Kick/Twitch cards' own
    toggles above, these two switches just pick which transport carries them. */
-function streamerbotCard(input, hint) {
+function streamerbotCard(hint) {
   const saveCh = () => store.save("bd-mc-channels", channels);
   const c = el("div", "cv-conn-card");
   c.dataset.platform = "streamerbot";
@@ -2420,35 +2429,12 @@ function streamerbotCard(input, hint) {
   head.append(status);
   c.append(head);
 
-  const hostRow = el("div", "cv-settings-row");
-  hostRow.style.border = "none"; hostRow.style.padding = "0";
-  const hostInput = input(channels.streamerbotHost, "127.0.0.1", v => channels.streamerbotHost = v, true);
-  const portInput = input(channels.streamerbotPort, "8080", v => channels.streamerbotPort = v, true);
-  hostRow.append(hostInput, portInput);
-  c.append(hostRow);
-
-  const passInput = el("input", "cv-input mono");
-  passInput.type = "password";
-  passInput.placeholder = "WebSocket password (optional)";
-  if (tauriInvoke) {
-    tauriInvoke("streamerbot_has_password").then(has => {
-      if (has) passInput.placeholder = "•••••••• (saved — leave blank to keep)";
-    });
-  }
-  const passRow = el("div", "cv-settings-row");
-  passRow.style.border = "none"; passRow.style.padding = "0";
-  const passSave = el("button", "cv-btn", "Save");
-  passSave.onclick = async () => {
-    const val = passInput.value.trim();
-    if (!val) { showToast("Enter a password first"); return; }
-    await tauriInvoke("streamerbot_save_password", { password: val });
-    passInput.value = "";
-    passInput.placeholder = "•••••••• (saved — leave blank to keep)";
-    showToast("Streamer.bot password saved");
-  };
-  passRow.append(passInput, passSave);
-  c.append(passRow);
-  c.append(hint("Only needed if you've turned on authentication for the WebSocket Server in Streamer.bot's Servers/Clients tab — leave blank otherwise."));
+  // Host/port/password moved to StreamerSuite Settings -> Connections & Keys
+  // (a "Streamer.bot" card there, same status-readout pattern Twitch/Kick/
+  // Joystick already use) so any tool that wants Streamer.bot — not just
+  // Multi-Chat — points at the same connection instead of each holding its
+  // own copy. connectStreamerbot() reads config.broadcaster.streamerbot_*.
+  c.append(hint("Connection (host/port/password) is set up in StreamerSuite Settings &rarr; Connections &amp; Keys now — this card just picks which platforms route through it."));
 
   const kickRow = el("div", "cv-settings-row");
   kickRow.style.border = "none"; kickRow.style.padding = "0";

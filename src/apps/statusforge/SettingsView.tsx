@@ -1039,6 +1039,8 @@ const defaultConfig: AppConfig = {
     joystick_token: "",
     joystick_refresh: "",
     joystick_username: "",
+    streamerbot_host: "",
+    streamerbot_port: "",
   },
   engine_settings: {
     idle_category: "Just Chatting",

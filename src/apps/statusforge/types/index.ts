@@ -97,6 +97,8 @@ export interface BroadcasterConfig {
   joystick_token: string;
   joystick_refresh: string;
   joystick_username: string;
+  streamerbot_host: string;
+  streamerbot_port: string;
 }
 
 export interface AppConfig {

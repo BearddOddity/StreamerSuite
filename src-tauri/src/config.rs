@@ -195,6 +195,16 @@ pub struct BroadcasterConfig {
     pub joystick_refresh: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub joystick_username: String,
+    /// Streamer.bot's WebSocket server — a local app, not an OAuth platform,
+    /// so no client/secret/token here (password lives in the OS keychain
+    /// only, same as before: kr_set("streamerbot.password", ...), never
+    /// plaintext in Config.json). Shared here so every tool that wants to
+    /// use it (not just Multi-Chat, which is all that used to have these)
+    /// points at the same connection instead of each holding its own copy.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub streamerbot_host: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub streamerbot_port: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -783,5 +793,7 @@ mod tests {
         assert_eq!(config.broadcaster.joystick_token, "");
         assert_eq!(config.broadcaster.joystick_refresh, "");
         assert_eq!(config.broadcaster.joystick_username, "");
+        assert_eq!(config.broadcaster.streamerbot_host, "");
+        assert_eq!(config.broadcaster.streamerbot_port, "");
     }
 }

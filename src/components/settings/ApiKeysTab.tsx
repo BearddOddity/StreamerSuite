@@ -42,6 +42,8 @@ const defaultConfig: AppConfig = {
     joystick_token: "",
     joystick_refresh: "",
     joystick_username: "",
+    streamerbot_host: "",
+    streamerbot_port: "",
   },
   engine_settings: {
     idle_category: "Just Chatting",
@@ -257,6 +259,159 @@ const ROUTING_CATALOG: {
     ],
   },
 ];
+
+async function sha256Base64(str: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+
+/// Streamer.bot isn't an OAuth platform (no client/secret/token, no
+/// connect_platform/disconnect_platform lifecycle) — a local WebSocket
+/// server with a host/port/password, so it gets its own small card instead
+/// of squeezing into ROUTING_CATALOG's OAuth-shaped rendering. Host/port
+/// live in the shared AppConfig (broadcaster.streamerbot_host/port) same as
+/// everything else here; the password stays keychain-only via the existing
+/// streamerbot_* commands, same as before this moved out of Multi-Chat.
+function StreamerBotCard({
+  bc,
+  setField,
+  toast,
+}: {
+  bc: AppConfig["broadcaster"];
+  setField: (key: string, value: string) => void;
+  toast: (msg: string, type?: ToastType) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [hasSavedPassword, setHasSavedPassword] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    tauriApi("streamerbot_has_password").then((has) => setHasSavedPassword(!!has));
+  }, []);
+
+  const savePassword = async () => {
+    if (!password) return;
+    await tauriApi("streamerbot_save_password", { password });
+    setHasSavedPassword(true);
+    setPassword("");
+    toast("Streamer.bot password saved", "success");
+  };
+
+  const testConnection = async () => {
+    setTesting(true);
+    setTestResult(null);
+    const host = bc.streamerbot_host || "127.0.0.1";
+    const port = bc.streamerbot_port || "8080";
+    try {
+      const result = await new Promise<string>((resolve, reject) => {
+        let ws: WebSocket;
+        try {
+          ws = new WebSocket(`ws://${host}:${port}/`);
+        } catch (e) {
+          reject(`invalid host/port: ${e}`);
+          return;
+        }
+        const timeout = setTimeout(() => {
+          ws.close();
+          reject("timed out — is Streamer.bot running with the WebSocket Server enabled?");
+        }, 5000);
+        ws.onmessage = async (ev) => {
+          let msg: { authentication?: { salt: string; challenge: string }; id?: string; status?: string; error?: string };
+          try {
+            msg = JSON.parse(ev.data as string);
+          } catch {
+            return;
+          }
+          if (msg.authentication) {
+            const savedPassword = await tauriApi("streamerbot_get_password").catch(() => null);
+            if (!savedPassword) {
+              clearTimeout(timeout);
+              ws.close();
+              resolve("Reachable — no password saved, so authentication wasn't tested. Sending messages needs one.");
+              return;
+            }
+            const secret = await sha256Base64(savedPassword + msg.authentication.salt);
+            const authentication = await sha256Base64(secret + msg.authentication.challenge);
+            ws.send(JSON.stringify({ request: "Authenticate", authentication, id: "test" }));
+            return;
+          }
+          if (msg.id === "test") {
+            clearTimeout(timeout);
+            ws.close();
+            if (msg.status === "ok") resolve("Connected and authenticated successfully.");
+            else reject(msg.error || "authentication failed — check the password");
+          }
+        };
+        ws.onerror = () => {
+          clearTimeout(timeout);
+          reject("couldn't reach Streamer.bot at that host/port");
+        };
+      });
+      setTestResult(result);
+      toast(result, "success");
+    } catch (e) {
+      setTestResult(String(e));
+      toast(`Streamer.bot test failed: ${e}`, "error");
+    }
+    setTesting(false);
+  };
+
+  return (
+    <div className="surface-card rounded-2xl p-6 mb-5">
+      <div className="flex items-center justify-between mb-5">
+        <h3 className="text-white font-semibold">Streamer.bot</h3>
+      </div>
+      <p className="text-[11px] text-white/40 mb-4">
+        An alternate transport for Kick/Twitch/YouTube chat — mainly useful for Kick (routes around the
+        Cloudflare blocking a direct connection hits) and YouTube (which has no direct connection here
+        otherwise). Connect once here — Multi-Chat and any other tool that wants it read this same
+        connection instead of holding their own.
+      </p>
+      <div className="flex flex-col gap-2.5">
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">Host</label>
+          <input
+            className="input-glass"
+            value={bc.streamerbot_host || ""}
+            placeholder="127.0.0.1"
+            onChange={(e) => setField("streamerbot_host", e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">Port</label>
+          <input
+            className="input-glass"
+            value={bc.streamerbot_port || ""}
+            placeholder="8080"
+            onChange={(e) => setField("streamerbot_port", e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">
+            WebSocket Password
+          </label>
+          <input
+            type="password"
+            className="input-glass"
+            value={password}
+            placeholder={hasSavedPassword ? "•••••••• (saved — leave blank to keep)" : "Streamer.bot's WebSocket Server password"}
+            onChange={(e) => setPassword(e.target.value)}
+            onBlur={savePassword}
+          />
+          <p className="text-[10px] text-white/20 mt-1">
+            Only needed to send messages — reading chat works without it. Set in Streamer.bot itself:
+            Servers/Clients → WebSocket Server.
+          </p>
+        </div>
+      </div>
+      <button onClick={testConnection} disabled={testing} className="btn-cta mt-3">
+        {testing ? "Testing…" : "🔌 Test Connection"}
+      </button>
+      {testResult && <p className="text-[11px] text-white/50 mt-2">{testResult}</p>}
+    </div>
+  );
+}
 
 export default function ApiKeysTab() {
   const [section, setSection] = useState<"keys" | "routing">("keys");
@@ -1210,6 +1365,8 @@ export default function ApiKeysTab() {
           </div>
         </div>
       )}
+
+      {section === "routing" && <StreamerBotCard bc={bc} setField={setField} toast={toast} />}
 
       {oauthModal && (
         <OAuthConnectModal
