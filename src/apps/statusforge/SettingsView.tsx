@@ -1042,6 +1042,7 @@ const defaultConfig: AppConfig = {
     joystick_username: "",
     streamerbot_host: "",
     streamerbot_port: "",
+    streamerbot_kick_action: "",
     chaturbate_username: "",
     chaturbate_token: "",
   },

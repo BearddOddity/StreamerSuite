@@ -218,6 +218,13 @@ pub struct BroadcasterConfig {
     pub streamerbot_host: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub streamerbot_port: String,
+    /// Name of a user-authored Streamer.bot Action containing the Kick >
+    /// Channel > "Set Channel Title"/"Set Channel Category" sub-actions
+    /// (reading %title%/%category% arguments). Lets Stream Manager update
+    /// Kick through Streamer.bot instead of Kick's own API, which can hit
+    /// the same Cloudflare block a direct chat connection does.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub streamerbot_kick_action: String,
     /// Chaturbate's Events API (devportal.cb.dev) — a plain per-broadcaster
     /// API token generated at chaturbate.com/statsapi/authtoken/, not OAuth
     /// (no client id/secret/redirect flow at all). Read-only: chat
@@ -823,6 +830,7 @@ mod tests {
         assert_eq!(config.broadcaster.joystick_username, "");
         assert_eq!(config.broadcaster.streamerbot_host, "");
         assert_eq!(config.broadcaster.streamerbot_port, "");
+        assert_eq!(config.broadcaster.streamerbot_kick_action, "");
         assert_eq!(config.broadcaster.chaturbate_username, "");
         assert_eq!(config.broadcaster.chaturbate_token, "");
     }

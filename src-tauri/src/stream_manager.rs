@@ -5,6 +5,19 @@
 // Twitch, channel:write on Kick) since pusher.rs uses the same tokens for
 // automatic category pushes on game detection.
 //
+// When StatusForge's own game-detection push is on
+// (engine_settings.platform_push_enabled), that engine already owns the
+// live category — the frontend hides the manual category field in that
+// case rather than letting this module fight it. This module doesn't need
+// to know that itself; it just updates whatever it's told to.
+//
+// Kick's direct API here can hit the same Cloudflare block a direct chat
+// connection sometimes does (see multichat.rs) — the frontend offers an
+// alternate path through Streamer.bot's WebSocket API (a user-authored
+// Action running Kick's "Set Channel Title"/"Set Channel Category"
+// sub-actions) for that case; see src/lib/streamerbot.ts. That path doesn't
+// touch this module at all — it's a pure frontend WebSocket call.
+//
 // Joystick.tv has no verified API for this (see Stream Stats' reporting
 // window) — StreamerSuite doesn't attempt it here either.
 use crate::auth;

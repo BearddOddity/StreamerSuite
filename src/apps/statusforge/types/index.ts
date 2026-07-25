@@ -103,6 +103,7 @@ export interface BroadcasterConfig {
   joystick_username: string;
   streamerbot_host: string;
   streamerbot_port: string;
+  streamerbot_kick_action: string;
   chaturbate_username: string;
   chaturbate_token: string;
 }

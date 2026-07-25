@@ -13,6 +13,7 @@ import { saveConfig, tauriApi } from "@statusforge/hooks/useTauriApi";
 import OAuthConnectModal from "@statusforge/components/OAuthConnectModal";
 import { PlatformIcon } from "../common/PlatformIcon";
 import { EditRemoveButtons, Toggle } from "./SettingsComponents";
+import { sha256Base64 } from "@/lib/streamerbot";
 
 type ToastType = "success" | "error" | "info";
 
@@ -45,6 +46,7 @@ const defaultConfig: AppConfig = {
     joystick_username: "",
     streamerbot_host: "",
     streamerbot_port: "",
+    streamerbot_kick_action: "",
     chaturbate_username: "",
     chaturbate_token: "",
   },
@@ -297,11 +299,6 @@ const ROUTING_CATALOG: {
   },
 ];
 
-async function sha256Base64(str: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-  return btoa(String.fromCharCode(...new Uint8Array(buf)));
-}
-
 /// Streamer.bot isn't an OAuth platform (no client/secret/token, no
 /// connect_platform/disconnect_platform lifecycle) — a local WebSocket
 /// server with a host/port/password, so it gets its own small card instead
@@ -439,6 +436,25 @@ function StreamerBotCard({
           <p className="text-[10px] text-white/20 mt-1">
             Only needed to send messages — reading chat works without it. Set in Streamer.bot itself:
             Servers/Clients → WebSocket Server.
+          </p>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-1">
+            Kick Update Action Name
+          </label>
+          <input
+            className="input-glass"
+            value={bc.streamerbot_kick_action || ""}
+            placeholder="e.g. Kick - Update Stream Info"
+            onChange={(e) => setField("streamerbot_kick_action", e.target.value)}
+          />
+          <p className="text-[10px] text-white/20 mt-1">
+            Optional — lets Stream Manager update your Kick title/category through Streamer.bot instead
+            of Kick's own API, which sometimes hits the same Cloudflare block direct chat does. Create a
+            Streamer.bot Action with the Kick &gt; Channel &gt; "Set Channel Title" and "Set Channel
+            Category" sub-actions reading the <code className="text-white/40">%title%</code> and{" "}
+            <code className="text-white/40">%category%</code> arguments, then enter that Action's exact
+            name here.
           </p>
         </div>
       </div>
