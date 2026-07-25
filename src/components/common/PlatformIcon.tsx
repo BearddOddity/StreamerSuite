@@ -17,15 +17,27 @@ const sizeMap: Record<IconSize, number> = {
 };
 
 export type PlatformIconProps = {
-  platform: "twitch" | "kick" | "joystick";
+  platform: "twitch" | "kick" | "joystick" | "chaturbate";
   size?: IconSize;
   variant?: "color" | "light" | "dark";
   className?: string;
 };
 
 export function PlatformIcon({ platform, size = "sm", variant = "color", className }: PlatformIconProps) {
-  const src = getSrc(platform, variant);
   const px = sizeMap[size];
+  // No sourced brand asset for Chaturbate (unlike the SVG files the others
+  // use) — a plain glyph avoids embedding an unverified third-party logo.
+  if (platform === "chaturbate") {
+    return (
+      <span
+        className={`inline-flex items-center justify-center shrink-0 rounded-full bg-orange-500/20 text-orange-400 ${className ?? ""}`}
+        style={{ width: px, height: px, fontSize: px * 0.6, lineHeight: 1 }}
+      >
+        🔥
+      </span>
+    );
+  }
+  const src = getSrc(platform, variant);
   return (
     <span
       className={`inline-flex items-center justify-center shrink-0 ${className ?? ""}`}

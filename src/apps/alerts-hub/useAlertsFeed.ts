@@ -37,6 +37,7 @@ export function useAlertsFeed(settings: AlertsSettings) {
   const [twitchStatus, setTwitchStatus] = useState<"disconnected" | "connecting" | "live" | "error">("disconnected");
   const [kickStatus, setKickStatus] = useState<"disconnected" | "connecting" | "live" | "error">("disconnected");
   const [joystickStatus, setJoystickStatus] = useState<"disconnected" | "connecting" | "live" | "error">("disconnected");
+  const [chaturbateStatus, setChaturbateStatus] = useState<"disconnected" | "connecting" | "live" | "error">("disconnected");
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -306,9 +307,66 @@ export function useAlertsFeed(settings: AlertsSettings) {
     };
   }, [settings.enabled.joystickTip, push]);
 
+  // ── Chaturbate — Events API long-poll (devportal.cb.dev) ──
+  // Read-only: chatMessage and tip events go to Multi-Chat's own feed (see
+  // multichat.js), this tool only cares about tip and follow as alerts.
+  // Field names (isMod, inFanclub, isAnon, tokens) are the raw camelCase
+  // Chaturbate's API returns, per its official reference client
+  // (github.com/MountainGod2/chaturbate_poller) — the Rust side proxies the
+  // response untouched.
+  useEffect(() => {
+    if (!settings.enabled.chaturbateTip && !settings.enabled.chaturbateFollow) {
+      setChaturbateStatus("disconnected");
+      return;
+    }
+    let cancelled = false;
+    let nextUrl: string | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function poll() {
+      setChaturbateStatus("connecting");
+      while (!cancelled) {
+        let resp: { events?: { method?: string; object?: Record<string, unknown> }[]; nextUrl?: string } | null;
+        try {
+          resp = await invoke("chaturbate_poll_events", { nextUrl });
+        } catch {
+          if (cancelled) return;
+          setChaturbateStatus("error");
+          timer = setTimeout(poll, 5000);
+          return;
+        }
+        if (cancelled) return;
+        setChaturbateStatus("live");
+        for (const ev of resp?.events ?? []) {
+          const obj = ev.object ?? {};
+          const user = (obj.user as Record<string, unknown> | undefined) ?? {};
+          const username = typeof user.username === "string" ? user.username : "unknown";
+          if (ev.method === "tip" && settingsRef.current.enabled.chaturbateTip) {
+            const tip = (obj.tip as Record<string, unknown> | undefined) ?? {};
+            const isAnon = !!tip.isAnon;
+            const tokens = typeof tip.tokens === "number" ? String(tip.tokens) : "0";
+            push({ platform: "chaturbate", kind: "tip", user: isAnon ? "Anonymous" : username, message: "sent a tip!", amount: tokens });
+          } else if (ev.method === "follow" && settingsRef.current.enabled.chaturbateFollow) {
+            push({ platform: "chaturbate", kind: "follow", user: username, message: "just followed!" });
+          }
+        }
+        nextUrl = resp?.nextUrl ?? null;
+      }
+    }
+
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [settings.enabled.chaturbateTip, settings.enabled.chaturbateFollow, push]);
+
   const clear = useCallback(() => setAlerts([]), []);
 
-  return { alerts, push, clear, twitchAccount, refreshTwitchAccount, twitchStatus, kickStatus, joystickStatus };
+  return {
+    alerts, push, clear, twitchAccount, refreshTwitchAccount,
+    twitchStatus, kickStatus, joystickStatus, chaturbateStatus,
+  };
 }
 
 function handleTwitchNotification(

@@ -1042,6 +1042,8 @@ const defaultConfig: AppConfig = {
     joystick_username: "",
     streamerbot_host: "",
     streamerbot_port: "",
+    chaturbate_username: "",
+    chaturbate_token: "",
   },
   engine_settings: {
     idle_category: "Just Chatting",

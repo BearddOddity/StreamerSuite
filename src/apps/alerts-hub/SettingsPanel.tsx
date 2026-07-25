@@ -20,6 +20,7 @@ export function SettingsPanel({
   twitchStatus,
   kickStatus,
   joystickStatus,
+  chaturbateStatus,
   adultContentEnabled,
   onClose,
 }: {
@@ -31,6 +32,7 @@ export function SettingsPanel({
   twitchStatus: ConnStatus;
   kickStatus: ConnStatus;
   joystickStatus: ConnStatus;
+  chaturbateStatus: ConnStatus;
   adultContentEnabled: boolean;
   onClose: () => void;
 }) {
@@ -110,6 +112,31 @@ export function SettingsPanel({
             <div className="mt-2">
               <Chip selected={settings.enabled.joystickTip} onClick={() => onToggle("joystickTip")}>
                 Tips
+              </Chip>
+            </div>
+          </section>
+        )}
+
+        {/* Chaturbate — off by default (General -> Adult Content &
+            Platforms), zero mention anywhere in this tool until turned on
+            there. Read-only Events API: tips and follows only, no chat
+            (that's Multi-Chat's job) and no sending/moderation exists. */}
+        {adultContentEnabled && (
+          <section className="mb-6">
+            <div className="flex items-center gap-2 mb-2">
+              <PlatformIcon platform="chaturbate" size="sm" />
+              <span className="text-[12px] font-semibold text-white/70">Chaturbate</span>
+              <StatusDot status={toDotStatus(chaturbateStatus)} />
+            </div>
+            <p className="text-[10px] text-white/30">
+              Connect your username/API token in StreamerSuite Settings → Connections & Keys first.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Chip selected={settings.enabled.chaturbateTip} onClick={() => onToggle("chaturbateTip")}>
+                Tips
+              </Chip>
+              <Chip selected={settings.enabled.chaturbateFollow} onClick={() => onToggle("chaturbateFollow")}>
+                Follows
               </Chip>
             </div>
           </section>

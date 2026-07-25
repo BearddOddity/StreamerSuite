@@ -892,6 +892,11 @@ fn backfill_from_keychain(config: &mut AppConfig) {
             config.broadcaster.joystick_secret = v;
         }
     }
+    if config.broadcaster.chaturbate_token.is_empty() {
+        if let Some(v) = read("chaturbate_api_token") {
+            config.broadcaster.chaturbate_token = v;
+        }
+    }
     if config.api_keys.igdb_token.is_empty() {
         if let Some(v) = read("igdb_api_token") {
             config.api_keys.igdb_token = v;
@@ -1008,6 +1013,10 @@ pub(crate) fn redact_migrated_secrets(config: &mut AppConfig) {
     sync(
         &mut config.broadcaster.joystick_secret,
         "joystick_client_secret",
+    );
+    sync(
+        &mut config.broadcaster.chaturbate_token,
+        "chaturbate_api_token",
     );
     sync(&mut config.api_keys.igdb_token, "igdb_api_token");
     sync(&mut config.api_keys.igdb_secret, "igdb_api_secret");

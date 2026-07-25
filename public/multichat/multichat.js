@@ -15,15 +15,24 @@ const JOYSTICK_URI = "data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIj8+Cjxz
 const JOYSTICK_IMG = `<img src="${JOYSTICK_URI}" alt="Joystick.tv">`;
 const YOUTUBE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 20" fill="currentColor"><path d="M27.4,3.1c-0.3-1.2-1.3-2.1-2.5-2.4C22.7,0.2,14,0.2,14,0.2s-8.7,0-10.9,0.6C1.9,1.1,0.9,2,0.6,3.1 C0,5.4,0,10,0,10s0,4.6,0.6,6.9c0.3,1.2,1.3,2.1,2.5,2.4c2.2,0.6,10.9,0.6,10.9,0.6s8.7,0,10.9-0.6c1.2-0.3,2.2-1.2,2.5-2.4 C28,14.6,28,10,28,10S28,5.4,27.4,3.1z" fill="#FF0000"></path><path d="M11.2,14.2V5.8L18.5,10L11.2,14.2z" fill="#fff"></path></svg>`;
 
+// No sourced brand asset for Chaturbate (unlike the other platforms' real
+// logo files/data URIs) — a plain glyph avoids embedding an unverified
+// third-party logo.
+const CHATURBATE_IMG = '<span style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;border-radius:50%;background:rgba(247,148,29,.2);color:#f7941d;">🔥</span>';
+
 // YouTube has no native connector (its OAuth setup was more friction than it
 // was worth — see prior session) — it only ever shows up via Streamer.bot,
 // same as an "improved Kick" transport. Still a real PLATFORMS entry so
 // messages get a proper icon/color and show up in the mute/focus toggle row.
+// Chaturbate is 18+ (hidden unless General -> Adult Content & Platforms is
+// on, see orderedPlatforms()) and read-only — no send/moderation exists on
+// its Events API, so it never appears in compose targets or canModerate().
 const PLATFORMS = [
-  { id: "twitch",   label: "Twitch",      initial: "T", icon: TWITCH_SVG },
-  { id: "kick",     label: "Kick",        initial: "K", icon: KICK_SVG },
-  { id: "joystick", label: "Joystick.tv", initial: "J", icon: JOYSTICK_IMG },
-  { id: "youtube",  label: "YouTube",     initial: "Y", icon: YOUTUBE_SVG },
+  { id: "twitch",     label: "Twitch",      initial: "T", icon: TWITCH_SVG },
+  { id: "kick",       label: "Kick",        initial: "K", icon: KICK_SVG },
+  { id: "joystick",   label: "Joystick.tv", initial: "J", icon: JOYSTICK_IMG },
+  { id: "youtube",    label: "YouTube",     initial: "Y", icon: YOUTUBE_SVG },
+  { id: "chaturbate", label: "Chaturbate",  initial: "C", icon: CHATURBATE_IMG },
 ];
 const PLATFORM_MAP = Object.fromEntries(PLATFORMS.map(p => [p.id, p]));
 const ROLE_META = { mod: { label: "MOD", variant: "green" }, vip: { label: "VIP", variant: "amber" }, sub: { label: "SUB", variant: "ghost" }, host: { label: "HOST", variant: "accent" } };
@@ -100,7 +109,7 @@ const DEFAULT_CHANNELS = {
   twitch: "", kick: "", kickChatroomId: "", joystick: "",
   // YouTube has no "enabled" toggle of its own (no native card/connector) —
   // checking "Handle YouTube chat" on the Streamer.bot card sets this too.
-  enabled: { twitch: false, kick: false, joystick: false, youtube: false },
+  enabled: { twitch: false, kick: false, joystick: false, youtube: false, chaturbate: false },
   // Streamer.bot is a transport, not a platform tile — it carries chat for
   // whichever of Twitch/Kick/YouTube the user opts to route through it
   // instead of their own direct connection (mainly to sidestep Kick's
@@ -1590,11 +1599,12 @@ function renderPinned() {
 
 /* Platform toggles + health */
 // Off by default (StreamerSuite Settings -> General -> Adult Content &
-// Platforms) — zero mention of an 18+ platform (currently just Joystick.tv)
+// Platforms) — zero mention of an 18+ platform (Joystick.tv, Chaturbate)
 // anywhere in this app until it's explicitly turned on there. Filtering
 // centrally here (the one function every platform-list UI — toggle row,
 // command palette, reorder — already goes through) means nothing downstream
 // needs its own check.
+const ADULT_PLATFORM_IDS = ["joystick", "chaturbate"];
 let adultContentEnabled = false;
 async function loadAdultContentFlag() {
   if (!tauriInvoke) return;
@@ -1607,7 +1617,7 @@ function orderedPlatforms() {
   PLATFORMS.forEach(p => { if (!order.includes(p.id)) order.push(p.id); });
   return order
     .map(id => PLATFORM_MAP[id])
-    .filter(p => p.id !== "joystick" || adultContentEnabled);
+    .filter(p => !ADULT_PLATFORM_IDS.includes(p.id) || adultContentEnabled);
 }
 let _dragId = null;
 function reorderPlatforms(dragId, dropId) {
@@ -1923,6 +1933,65 @@ async function connectJoystick() {
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
 
+/* Chaturbate — Events API (devportal.cb.dev) is a long-poll HTTP feed, not a
+   WebSocket, so there's no real "socket" to hand to the generic disconnect()
+   helper — a plain object with a close() that flips chaturbatePollActive
+   false stands in for one, letting applyConnections()/disconnect() treat it
+   the same as every WebSocket-based platform without any special-casing.
+   Read-only: chatMessage and tip are surfaced in the feed; follow and
+   fanclubJoin as system-style events. broadcastStart/Stop, userEnter/Leave,
+   unfollow, privateMessage, roomSubjectChange, and mediaPurchase exist on
+   the API but aren't surfaced here — same "not every event type" scoping
+   already used for Joystick's StreamEvent and Streamer.bot's YouTube path. */
+let chaturbatePollActive = false;
+async function connectChaturbate() {
+  if (chaturbatePollActive) return;
+  chaturbatePollActive = true;
+  setHealth("chaturbate", "reconnecting");
+  sockets.chaturbate = { onclose: null, close: () => { chaturbatePollActive = false; } };
+  let nextUrl = null;
+  let backoff = 1500;
+  while (chaturbatePollActive) {
+    let resp;
+    try {
+      resp = await tauriInvoke("chaturbate_poll_events", { nextUrl: nextUrl || null });
+    } catch (e) {
+      if (!chaturbatePollActive) return;
+      setHealth("chaturbate", "reconnecting");
+      addSystem("chaturbate", `poll error: ${e} — retrying`);
+      await new Promise(r => setTimeout(r, backoff));
+      backoff = Math.min(30000, backoff * 2);
+      continue;
+    }
+    if (!chaturbatePollActive) return;
+    connected("chaturbate");
+    backoff = 1500;
+    for (const ev of (resp && resp.events) || []) handleChaturbateEvent(ev);
+    nextUrl = resp && resp.nextUrl;
+  }
+}
+function handleChaturbateEvent(ev) {
+  const method = ev.method;
+  const obj = ev.object || {};
+  const u = obj.user || {};
+  if (method === "chatMessage") {
+    const msg = obj.message || {};
+    const role = u.isMod ? "mod" : u.inFanclub ? "sub" : null;
+    addMessage({ platform: "chaturbate", user: u.username || "unknown", text: msg.message || "", role, pinned: false });
+  } else if (method === "tip") {
+    const tip = obj.tip || {};
+    addMessage({
+      platform: "chaturbate", user: tip.isAnon ? "Anonymous" : (u.username || "unknown"),
+      text: tip.message || "sent a tip", chip: "tip", chipAmount: String(tip.tokens || 0),
+      pinned: false, event: true,
+    });
+  } else if (method === "follow") {
+    addMessage({ platform: "chaturbate", user: u.username || "unknown", text: "followed", role: null, pinned: false, event: true });
+  } else if (method === "fanclubJoin") {
+    addMessage({ platform: "chaturbate", user: u.username || "unknown", text: "joined the fan club", role: null, pinned: false, event: true });
+  }
+}
+
 /* Twitch — EventSub over WebSocket (the real API): richer than anonymous IRC
    (message IDs, structured emote fragments, cheer/reply/notice data) but
    only available once an account is connected, since it's authenticated. */
@@ -2031,7 +2100,7 @@ function connectTwitchDispatch() {
   if (tauriInvoke && oauthAccounts.twitch) connectTwitchEventSub();
   else connectTwitch();
 }
-const CONNECTORS = { twitch: connectTwitchDispatch, kick: connectKick, joystick: connectJoystick };
+const CONNECTORS = { twitch: connectTwitchDispatch, kick: connectKick, joystick: connectJoystick, chaturbate: connectChaturbate };
 function applyConnections() {
   PLATFORMS.forEach(p => {
     // Streamer.bot substitutes for the native connector on whichever
@@ -2370,7 +2439,10 @@ function buildChannelsDrawer() {
     hint("If auto-resolve fails, open <code>kick.com/api/v2/channels/&lt;slug&gt;</code> in a browser tab and paste the <code>chatroom.id</code> number. Defaults to your connected Kick account's own channel."),
   ], centralConnectionNote("kick", "Kick", kickChannelInput, "kick_channel_id")));
 
-  if (adultContentEnabled) body.append(joystickCard(hint));
+  if (adultContentEnabled) {
+    body.append(joystickCard(hint));
+    body.append(chaturbateCard(hint));
+  }
   body.append(streamerbotCard(hint));
 }
 
@@ -2424,6 +2496,54 @@ function joystickCard(hint) {
   }
   c.append(divider);
   makeCardCollapsible(c, head, "joystick");
+  return c;
+}
+
+/* Chaturbate — connects through StreamerSuite's centralized Settings, same
+   as every other platform card here. Read-only: no send box, no moderation
+   menu items — the Events API has neither, so this card just says so
+   instead of offering controls that would silently do nothing. */
+function chaturbateCard(hint) {
+  const saveCh = () => store.save("bd-mc-channels", channels);
+  const c = el("div", "cv-conn-card");
+  c.dataset.platform = "chaturbate";
+  const head = el("div", "cv-conn-title");
+  const ic = el("span", "cv-conn-icon"); ic.innerHTML = PLATFORM_MAP.chaturbate.icon;
+  head.append(ic, el("span", "", "Chaturbate"));
+  const status = el("span", "cv-conn-status", state.health.chaturbate.toUpperCase());
+  status.dataset.status = state.health.chaturbate;
+  status.dataset.p = "chaturbate";
+  head.append(status);
+  c.append(head);
+
+  const viewRow = el("div", "cv-settings-row");
+  viewRow.style.border = "none"; viewRow.style.padding = "0";
+  viewRow.append(el("span", "cv-settings-label", "View Chat"));
+  const sw = el("input", "cv-switch");
+  sw.type = "checkbox";
+  sw.checked = channels.enabled.chaturbate;
+  sw.onchange = () => { channels.enabled.chaturbate = sw.checked; saveCh(); applyConnections(); };
+  viewRow.append(sw);
+  c.append(viewRow);
+
+  const divider = el("div", "cv-divider");
+  const noteRow = el("div", "cv-settings-row");
+  noteRow.style.border = "none"; noteRow.style.padding = "0";
+  const noteStatus = el("span", "cv-settings-label", "Checking…");
+  noteRow.append(noteStatus);
+  divider.append(noteRow);
+  divider.append(hint("Read-only — chat messages, tips, follows, and fan club joins only. No sending or moderation exists on Chaturbate's Events API. Connected in one place now — open StreamerSuite Settings &rarr; Connections &amp; Keys to set up the username/token."));
+  if (tauriInvoke) {
+    tauriInvoke("export_config").then(cfg => {
+      const b = cfg && cfg.broadcaster;
+      const connectedCb = !!(b && b.chaturbate_username && b.chaturbate_token);
+      noteStatus.textContent = connectedCb ? "🟢 Connected via StreamerSuite Settings" : "⚪ Not connected";
+    }).catch(() => { noteStatus.textContent = "⚪ Not connected"; });
+  } else {
+    noteStatus.textContent = "⚪ Not connected";
+  }
+  c.append(divider);
+  makeCardCollapsible(c, head, "chaturbate");
   return c;
 }
 
@@ -2857,9 +2977,9 @@ function buildSettingsDrawer() {
     const resetBtn = el("button", "cv-btn danger", "🧨 Reset all credentials");
     resetBtn.onclick = async () => {
       if (!tauriInvoke) { showToast("Requires the desktop app"); return; }
-      const resetPlatforms = ["Twitch", "Kick", ...(adultContentEnabled ? ["Joystick.tv"] : []), "Streamer.bot"];
+      const resetPlatforms = ["Twitch", "Kick", ...(adultContentEnabled ? ["Joystick.tv", "Chaturbate"] : []), "Streamer.bot"];
       if (!confirm(`Erase every saved Client ID/Secret and login token (${resetPlatforms.join(", ")})? You'll need to reconnect each one from scratch.`)) return;
-      ["twitch", "kick", "joystick", "streamerbot"].forEach(p => disconnect(p));
+      ["twitch", "kick", "joystick", "chaturbate", "streamerbot"].forEach(p => disconnect(p));
       oauthAccounts.twitch = oauthAccounts.kick = oauthAccounts.joystick = null;
       await tauriInvoke("wipe_all_credentials_cmd");
       buildChannelsDrawer();

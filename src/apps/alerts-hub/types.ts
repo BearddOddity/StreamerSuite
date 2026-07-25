@@ -1,4 +1,4 @@
-export type AlertPlatform = "twitch" | "kick" | "joystick";
+export type AlertPlatform = "twitch" | "kick" | "joystick" | "chaturbate";
 export type AlertKind = "follow" | "sub" | "raid" | "cheer" | "tip";
 
 export interface AlertEvent {
@@ -21,6 +21,8 @@ export interface AlertsSettings {
     kickSub: boolean;
     kickHost: boolean;
     joystickTip: boolean;
+    chaturbateTip: boolean;
+    chaturbateFollow: boolean;
   };
   soundEnabled: boolean;
 }
@@ -35,6 +37,8 @@ export const defaultAlertsSettings: AlertsSettings = {
     kickSub: true,
     kickHost: true,
     joystickTip: true,
+    chaturbateTip: true,
+    chaturbateFollow: true,
   },
   soundEnabled: true,
 };

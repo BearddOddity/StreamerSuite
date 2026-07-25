@@ -342,6 +342,8 @@ fn shared_cred_get(key: &str) -> Option<String> {
         ("joystick", "client_id") => &b.joystick_client,
         ("joystick", "client_secret") => &b.joystick_secret,
         ("joystick", "username") => &b.joystick_username,
+        ("chaturbate", "username") => &b.chaturbate_username,
+        ("chaturbate", "token") => &b.chaturbate_token,
         _ => return None,
     };
     if val.is_empty() {
@@ -372,6 +374,8 @@ fn shared_cred_set(key: &str, value: &str) -> Result<(), String> {
         ("joystick", "client_id") => b.joystick_client = value.to_string(),
         ("joystick", "client_secret") => b.joystick_secret = value.to_string(),
         ("joystick", "username") => b.joystick_username = value.to_string(),
+        ("chaturbate", "username") => b.chaturbate_username = value.to_string(),
+        ("chaturbate", "token") => b.chaturbate_token = value.to_string(),
         _ => return Err(format!("unsupported shared credential key {key}")),
     }
     shared_save(&config)
@@ -1084,6 +1088,61 @@ pub(crate) async fn joystick_moderate_user(message_id: String, ban: bool) -> Res
         return Ok(());
     }
     Err("Joystick moderate user failed even after refreshing the token — reconnect your account".into())
+}
+
+/// Chaturbate's Events API (devportal.cb.dev) — a plain per-broadcaster API
+/// token generated at chaturbate.com/statsapi/authtoken/, not OAuth (no
+/// client id/secret/redirect flow). Read-only long-poll feed: chatMessage,
+/// tip, follow, unfollow, fanclubJoin, privateMessage, broadcastStart/Stop,
+/// userEnter/Leave, roomSubjectChange, mediaPurchase — there's no send-
+/// message or moderation endpoint on this API at all.
+///
+/// `next_url` continues an existing poll using the server-provided
+/// pagination cursor (each response's `nextUrl`); omit it to start a fresh
+/// poll. The request itself blocks server-side for up to `timeout` seconds
+/// waiting for new events, so the client timeout here is set comfortably
+/// longer than that rather than being a tight round-trip budget.
+#[tauri::command]
+pub(crate) async fn chaturbate_poll_events(next_url: Option<String>) -> Result<Value, String> {
+    let url = match next_url.filter(|u| !u.is_empty()) {
+        Some(u) => u,
+        None => {
+            let username = kr_get("chaturbate.username").ok_or("Chaturbate not connected")?;
+            let token = kr_get("chaturbate.token").ok_or("Chaturbate not connected")?;
+            format!("https://eventsapi.chaturbate.com/events/{username}/{token}/?timeout=10")
+        }
+    };
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "Chaturbate Events API: {} — check the username/token in Connections & Keys",
+            resp.status()
+        ));
+    }
+    resp.json().await.map_err(|e| e.to_string())
+}
+
+/// One-shot check that a saved username/token pair actually works — the
+/// same long-poll endpoint above but with timeout=0 so it returns
+/// immediately instead of hanging up to 10s waiting for an event.
+#[tauri::command]
+pub(crate) async fn chaturbate_validate_token() -> Result<(), String> {
+    let username = kr_get("chaturbate.username").ok_or("enter a username and token first")?;
+    let token = kr_get("chaturbate.token").ok_or("enter a username and token first")?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+    let url = format!("https://eventsapi.chaturbate.com/events/{username}/{token}/?timeout=0");
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("Chaturbate Events API: {}", resp.status()));
+    }
+    Ok(())
 }
 
 /// Manual, per-message translation — unofficial Google Translate endpoint

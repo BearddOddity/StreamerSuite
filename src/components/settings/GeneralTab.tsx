@@ -80,7 +80,7 @@ function AdultContentSection() {
     <CollapsibleSection title="Adult Content & Platforms" icon="🔞">
       <SettingsRow
         label="Show 18+ Platforms"
-        description="Joystick.tv (and any future 18+ platform) is completely hidden — Connections & Keys, Multi-Chat, Chatbot, AI Co-Host, Alerts Hub — until this is on. Off by default."
+        description="Joystick.tv and Chaturbate (and any future 18+ platform) are completely hidden — Connections & Keys, Multi-Chat, Chatbot, AI Co-Host, Alerts Hub — until this is on. Off by default."
       >
         {enabled ? (
           <Toggle on={true} onToggle={() => setEnabled(false)} />
@@ -110,10 +110,10 @@ function AdultContentSection() {
               <h3 className="text-white font-semibold text-sm">Show 18+ platforms?</h3>
             </div>
             <p className="text-[12px] text-white/50 mb-5 leading-relaxed">
-              Joystick.tv is an adult-oriented platform. Turning this on makes it visible across every
-              tool in StreamerSuite — Connections & Keys, Multi-Chat, Chatbot, AI Co-Host, and Alerts Hub
-              — including its chat, moderation, and tip-alert surfaces. You can hide it again anytime from
-              this same setting.
+              Joystick.tv and Chaturbate are adult-oriented platforms. Turning this on makes them visible
+              across every tool in StreamerSuite — Connections & Keys, Multi-Chat, Chatbot, AI Co-Host, and
+              Alerts Hub — including their chat, moderation, and tip-alert surfaces. You can hide them again
+              anytime from this same setting.
             </p>
             <div className="flex gap-2 justify-end">
               <button onClick={closeConfirm} className="btn-ghost text-[11px] px-3 py-1.5">

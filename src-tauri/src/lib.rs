@@ -1236,6 +1236,7 @@ fn disconnect_platform(platform: String) -> Result<String, String> {
             "joystick_refresh_token",
             "joystick_client_secret",
         ],
+        "chaturbate" => &["chaturbate_api_token"],
         _ => return Err(format!("Unknown platform: {}", platform)),
     };
     // A deletion failure here used to be logged and silently ignored — the
@@ -1287,6 +1288,10 @@ fn disconnect_platform(platform: String) -> Result<String, String> {
             config.broadcaster.joystick_refresh.clear();
             config.broadcaster.joystick_secret.clear();
             config.broadcaster.joystick_username.clear();
+        }
+        "chaturbate" => {
+            config.broadcaster.chaturbate_token.clear();
+            config.broadcaster.chaturbate_username.clear();
         }
         _ => unreachable!("validated above"),
     }
@@ -2616,6 +2621,8 @@ pub fn run() {
             multichat::streamerbot_clear_password,
             multichat::joystick_delete_message,
             multichat::joystick_moderate_user,
+            multichat::chaturbate_poll_events,
+            multichat::chaturbate_validate_token,
             multichat::wipe_all_credentials_cmd,
             alerts::alerts_eventsub_subscribe,
             alerts::twitch_stream_stats,

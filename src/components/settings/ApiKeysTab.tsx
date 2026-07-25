@@ -45,6 +45,8 @@ const defaultConfig: AppConfig = {
     joystick_username: "",
     streamerbot_host: "",
     streamerbot_port: "",
+    chaturbate_username: "",
+    chaturbate_token: "",
   },
   engine_settings: {
     idle_category: "Just Chatting",
@@ -269,6 +271,28 @@ const ROUTING_CATALOG: {
     managedFields: [
       { key: "joystick_refresh", label: "Refresh Token" },
       { key: "joystick_username", label: "Connected As" },
+    ],
+  },
+  {
+    key: "chaturbate",
+    label: "Chaturbate",
+    desc: "Events API — chat messages, tips, follows, and broadcast status (read-only, no sending or moderation)",
+    adult: true,
+    keyUrl: "https://chaturbate.com/statsapi/authtoken/",
+    icon: <PlatformIcon platform="chaturbate" size="sm" />,
+    color: "#f7941d",
+    // No OAuth at all (devportal.cb.dev) — a plain per-broadcaster API
+    // token generated on Chaturbate's own site, not a client id/secret/
+    // redirect flow. Read-only: there's no send-message or moderation
+    // endpoint on this API, unlike every other platform here.
+    connectUrl: "",
+    userFields: [
+      { key: "chaturbate_username", label: "Username" },
+      {
+        key: "chaturbate_token",
+        label: "API Token",
+        hint: 'Generate at chaturbate.com/statsapi/authtoken/ with "Events API" permission. Only share this with tools you trust — it grants access to tips and private messages, and can\'t be scoped down further.',
+      },
     ],
   },
 ];
@@ -737,6 +761,28 @@ export default function ApiKeysTab() {
     loadConfig();
   };
 
+  // Chaturbate has no OAuth flow at all — a plain per-broadcaster API token
+  // pasted in from chaturbate.com/statsapi/authtoken/ (devportal.cb.dev),
+  // so "Connect" here just force-saves and validates the pair directly,
+  // same idea as connectOrValidate's manual-token branch but without an
+  // OAuth popup fallback since there's nothing to fall back to.
+  const connectChaturbate = async () => {
+    if (!bc.chaturbate_username || !bc.chaturbate_token) {
+      toast("Enter a Chaturbate username and API token first", "error");
+      return;
+    }
+    if (config) await saveConfig(config).catch(() => {});
+    setValidatingPlatform("chaturbate");
+    const res = await tauriApi("chaturbate_validate_token");
+    setValidatingPlatform(null);
+    if (res && typeof res === "object" && "error" in res) {
+      toast(`Chaturbate connect failed: ${(res as { error: string }).error}`, "error");
+      return;
+    }
+    toast("Chaturbate connected!", "success");
+    loadConfig();
+  };
+
   // ── Floating card ─────────────────────────────────
   const renderFloatingCard = () => {
     if (!floatingOpen) return null;
@@ -1155,7 +1201,8 @@ export default function ApiKeysTab() {
               </div>
               <p className="text-sm mb-1">No broadcaster channels routed</p>
               <p className="text-[10px] text-white/20">
-                Click "Add Integration" to connect Twitch, Kick, or Joystick.tv
+                Click "Add Integration" to connect Twitch, Kick
+                {adultContentEnabled ? ", Joystick.tv, or Chaturbate" : ""}
               </p>
             </div>
           ) : (
@@ -1308,6 +1355,20 @@ export default function ApiKeysTab() {
                               {validatingPlatform === "joystick"
                                 ? "Connecting…"
                                 : `🔗 Connect ${entry.label}`}
+                            </button>
+                          )}
+
+                          {/* Chaturbate has no OAuth flow at all — a plain
+                              username+token pair, validated directly. */}
+                          {entry.key === "chaturbate" && !entry.connectUrl && (
+                            <button
+                              onClick={connectChaturbate}
+                              disabled={validatingPlatform === "chaturbate"}
+                              className="btn-cta"
+                            >
+                              {validatingPlatform === "chaturbate"
+                                ? "Verifying…"
+                                : `✓ Verify ${entry.label} Token`}
                             </button>
                           )}
 

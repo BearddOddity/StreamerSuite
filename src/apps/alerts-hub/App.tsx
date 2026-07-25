@@ -23,7 +23,9 @@ const TEST_EVENTS: Omit<AlertEvent, "id" | "timestamp">[] = [
   { platform: "twitch", kind: "cheer", user: "GenerousViewer", message: "cheered 500 bits!", amount: "500" },
   { platform: "kick", kind: "sub", user: "LoyalSub", message: "gifted 5 subs!", amount: "5" },
   { platform: "joystick", kind: "tip", user: "BigFan", message: "sent a tip!", amount: "100" },
+  { platform: "chaturbate", kind: "tip", user: "BigFan", message: "sent a tip!", amount: "100" },
 ];
+const ADULT_ALERT_PLATFORMS = ["joystick", "chaturbate"];
 
 /** Maps the feed's 4-state connection status onto StatusDot's 3 visual states —
  *  "error" reads as "warn" since the shared dot has no red variant. */
@@ -35,7 +37,7 @@ function toDotStatus(status: "disconnected" | "connecting" | "live" | "error"): 
 
 export default function AlertsHubApp() {
   const { settings, update, toggle } = useAlertsSettings();
-  const { alerts, push, clear, twitchAccount, refreshTwitchAccount, twitchStatus, kickStatus, joystickStatus } = useAlertsFeed(settings);
+  const { alerts, push, clear, twitchAccount, refreshTwitchAccount, twitchStatus, kickStatus, joystickStatus, chaturbateStatus } = useAlertsFeed(settings);
   const [showSettings, setShowSettings] = useState(false);
   // Off by default (General -> Adult Content & Platforms) — zero mention of
   // Joystick.tv anywhere in this tool until it's explicitly turned on there.
@@ -45,8 +47,13 @@ export default function AlertsHubApp() {
     fetchConfig().then((cfg) => setAdultContentEnabled(!!cfg?.engine_settings.adult_content_enabled));
   }, []);
 
-  const anyLive = twitchStatus === "live" || kickStatus === "live" || (adultContentEnabled && joystickStatus === "live");
-  const testEvents = adultContentEnabled ? TEST_EVENTS : TEST_EVENTS.filter((e) => e.platform !== "joystick");
+  const anyLive =
+    twitchStatus === "live" ||
+    kickStatus === "live" ||
+    (adultContentEnabled && (joystickStatus === "live" || chaturbateStatus === "live"));
+  const testEvents = adultContentEnabled
+    ? TEST_EVENTS
+    : TEST_EVENTS.filter((e) => !ADULT_ALERT_PLATFORMS.includes(e.platform));
 
   return (
     <div className="h-full flex flex-col p-6 overflow-y-auto">
@@ -55,7 +62,7 @@ export default function AlertsHubApp() {
           <SectionHead
             icon="🔔"
             title="Alerts & Events"
-            desc={`${anyLive ? "🟢 Live — " : ""}Follows, subs, raids, cheers, and tips across Twitch, Kick${adultContentEnabled ? ", and Joystick.tv" : ""}`}
+            desc={`${anyLive ? "🟢 Live — " : ""}Follows, subs, raids, cheers, and tips across Twitch, Kick${adultContentEnabled ? ", Joystick.tv, and Chaturbate" : ""}`}
             right={
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => update({ soundEnabled: !settings.soundEnabled })}>
@@ -73,7 +80,10 @@ export default function AlertsHubApp() {
           <span className="flex items-center gap-1.5"><PlatformIcon platform="twitch" size="xs" /><StatusDot status={toDotStatus(twitchStatus)} label={twitchStatus} /></span>
           <span className="flex items-center gap-1.5"><PlatformIcon platform="kick" size="xs" /><StatusDot status={toDotStatus(kickStatus)} label={kickStatus} /></span>
           {adultContentEnabled && (
-            <span className="flex items-center gap-1.5"><PlatformIcon platform="joystick" size="xs" /><StatusDot status={toDotStatus(joystickStatus)} label={joystickStatus} /></span>
+            <>
+              <span className="flex items-center gap-1.5"><PlatformIcon platform="joystick" size="xs" /><StatusDot status={toDotStatus(joystickStatus)} label={joystickStatus} /></span>
+              <span className="flex items-center gap-1.5"><PlatformIcon platform="chaturbate" size="xs" /><StatusDot status={toDotStatus(chaturbateStatus)} label={chaturbateStatus} /></span>
+            </>
           )}
         </div>
 
@@ -129,6 +139,7 @@ export default function AlertsHubApp() {
           twitchStatus={twitchStatus}
           kickStatus={kickStatus}
           joystickStatus={joystickStatus}
+          chaturbateStatus={chaturbateStatus}
           adultContentEnabled={adultContentEnabled}
           onClose={() => setShowSettings(false)}
         />
