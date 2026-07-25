@@ -6,6 +6,7 @@ import kickBlack from "@/Icons/KICK Black.svg?raw";
 import kickWhite from "@/Icons/KICK White.svg?raw";
 import joystickDark from "@/Icons/joysticktv-logo-simple-dark.svg?raw";
 import joystickLight from "@/Icons/joysticktv-logo-simple-light.svg?raw";
+import chaturbateLogo from "@/Icons/Chaturbate.svg?raw";
 
 export type IconSize = "xs" | "sm" | "md" | "lg";
 
@@ -25,18 +26,6 @@ export type PlatformIconProps = {
 
 export function PlatformIcon({ platform, size = "sm", variant = "color", className }: PlatformIconProps) {
   const px = sizeMap[size];
-  // No sourced brand asset for Chaturbate (unlike the SVG files the others
-  // use) — a plain glyph avoids embedding an unverified third-party logo.
-  if (platform === "chaturbate") {
-    return (
-      <span
-        className={`inline-flex items-center justify-center shrink-0 rounded-full bg-orange-500/20 text-orange-400 ${className ?? ""}`}
-        style={{ width: px, height: px, fontSize: px * 0.6, lineHeight: 1 }}
-      >
-        🔥
-      </span>
-    );
-  }
   const src = getSrc(platform, variant);
   return (
     <span
@@ -83,6 +72,9 @@ function getSrc(platform: string, variant: string): string {
   if (platform === "joystick") {
     if (variant === "light") return joystickLight;
     return joystickDark;
+  }
+  if (platform === "chaturbate") {
+    return chaturbateLogo;
   }
   return "";
 }
