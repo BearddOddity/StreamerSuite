@@ -177,6 +177,10 @@ pub(crate) struct TemplateParams {
     border_radius: String,
     #[serde(default = "default_true")]
     animations_enabled: bool,
+    /// "pop" (default) / "slide" / "fade" — which entrance keyframes
+    /// animations_enabled turns on.
+    #[serde(default = "default_animation_style")]
+    animation_style: String,
     /// Goal Bar only — the target number the bound value is measured
     /// against (e.g. a follower goal of 1000).
     #[serde(default)]
@@ -185,6 +189,12 @@ pub(crate) struct TemplateParams {
     text_shadow: bool,
     #[serde(default)]
     text_stroke: bool,
+    /// Countdown template only — an ISO 8601 datetime string the client
+    /// ticks down to locally (no server round-trip, unlike every other
+    /// bound field). Free text: invalid/unparseable values just render as
+    /// placeholder dashes client-side rather than failing to save.
+    #[serde(default)]
+    countdown_target: String,
 }
 
 fn default_text_color() -> String {
@@ -201,6 +211,9 @@ fn default_border_radius() -> String {
 }
 fn default_true() -> bool {
     true
+}
+fn default_animation_style() -> String {
+    "pop".into()
 }
 
 const FONT_STACK: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
@@ -342,6 +355,29 @@ function getOverlayToken() {
 }
 "#;
 
+/// Countdown template only — ticks entirely client-side against
+/// `data-target` (an ISO datetime string), no server round-trip and no
+/// dependency on `DATA_BIND_SCRIPT`/overlay_publish_data at all.
+const COUNTDOWN_SCRIPT: &str = r#"<script>
+(function() {
+  var el = document.getElementById("sb-countdown");
+  if (!el) return;
+  var target = new Date(el.getAttribute("data-target")).getTime();
+  function tick() {
+    if (isNaN(target)) { el.textContent = "--d --:--:--"; return; }
+    var diff = Math.max(0, target - Date.now());
+    var s = Math.floor(diff / 1000);
+    var d = Math.floor(s / 86400); s %= 86400;
+    var h = Math.floor(s / 3600); s %= 3600;
+    var m = Math.floor(s / 60); s %= 60;
+    function pad(n) { return String(n).padStart(2, "0"); }
+    el.textContent = d + "d " + pad(h) + ":" + pad(m) + ":" + pad(s);
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>"#;
+
 fn render_template(params: &TemplateParams) -> Result<String, String> {
     let text_color = safe_color(&params.text_color, &default_text_color());
     let accent = safe_color(&params.accent_color, &default_accent_color());
@@ -376,10 +412,20 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
     // animation — off entirely (not just neutralized) when the user disables
     // animations, so a disabled overlay never even defines the keyframes.
     let (card_animation, keyframes) = if params.animations_enabled {
-        (
-            "animation: overlay-pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;",
-            "@keyframes overlay-pop-in { from { opacity: 0; transform: scale(0.9) translateY(-8px); } to { opacity: 1; transform: scale(1) translateY(0); } }",
-        )
+        match params.animation_style.as_str() {
+            "slide" => (
+                "animation: overlay-slide-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;",
+                "@keyframes overlay-slide-in { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }",
+            ),
+            "fade" => (
+                "animation: overlay-fade-in 0.5s ease forwards;",
+                "@keyframes overlay-fade-in { from { opacity: 0; } to { opacity: 1; } }",
+            ),
+            _ => (
+                "animation: overlay-pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;",
+                "@keyframes overlay-pop-in { from { opacity: 0; transform: scale(0.9) translateY(-8px); } to { opacity: 1; transform: scale(1) translateY(0); } }",
+            ),
+        }
     } else {
         ("", "")
     };
@@ -529,14 +575,64 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                 ),
             )
         }
+        "alert-banner" => {
+            let corner_css = match params.position.as_str() {
+                "top-left" => "top: 30px; left: 30px;",
+                "top-right" => "top: 30px; right: 30px;",
+                "bottom-left" => "bottom: 30px; left: 30px;",
+                _ => "bottom: 30px; right: 30px;",
+            };
+            (
+                format!("position: fixed; {corner_css}"),
+                format!(
+                    r#"<div id="card"><div class="pulse-ring"></div>{logo_html}<div class="text">{title_html}{subtitle_html}</div></div>"#
+                ),
+                format!(
+                    "#card {{ position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; box-shadow: 0 0 24px {accent}88; {card_animation} }}\n\
+                     .pulse-ring {{ position: absolute; inset: -2px; border-radius: {radius}; border: 2px solid {accent}; animation: alert-pulse 1.4s ease-out infinite; }}\n\
+                     .text {{ display: flex; flex-direction: column; gap: 2px; }}\n\
+                     .title {{ font-size: 20px; font-weight: 800; color: {text_color}; text-transform: uppercase; letter-spacing: 0.03em; }}\n\
+                     .subtitle {{ font-size: 15px; font-weight: 600; color: {text_color}; opacity: 0.85; }}\n\
+                     .logo {{ height: 34px; width: 34px; border-radius: 50%; object-fit: cover; }}\n\
+                     @keyframes alert-pulse {{ 0% {{ opacity: 0.7; transform: scale(1); }} 100% {{ opacity: 0; transform: scale(1.08); }} }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
+        "countdown" => {
+            let place_css = match params.position.as_str() {
+                "top-left" => "top: 40px; left: 40px;",
+                "top-right" => "top: 40px; right: 40px;",
+                "bottom-left" => "bottom: 40px; left: 40px;",
+                "bottom-right" => "bottom: 40px; right: 40px;",
+                _ => "top: 50%; left: 50%; transform: translate(-50%, -50%);",
+            };
+            let target = escape_html(params.countdown_target.trim());
+            (
+                format!("position: fixed; {place_css}"),
+                format!(
+                    r#"<div id="card">{logo_html}{title_html}<div class="countdown" id="sb-countdown" data-target="{target}">--d --:--:--</div>{subtitle_html}</div>"#
+                ),
+                format!(
+                    "#card {{ display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px 36px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; text-align: center; {card_animation} }}\n\
+                     .title {{ font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: {text_color}; opacity: 0.8; }}\n\
+                     .countdown {{ font-size: 40px; font-weight: 800; color: {text_color}; font-variant-numeric: tabular-nums; }}\n\
+                     .subtitle {{ font-size: 14px; color: {text_color}; opacity: 0.7; }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
         other => return Err(format!("unknown template: {other}")),
     };
 
-    let script = if has_binding(params) {
+    let mut script = if has_binding(params) {
         format!("<script>{TOKEN_FROM_PATH_JS}</script>{DATA_BIND_SCRIPT}")
     } else {
         String::new()
     };
+    if params.template == "countdown" {
+        script.push_str(COUNTDOWN_SCRIPT);
+    }
 
     // Applied globally (harmless no-op for classes the current template
     // doesn't use) rather than threaded through every template arm above.
@@ -550,7 +646,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
     let text_effects_css = if text_effects.is_empty() {
         String::new()
     } else {
-        format!(".title, .subtitle, .goal-row, .goal-label {{ {text_effects} }}")
+        format!(".title, .subtitle, .goal-row, .goal-label, .countdown {{ {text_effects} }}")
     };
 
     Ok(format!(
@@ -694,15 +790,20 @@ mod tests {
             font_family: String::new(),
             border_radius: default_border_radius(),
             animations_enabled: true,
+            animation_style: default_animation_style(),
             goal: None,
             text_shadow: false,
             text_stroke: false,
+            countdown_target: String::new(),
         }
     }
 
     #[test]
     fn renders_all_templates_and_escapes_text() {
-        for t in ["lower-third", "corner-badge", "ticker", "text-box", "goal-bar", "cam-frame"] {
+        for t in [
+            "lower-third", "corner-badge", "ticker", "text-box", "goal-bar", "cam-frame",
+            "alert-banner", "countdown",
+        ] {
             let html = render_template(&params(t)).unwrap();
             assert!(html.contains("Hello &lt;World&gt;"), "template {t} should escape title text");
             assert!(!html.contains("Hello <World>"), "template {t} should not contain raw unescaped text");
@@ -762,6 +863,31 @@ mod tests {
     fn slugify_prefers_title_falls_back_to_template() {
         assert_eq!(slugify("My Cool Overlay!", "lower-third"), "my-cool-overlay");
         assert_eq!(slugify("   ", "corner-badge"), "corner-badge");
+    }
+
+    #[test]
+    fn countdown_embeds_target_and_ticker_script_only_for_countdown_template() {
+        let mut p = params("countdown");
+        p.countdown_target = "2026-12-25T00:00:00".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(html.contains(r#"data-target="2026-12-25T00:00:00""#));
+        assert!(html.contains("sb-countdown"));
+
+        let other = render_template(&params("lower-third")).unwrap();
+        assert!(!other.contains("sb-countdown"), "countdown script shouldn't leak into other templates");
+    }
+
+    #[test]
+    fn animation_style_selects_distinct_keyframes() {
+        let mut p = params("text-box");
+        p.animation_style = "slide".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(html.contains("overlay-slide-in"));
+        assert!(!html.contains("overlay-pop-in"));
+
+        p.animation_style = "fade".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(html.contains("overlay-fade-in"));
     }
 
     #[test]

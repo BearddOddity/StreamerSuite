@@ -63,15 +63,22 @@ export function useCoHost() {
     setConfig((prev) => ({ ...prev, tools: { ...prev.tools, [key]: !prev.tools[key] } }));
 
   /** Calls Hugging Face's Inference Providers router directly from the Rust
-   * backend (cohost.rs) — no local runtime, no separate app to install. */
-  const generateReply = (message: string): Promise<string> =>
-    invoke<string>("cohost_generate_reply", {
+   * backend (cohost.rs) — no local runtime, no separate app to install.
+   * Also publishes the reply as an overlay data source ("cohost_reply") so
+   * a Text Box/Lower Third can show it — genuinely live even though
+   * automatic chat-trigger replies aren't wired up yet, since this fires on
+   * every real call including a manual "Try It". */
+  const generateReply = async (message: string): Promise<string> => {
+    const reply = await invoke<string>("cohost_generate_reply", {
       message,
       persona: config.persona,
       model: config.model,
       bannedTopics: config.guardrails.bannedTopics,
       maxResponseLength: config.guardrails.maxResponseLength,
     });
+    invoke("overlay_publish_data", { key: "cohost_reply", value: reply }).catch(() => {});
+    return reply;
+  };
 
   return { config, update, updateGuardrails, toggleTrigger, togglePlatform, toggleTool, generateReply };
 }

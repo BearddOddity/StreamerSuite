@@ -5,7 +5,15 @@ export interface OverlayEntry {
   editable: boolean;
 }
 
-export type OverlayTemplateId = "lower-third" | "corner-badge" | "ticker" | "text-box" | "goal-bar" | "cam-frame";
+export type OverlayTemplateId =
+  | "lower-third"
+  | "corner-badge"
+  | "ticker"
+  | "text-box"
+  | "goal-bar"
+  | "cam-frame"
+  | "alert-banner"
+  | "countdown";
 
 export interface TemplateDef {
   id: OverlayTemplateId;
@@ -15,6 +23,7 @@ export interface TemplateDef {
   positions: { value: string; label: string }[];
   hasSpeed?: boolean;
   hasGoal?: boolean;
+  hasCountdownTarget?: boolean;
 }
 
 export const TEMPLATES: TemplateDef[] = [
@@ -88,6 +97,32 @@ export const TEMPLATES: TemplateDef[] = [
       { value: "bottom-right", label: "Bottom Right" },
     ],
   },
+  {
+    id: "alert-banner",
+    label: "Alert Banner",
+    icon: "🔔",
+    description: "Flashier corner alert — pulsing border, e.g. for a bound follow/sub/tip event",
+    positions: [
+      { value: "top-left", label: "Top Left" },
+      { value: "top-right", label: "Top Right" },
+      { value: "bottom-left", label: "Bottom Left" },
+      { value: "bottom-right", label: "Bottom Right" },
+    ],
+  },
+  {
+    id: "countdown",
+    label: "Countdown Timer",
+    icon: "⏳",
+    description: "Ticks down to a set date/time — start delays, sub goals with a deadline, etc.",
+    positions: [
+      { value: "center", label: "Center" },
+      { value: "top-left", label: "Top Left" },
+      { value: "top-right", label: "Top Right" },
+      { value: "bottom-left", label: "Bottom Left" },
+      { value: "bottom-right", label: "Bottom Right" },
+    ],
+    hasCountdownTarget: true,
+  },
 ];
 
 /**
@@ -113,6 +148,7 @@ export const KNOWN_LIVE_SOURCES: { value: string; label: string }[] = [
   { value: "stream_title", label: "Stream Title (Stream Manager)" },
   { value: "stream_category", label: "Stream Category (Stream Manager)" },
   { value: "latest_alert", label: "Latest Alert (Alerts Hub)" },
+  { value: "cohost_reply", label: "AI Co-Host's Last Reply (AI Co-Host)" },
 ];
 
 /** Turns an unrecognized published key like "chat_count" into "Chat Count" for display. */
@@ -140,9 +176,12 @@ export interface TemplateParams {
   fontFamily: string;
   borderRadius: "sharp" | "soft" | "rounded";
   animationsEnabled: boolean;
+  animationStyle: "pop" | "slide" | "fade";
   goal: number | null;
   textShadow: boolean;
   textStroke: boolean;
+  /** Countdown template only — ISO datetime string the client ticks down to. */
+  countdownTarget: string;
 }
 
 export const DEFAULT_TEMPLATE_PARAMS: TemplateParams = {
@@ -158,7 +197,9 @@ export const DEFAULT_TEMPLATE_PARAMS: TemplateParams = {
   fontFamily: "",
   borderRadius: "rounded",
   animationsEnabled: true,
+  animationStyle: "pop",
   goal: 1000,
   textShadow: false,
   textStroke: false,
+  countdownTarget: "",
 };

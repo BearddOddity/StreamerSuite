@@ -224,6 +224,17 @@ export default function OverlayMaker({
                   />
                 </div>
               )}
+              {template.hasCountdownTarget && (
+                <div>
+                  <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">Counts down to</label>
+                  <input
+                    type="datetime-local"
+                    value={params.countdownTarget}
+                    onChange={(e) => set("countdownTarget", e.target.value)}
+                    className="w-full input-glass text-[11px]"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -294,6 +305,19 @@ export default function OverlayMaker({
                   onChange={(e) => set("animationsEnabled", e.target.checked)}
                 />
               </div>
+              {params.animationsEnabled && (
+                <Select
+                  label="Animation Style"
+                  value={params.animationStyle}
+                  onChange={(v) => set("animationStyle", v as TemplateParams["animationStyle"])}
+                  options={[
+                    { value: "pop", label: "Pop" },
+                    { value: "slide", label: "Slide Up" },
+                    { value: "fade", label: "Fade" },
+                  ]}
+                  style={SELECT_COMPACT_STYLE}
+                />
+              )}
               <div className="flex items-center justify-between">
                 <label className="text-[11px] text-white/60">Text drop shadow</label>
                 <input
