@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { CoHostConfig, ToolAccess } from "./types";
 import { MODEL_OPTIONS } from "./types";
 
@@ -61,5 +62,16 @@ export function useCoHost() {
   const toggleTool = (key: ToolAccess) =>
     setConfig((prev) => ({ ...prev, tools: { ...prev.tools, [key]: !prev.tools[key] } }));
 
-  return { config, update, updateGuardrails, toggleTrigger, togglePlatform, toggleTool };
+  /** Calls Hugging Face's Inference Providers router directly from the Rust
+   * backend (cohost.rs) — no local runtime, no separate app to install. */
+  const generateReply = (message: string): Promise<string> =>
+    invoke<string>("cohost_generate_reply", {
+      message,
+      persona: config.persona,
+      model: config.model,
+      bannedTopics: config.guardrails.bannedTopics,
+      maxResponseLength: config.guardrails.maxResponseLength,
+    });
+
+  return { config, update, updateGuardrails, toggleTrigger, togglePlatform, toggleTool, generateReply };
 }

@@ -49,8 +49,27 @@ function ConnectionStatus({ config, adultContentEnabled }: { config: AppConfig |
 }
 
 export default function CoHostApp() {
-  const { config, update, updateGuardrails, toggleTrigger, togglePlatform, toggleTool } = useCoHost();
+  const { config, update, updateGuardrails, toggleTrigger, togglePlatform, toggleTool, generateReply } = useCoHost();
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
+  const [tryMessage, setTryMessage] = useState("hey, what game is this?");
+  const [tryReply, setTryReply] = useState<string | null>(null);
+  const [tryError, setTryError] = useState<string | null>(null);
+  const [tryBusy, setTryBusy] = useState(false);
+
+  const runTry = async () => {
+    if (!tryMessage.trim() || tryBusy) return;
+    setTryBusy(true);
+    setTryError(null);
+    setTryReply(null);
+    try {
+      const reply = await generateReply(tryMessage.trim());
+      setTryReply(reply);
+    } catch (e) {
+      setTryError(String(e));
+    } finally {
+      setTryBusy(false);
+    }
+  };
 
   useEffect(() => {
     fetchConfig().then(setAppConfig);
@@ -80,9 +99,9 @@ export default function CoHostApp() {
 
         <div className="mb-6 px-4 py-3 rounded-lg bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)]">
           <p className="text-[11px] text-white/60">
-            <b>Preview.</b> Persona, guardrails, and triggers are saved and editable, but nothing calls
-            Hugging Face or posts to chat yet — this is UI only. Model calls are the next step once this
-            shape feels right.
+            <b>Preview.</b> Persona, guardrails, and triggers are saved and editable, and "Try it" below calls
+            the real model through your Hugging Face connection — no separate app to install. Automatically
+            replying to live chat on the triggers below is the next step once this shape feels right.
           </p>
         </div>
 
@@ -147,6 +166,38 @@ export default function CoHostApp() {
             trigger-based replies rather than every chat message. Uncensored models have no built-in
             refusal behavior, so lean on Banned Topics and Mod Approval below to keep them in line.
           </p>
+        </Card>
+
+        {/* Try it — a real call to Hugging Face through the Rust backend,
+            using the persona/model/guardrails set above. Proves the
+            pipeline actually works without needing live chat wired up. */}
+        <Card padding={16} className="mb-4">
+          <span className="text-[11px] uppercase tracking-wider text-white/40 font-semibold block mb-3">
+            Try It
+          </span>
+          <div className="flex gap-2 mb-2">
+            <input
+              value={tryMessage}
+              onChange={(e) => setTryMessage(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && runTry()}
+              placeholder="Type a chat message to test the persona..."
+              className="input-glass flex-1 text-[12px]"
+            />
+            <Button variant="primary" onClick={runTry} disabled={tryBusy || !tryMessage.trim()}>
+              {tryBusy ? "Thinking…" : "Send"}
+            </Button>
+          </div>
+          {tryReply && (
+            <div className="px-3 py-2 rounded-lg bg-white/[0.03] text-[12px] text-white/80">
+              <span className="mr-1">{config.avatar || "🤖"}</span>
+              {tryReply}
+            </div>
+          )}
+          {tryError && (
+            <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-[11px] text-red-300">
+              {tryError}
+            </div>
+          )}
         </Card>
 
         {/* Guardrails */}

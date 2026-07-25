@@ -1,5 +1,6 @@
 mod auth;
 pub mod alerts;
+pub mod cohost;
 pub mod config;
 pub mod feedback;
 pub mod pusher;
@@ -2624,6 +2625,7 @@ pub fn run() {
             multichat::chaturbate_poll_events,
             multichat::chaturbate_validate_token,
             multichat::wipe_all_credentials_cmd,
+            cohost::cohost_generate_reply,
             alerts::alerts_eventsub_subscribe,
             alerts::twitch_stream_stats,
             multichat::kick_channel_stats,
