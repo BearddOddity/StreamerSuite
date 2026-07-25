@@ -16,9 +16,21 @@ export const MODEL_OPTIONS: ModelOption[] = [
   { id: "meta-llama/Llama-3.1-8B-Instruct", label: "Llama 3.1 8B Instruct", note: "Meta — well-rounded, widely available" },
   { id: "mistralai/Mistral-7B-Instruct-v0.3", label: "Mistral 7B Instruct", note: "Fast, low latency" },
   { id: "Qwen/Qwen2.5-7B-Instruct", label: "Qwen 2.5 7B Instruct", note: "Strong instruction-following" },
-  { id: "google/gemma-2-9b-it", label: "Gemma 2 9B", note: "Google — good safety tuning out of the box" },
+  { id: "google/gemma-2-9b-it", label: "Gemma 2 9B", note: "Google — heavier built-in safety tuning" },
   { id: "microsoft/Phi-3.5-mini-instruct", label: "Phi-3.5 Mini", note: "Smallest/fastest of the set" },
   { id: "HuggingFaceH4/zephyr-7b-beta", label: "Zephyr 7B Beta", note: "Hugging Face's own chat fine-tune" },
+];
+
+// "Uncensored" options: base-model refusal behavior stripped out (via
+// filtered training data or abliteration), so this tool's own Guardrails
+// below — banned topics, profanity filter, approval queue — do the content
+// shaping instead of a vendor's baked-in alignment. Useful for a persona
+// that shouldn't constantly deflect or moralize at chat. Free-tier
+// availability on Hugging Face's Inference Providers can vary by model.
+export const UNCENSORED_MODEL_OPTIONS: ModelOption[] = [
+  { id: "dphn/dolphin-2.9-llama3-8b", label: "Dolphin 2.9 Llama 3 8B", note: "Filtered training data — no built-in refusal behavior, pairs well with this tool's Guardrails" },
+  { id: "mlabonne/Hermes-3-Llama-3.1-8B-lorablated", label: "Hermes 3 8B (lorablated)", note: "Nous's Hermes 3 with refusal behavior removed via LoRA abliteration" },
+  { id: "mlabonne/NeuralDaredevil-8B-abliterated", label: "NeuralDaredevil 8B (abliterated)", note: "Abliterated Llama 3 8B, DPO-refined afterward to recover coherence" },
 ];
 
 export type TriggerType = "mention" | "command" | "follow" | "sub" | "raid" | "cheer";

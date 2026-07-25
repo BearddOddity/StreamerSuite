@@ -4,7 +4,7 @@ import { Badge, Button, Card, Chip, SectionHead, StatusDot } from "../../design-
 import { fetchConfig } from "@statusforge/hooks/useTauriApi";
 import type { AppConfig } from "@statusforge/types";
 import { useCoHost } from "./useCoHost";
-import { MODEL_OPTIONS, TRIGGER_LABELS, TOOL_ACCESS_OPTIONS } from "./types";
+import { MODEL_OPTIONS, UNCENSORED_MODEL_OPTIONS, TRIGGER_LABELS, TOOL_ACCESS_OPTIONS } from "./types";
 import type { CoHostPlatforms, TriggerType } from "./types";
 
 const PLATFORM_LABELS: { key: keyof CoHostPlatforms; label: string; icon: string }[] = [
@@ -127,15 +127,25 @@ export default function CoHostApp() {
             onChange={(e) => update({ model: e.target.value })}
             className="input-glass w-full text-[12px]"
           >
-            {MODEL_OPTIONS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label} — {m.note}
-              </option>
-            ))}
+            <optgroup label="Standard">
+              {MODEL_OPTIONS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} — {m.note}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Uncensored (relies on your Guardrails below)">
+              {UNCENSORED_MODEL_OPTIONS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} — {m.note}
+                </option>
+              ))}
+            </optgroup>
           </select>
           <p className="text-[9px] text-white/20 mt-1">
             Served via Hugging Face's free Serverless Inference API — rate-limited, fine for
-            trigger-based replies rather than every chat message.
+            trigger-based replies rather than every chat message. Uncensored models have no built-in
+            refusal behavior, so lean on Banned Topics and Mod Approval below to keep them in line.
           </p>
         </Card>
 
