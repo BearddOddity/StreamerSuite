@@ -27,6 +27,43 @@ function NumberField({ label, value, onChange, min, max }: { label: string; valu
   );
 }
 
+const SNAP_THRESHOLD_PCT = 1.5;
+
+/** Canvas center/edges plus every other element's left/center/right (x) or
+ * top/center/bottom (y) edge — what a dragged/resized element can snap to,
+ * same idea as Canva's alignment guides. */
+function snapTargets(elements: CanvasElementT[], excludeId: string) {
+  const xs = [0, 50, 100];
+  const ys = [0, 50, 100];
+  for (const e of elements) {
+    if (e.id === excludeId) continue;
+    xs.push(e.xPct, e.xPct + e.widthPct / 2, e.xPct + e.widthPct);
+    ys.push(e.yPct, e.yPct + e.heightPct / 2, e.yPct + e.heightPct);
+  }
+  return { xs, ys };
+}
+
+function snap(value: number, targets: number[]): { value: number; hit: number | null } {
+  for (const t of targets) {
+    if (Math.abs(value - t) <= SNAP_THRESHOLD_PCT) return { value: t, hit: t };
+  }
+  return { value, hit: null };
+}
+
+type DragMode = "move" | "resize";
+interface DragState {
+  id: string;
+  mode: DragMode;
+  startMouseX: number;
+  startMouseY: number;
+  startX: number;
+  startY: number;
+  startW: number;
+  startH: number;
+  rectW: number;
+  rectH: number;
+}
+
 export default function CanvasMaker({
   onSaved,
   onClose,
@@ -46,10 +83,85 @@ export default function CanvasMaker({
   const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [guideX, setGuideX] = useState<number | null>(null);
+  const [guideY, setGuideY] = useState<number | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<DragState | null>(null);
 
   const liveSources = useLiveSources();
   const selected = elements.find((e) => e.id === selectedId) ?? null;
+
+  // Mouse-driven drag-to-move / handle-drag-to-resize with Canva-style
+  // snapping to the canvas center/edges and other elements' edges — the
+  // direct-manipulation interaction the number inputs alone don't give you.
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const dxPct = ((e.clientX - d.startMouseX) / d.rectW) * 100;
+      const dyPct = ((e.clientY - d.startMouseY) / d.rectH) * 100;
+      setElements((prev) => {
+        const el = prev.find((e2) => e2.id === d.id);
+        if (!el) return prev;
+        const { xs, ys } = snapTargets(prev, d.id);
+        let patch: Partial<CanvasElementT>;
+        let hitX: number | null = null;
+        let hitY: number | null = null;
+        if (d.mode === "move") {
+          const rawX = Math.min(100 - 2, Math.max(0, d.startX + dxPct));
+          const rawY = Math.min(100 - 2, Math.max(0, d.startY + dyPct));
+          const sx = snap(rawX, xs);
+          const sy = snap(rawY, ys);
+          hitX = sx.hit;
+          hitY = sy.hit;
+          patch = { xPct: sx.value, yPct: sy.value };
+        } else {
+          const rawW = Math.min(100 - d.startX, Math.max(4, d.startW + dxPct));
+          const rawH = Math.min(100 - d.startY, Math.max(4, d.startH + dyPct));
+          const sw = snap(d.startX + rawW, xs);
+          const sh = snap(d.startY + rawH, ys);
+          hitX = sw.hit;
+          hitY = sh.hit;
+          patch = { widthPct: sw.hit != null ? sw.value - d.startX : rawW, heightPct: sh.hit != null ? sh.value - d.startY : rawH };
+        }
+        setGuideX(hitX);
+        setGuideY(hitY);
+        return prev.map((e2) => (e2.id === d.id ? { ...e2, ...patch } : e2));
+      });
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      setGuideX(null);
+      setGuideY(null);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  const startDrag = (e: React.MouseEvent, el: CanvasElementT, mode: DragMode) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedId(el.id);
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    dragRef.current = {
+      id: el.id,
+      mode,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      startX: el.xPct,
+      startY: el.yPct,
+      startW: el.widthPct,
+      startH: el.heightPct,
+      rectW: rect.width,
+      rectH: rect.height,
+    };
+  };
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -110,7 +222,7 @@ export default function CanvasMaker({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={onClose}>
-      <Card padding={24} className="w-full max-w-5xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <Card padding={24} className="w-full max-w-6xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4">
           <SectionHead
             icon="🧩"
@@ -132,7 +244,7 @@ export default function CanvasMaker({
           </Card>
         )}
 
-        <div className="grid grid-cols-[200px_1fr_1fr] gap-5">
+        <div className="grid grid-cols-[180px_320px_1fr] gap-5">
           {/* Element list */}
           <div className="space-y-2">
             <label className="text-[10px] text-white/40 uppercase tracking-wide block">Elements</label>
@@ -216,16 +328,65 @@ export default function CanvasMaker({
             )}
           </div>
 
-          {/* Preview */}
+          {/* Canvas — drag an element to move it, drag its bottom-right handle
+              to resize, both snapping to the canvas center/edges and other
+              elements' edges (thin purple guide lines while snapped). */}
           <div className="space-y-2">
-            <label className="text-[10px] text-white/40 uppercase tracking-wide block">Live Preview</label>
-            <div className="rounded-xl overflow-hidden border border-white/[0.06] bg-[repeating-conic-gradient(#111_0%_25%,#0a0a0a_0%_50%)] bg-[length:20px_20px] aspect-video">
+            <label className="text-[10px] text-white/40 uppercase tracking-wide block">Canvas</label>
+            <div
+              ref={canvasRef}
+              className="relative rounded-xl overflow-hidden border border-white/[0.06] bg-[repeating-conic-gradient(#111_0%_25%,#0a0a0a_0%_50%)] bg-[length:20px_20px] aspect-video select-none"
+              onMouseDown={() => setSelectedId(null)}
+            >
               {preview && (
-                <iframe title="canvas-preview" srcDoc={preview} className="w-full h-full pointer-events-none" />
+                <iframe
+                  title="canvas-preview"
+                  srcDoc={preview}
+                  className="absolute inset-0 w-full h-full pointer-events-none"
+                />
+              )}
+
+              {elements.map((el) => {
+                const t = TEMPLATES.find((tt) => tt.id === el.params.template)!;
+                const isSelected = el.id === selectedId;
+                return (
+                  <div
+                    key={el.id}
+                    onMouseDown={(e) => startDrag(e, el, "move")}
+                    className={`absolute cursor-move border-2 rounded ${
+                      isSelected ? "border-purple-400" : "border-white/15 hover:border-white/35"
+                    }`}
+                    style={{
+                      left: `${el.xPct}%`,
+                      top: `${el.yPct}%`,
+                      width: `${el.widthPct}%`,
+                      height: `${el.heightPct}%`,
+                      zIndex: el.zIndex + 1,
+                    }}
+                  >
+                    <span className="absolute -top-5 left-0 text-[9px] text-white/50 whitespace-nowrap">
+                      {t.icon} {el.params.title.text || t.label}
+                    </span>
+                    <div
+                      onMouseDown={(e) => startDrag(e, el, "resize")}
+                      className={`absolute -right-1.5 -bottom-1.5 w-3 h-3 rounded-sm cursor-nwse-resize ${
+                        isSelected ? "bg-purple-400" : "bg-white/30"
+                      }`}
+                    />
+                  </div>
+                );
+              })}
+
+              {guideX != null && (
+                <div className="absolute top-0 bottom-0 w-px bg-purple-400/80 pointer-events-none" style={{ left: `${guideX}%` }} />
+              )}
+              {guideY != null && (
+                <div className="absolute left-0 right-0 h-px bg-purple-400/80 pointer-events-none" style={{ top: `${guideY}%` }} />
               )}
             </div>
             <p className="text-[10px] text-white/25">
-              Position/size are percent of the canvas, so this holds up at any OBS Browser Source resolution.
+              Drag an element to move it, or its corner handle to resize — snaps to the canvas center/edges and
+              other elements. Position/size are percent-based, so this holds up at any OBS Browser Source resolution.
             </p>
           </div>
         </div>
