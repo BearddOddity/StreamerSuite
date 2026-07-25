@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppDefinition } from "@/apps/registry";
+import { fetchConfig } from "@statusforge/hooks/useTauriApi";
 
 interface CategoryInfo {
   id: string;
@@ -13,9 +14,30 @@ interface Props {
   onLaunch: (id: string) => void;
 }
 
+// Off by default (General -> Adult Content & Platforms) — a tile's static
+// `description` is written once at app-registration time (before any config
+// fetch could resolve), so unlike the rest of this app's zero-mention
+// gating this can't just be left out of a filter/render call. Instead this
+// strips any 18+ platform mention out of whatever text is actually shown,
+// generically (covers any future tile that mentions one), rather than
+// hand-editing individual apps' registered strings.
+function sanitizeDescription(desc: string, adultContentEnabled: boolean): string {
+  if (adultContentEnabled) return desc;
+  return desc
+    .replace(/,?\s*and Joystick\.tv/gi, "")
+    .replace(/,?\s*Joystick\.tv,?/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export default function Launcher({ categories, onLaunch }: Props) {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [adultContentEnabled, setAdultContentEnabled] = useState(false);
+
+  useEffect(() => {
+    fetchConfig().then((cfg) => setAdultContentEnabled(!!cfg?.engine_settings.adult_content_enabled));
+  }, []);
 
   const filteredCategories = activeCategory
     ? categories.filter((c) => c.id === activeCategory)
@@ -27,7 +49,9 @@ export default function Launcher({ categories, onLaunch }: Props) {
         .filter(
           (a) =>
             a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            a.description.toLowerCase().includes(searchQuery.toLowerCase())
+            sanitizeDescription(a.description, adultContentEnabled)
+              .toLowerCase()
+              .includes(searchQuery.toLowerCase())
         )
     : null;
 
@@ -99,7 +123,7 @@ export default function Launcher({ categories, onLaunch }: Props) {
         {filteredApps ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {filteredApps.map((app) => (
-              <AppCard key={app.id} app={app} onLaunch={onLaunch} />
+              <AppCard key={app.id} app={app} onLaunch={onLaunch} adultContentEnabled={adultContentEnabled} />
             ))}
             {filteredApps.length === 0 && (
               <div className="col-span-full text-center py-12 text-white/20 text-sm">
@@ -117,7 +141,7 @@ export default function Launcher({ categories, onLaunch }: Props) {
                   </h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                     {cat.apps.map((app) => (
-                      <AppCard key={app.id} app={app} onLaunch={onLaunch} />
+                      <AppCard key={app.id} app={app} onLaunch={onLaunch} adultContentEnabled={adultContentEnabled} />
                     ))}
                   </div>
                 </>
@@ -130,7 +154,15 @@ export default function Launcher({ categories, onLaunch }: Props) {
   );
 }
 
-function AppCard({ app, onLaunch }: { app: AppDefinition; onLaunch: (id: string) => void }) {
+function AppCard({
+  app,
+  onLaunch,
+  adultContentEnabled,
+}: {
+  app: AppDefinition;
+  onLaunch: (id: string) => void;
+  adultContentEnabled: boolean;
+}) {
   return (
     <button
       onClick={() => onLaunch(app.id)}
@@ -147,7 +179,9 @@ function AppCard({ app, onLaunch }: { app: AppDefinition; onLaunch: (id: string)
               <span className="badge badge-purple shrink-0">Featured</span>
             )}
           </div>
-          <p className="text-[11px] text-white/30 mt-1 line-clamp-2 leading-relaxed">{app.description}</p>
+          <p className="text-[11px] text-white/30 mt-1 line-clamp-2 leading-relaxed">
+            {sanitizeDescription(app.description, adultContentEnabled)}
+          </p>
           <span className="inline-block mt-2 badge badge-ghost">
             {app.category}
           </span>
