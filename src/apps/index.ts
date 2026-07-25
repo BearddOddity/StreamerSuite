@@ -11,3 +11,4 @@ import "./notes-commands";
 import "./statusforge";
 import "./stream-manager";
 import "./overlay-library";
+import "./overlay-editor";

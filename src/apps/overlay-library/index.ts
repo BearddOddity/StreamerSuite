@@ -5,7 +5,7 @@ registerApp({
   id: "overlay-library",
   name: "Overlay Library",
   icon: "🖼️",
-  description: "Every browser-source overlay in one place — built-in widgets, live alerts, and your own custom overlays.",
+  description: "Browse and copy the URL for every browser-source overlay — built-in widgets and your own custom overlays. Build new ones with the editor app (🧩).",
   category: "media",
   component: OverlayLibraryApp,
   featured: true,

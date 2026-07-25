@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { DEFAULT_TEMPLATE_PARAMS, type TemplateParams } from "./types";
-import { useLiveSources } from "./useLiveSources";
+import { DEFAULT_TEMPLATE_PARAMS, type TemplateParams } from "../overlay-library/types";
+import { useLiveSources } from "../overlay-library/useLiveSources";
 import TemplateFieldsEditor from "./TemplateFieldsEditor";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
 

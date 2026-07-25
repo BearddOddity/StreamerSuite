@@ -6,8 +6,8 @@
 // CSS can never collide with each other.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { TEMPLATES, newCanvasElement, type CanvasElementT, type TemplateParams } from "./types";
-import { useLiveSources } from "./useLiveSources";
+import { TEMPLATES, newCanvasElement, type CanvasElementT, type TemplateParams } from "../overlay-library/types";
+import { useLiveSources } from "../overlay-library/useLiveSources";
 import TemplateFieldsEditor from "./TemplateFieldsEditor";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
 

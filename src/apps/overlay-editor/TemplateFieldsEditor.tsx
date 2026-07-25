@@ -3,7 +3,7 @@
 // Shared by OverlayMaker (a whole overlay = one of these) and CanvasMaker
 // (a whole overlay = several of these, each independently placed), so a
 // widget's own settings never drift between the two editors.
-import { DEFAULT_TEMPLATE_PARAMS, TEMPLATES, type BoundField, type TemplateParams } from "./types";
+import { DEFAULT_TEMPLATE_PARAMS, TEMPLATES, type BoundField, type TemplateParams } from "../overlay-library/types";
 import { Select } from "../../design-system/components/forms";
 
 const FONT_PRESETS = ["", "Bebas Neue", "Anton", "Oswald", "Bungee", "Press Start 2P", "Poppins"];

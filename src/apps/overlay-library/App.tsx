@@ -1,9 +1,4 @@
-import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useOverlays } from "./useOverlays";
-import OverlayMaker from "./OverlayMaker";
-import CanvasMaker from "./CanvasMaker";
-import type { CanvasElementT, TemplateParams } from "./types";
 import "../../design-system/styles.css";
 import { Button, Card, SectionHead, Badge } from "../../design-system/components/core";
 
@@ -15,41 +10,8 @@ function OverlayPreview({ url }: { url: string }) {
   );
 }
 
-type MakerState = { mode: "create" | "edit"; editFile?: string; initialParams?: TemplateParams };
-type CanvasMakerState = { mode: "create" | "edit"; editFile?: string; initialElements?: CanvasElementT[] };
-
 export default function OverlayLibraryApp() {
-  const { builtin, custom, error, copied, builtinUrl, customUrl, copyUrl, addCustom, removeCustom, sendTestAlert, refresh } = useOverlays();
-  const [maker, setMaker] = useState<MakerState | null>(null);
-  const [canvasMaker, setCanvasMaker] = useState<CanvasMakerState | null>(null);
-  const [loadError, setLoadError] = useState("");
-
-  // Loads a Maker-built overlay's own saved settings before opening it —
-  // each overlay's settings live only in its own sidecar file, so this
-  // always loads exactly the one overlay being edited/duplicated, never
-  // anything shared across overlays. `kind` (from overlay_list_custom)
-  // decides which editor's sidecar/command pair to use.
-  const openWithSavedParams = async (file: string, mode: "create" | "edit", kind: "template" | "canvas") => {
-    try {
-      if (kind === "canvas") {
-        const canvasParams = await invoke<{ elements: CanvasElementT[] } | null>("overlay_get_canvas_params", { file });
-        if (!canvasParams) return;
-        setLoadError("");
-        setCanvasMaker(
-          mode === "edit"
-            ? { mode: "edit", editFile: file, initialElements: canvasParams.elements }
-            : { mode: "create", initialElements: canvasParams.elements }
-        );
-        return;
-      }
-      const params = await invoke<TemplateParams | null>("overlay_get_template_params", { file });
-      if (!params) return;
-      setLoadError("");
-      setMaker(mode === "edit" ? { mode: "edit", editFile: file, initialParams: params } : { mode: "create", initialParams: params });
-    } catch (e) {
-      setLoadError(String(e));
-    }
-  };
+  const { builtin, custom, error, copied, builtinUrl, customUrl, copyUrl, addCustom, removeCustom, sendTestAlert } = useOverlays();
 
   return (
     <div className="h-full flex flex-col p-6 overflow-y-auto">
@@ -62,10 +24,10 @@ export default function OverlayLibraryApp() {
           />
         </div>
 
-        {(error || loadError) && (
+        {error && (
           <Card padding={12} className="mb-4">
             <p className="text-[11px]" style={{ color: "var(--bd-red-text)" }}>
-              {error || loadError}
+              {error}
             </p>
           </Card>
         )}
@@ -97,21 +59,13 @@ export default function OverlayLibraryApp() {
         <Card padding={20}>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-[13px] font-semibold text-white/80">Custom</h3>
-            <div className="flex gap-2">
-              <Button variant="cta" size="sm" onClick={() => setMaker({ mode: "create" })}>
-                🎨 Build Overlay
-              </Button>
-              <Button variant="cta" size="sm" onClick={() => setCanvasMaker({ mode: "create" })}>
-                🧩 Build Canvas
-              </Button>
-              <Button variant="ghost" size="sm" onClick={addCustom}>
-                + Add Overlay
-              </Button>
-            </div>
+            <Button variant="ghost" size="sm" onClick={addCustom}>
+              + Add Overlay
+            </Button>
           </div>
           {custom.length === 0 ? (
             <p className="text-[11px] text-white/25">
-              Add your own HTML/image/text file, or build one with the overlay maker above.
+              Add your own HTML/image/text file, or build one with the editor app (🧩).
             </p>
           ) : (
             <div className="space-y-2">
@@ -119,16 +73,8 @@ export default function OverlayLibraryApp() {
                 <div key={o.file} className="flex items-center gap-3 bg-white/[0.02] rounded-xl px-3 py-2">
                   <OverlayPreview url={customUrl(o.file)} />
                   <span className="text-[12px] text-white/70 flex-1 capitalize">{o.name}</span>
-                  {o.editable && <Badge variant="purple">{o.kind === "canvas" ? "Canvas" : "Maker"}</Badge>}
-                  {o.editable && o.kind && (
-                    <>
-                      <Button variant="ghost" size="sm" onClick={() => openWithSavedParams(o.file, "edit", o.kind!)}>
-                        ✏️ Edit
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => openWithSavedParams(o.file, "create", o.kind!)}>
-                        ⎘ Duplicate
-                      </Button>
-                    </>
+                  {o.editable && (
+                    <Badge variant="purple">{o.kind === "canvas" ? "Canvas" : "Widget"} — edit in the editor app</Badge>
                   )}
                   <Button variant={copied === o.file ? "success" : "primary"} size="sm" onClick={() => copyUrl(customUrl(o.file), o.file)}>
                     {copied === o.file ? "Copied ✓" : "Copy URL"}
@@ -142,32 +88,6 @@ export default function OverlayLibraryApp() {
           )}
         </Card>
       </div>
-
-      {maker && (
-        <OverlayMaker
-          mode={maker.mode}
-          editFile={maker.editFile}
-          initialParams={maker.initialParams}
-          onClose={() => setMaker(null)}
-          onSaved={() => {
-            setMaker(null);
-            refresh();
-          }}
-        />
-      )}
-
-      {canvasMaker && (
-        <CanvasMaker
-          mode={canvasMaker.mode}
-          editFile={canvasMaker.editFile}
-          initialElements={canvasMaker.initialElements}
-          onClose={() => setCanvasMaker(null)}
-          onSaved={() => {
-            setCanvasMaker(null);
-            refresh();
-          }}
-        />
-      )}
     </div>
   );
 }

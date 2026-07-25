@@ -1,0 +1,141 @@
+// Overlay Editor — where overlays actually get built and edited (Overlay
+// Library, a separate app, is purely for browsing/copying URLs of every
+// overlay, built-in or custom, editable or not). Split out once this grew
+// past "a couple of buttons in a list screen" into a real direct-
+// manipulation editor (drag/resize/snap canvas, per-widget field editor).
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useOverlays } from "../overlay-library/useOverlays";
+import OverlayMaker from "./OverlayMaker";
+import CanvasMaker from "./CanvasMaker";
+import type { CanvasElementT, TemplateParams } from "../overlay-library/types";
+import "../../design-system/styles.css";
+import { Button, Card, SectionHead, Badge } from "../../design-system/components/core";
+
+type MakerState = { mode: "create" | "edit"; editFile?: string; initialParams?: TemplateParams };
+type CanvasMakerState = { mode: "create" | "edit"; editFile?: string; initialElements?: CanvasElementT[] };
+
+export default function OverlayEditorApp() {
+  const { custom, error, copied, customUrl, copyUrl, removeCustom, refresh } = useOverlays();
+  const [maker, setMaker] = useState<MakerState | null>(null);
+  const [canvasMaker, setCanvasMaker] = useState<CanvasMakerState | null>(null);
+  const [loadError, setLoadError] = useState("");
+
+  const editable = custom.filter((o) => o.editable && o.kind);
+
+  // Loads a Maker-built overlay's own saved settings before opening it —
+  // each overlay's settings live only in its own sidecar file, so this
+  // always loads exactly the one overlay being edited/duplicated, never
+  // anything shared across overlays. `kind` decides which editor/command
+  // pair (single-widget vs multi-widget canvas) to use.
+  const openWithSavedParams = async (file: string, mode: "create" | "edit", kind: "template" | "canvas") => {
+    try {
+      if (kind === "canvas") {
+        const canvasParams = await invoke<{ elements: CanvasElementT[] } | null>("overlay_get_canvas_params", { file });
+        if (!canvasParams) return;
+        setLoadError("");
+        setCanvasMaker(
+          mode === "edit"
+            ? { mode: "edit", editFile: file, initialElements: canvasParams.elements }
+            : { mode: "create", initialElements: canvasParams.elements }
+        );
+        return;
+      }
+      const params = await invoke<TemplateParams | null>("overlay_get_template_params", { file });
+      if (!params) return;
+      setLoadError("");
+      setMaker(mode === "edit" ? { mode: "edit", editFile: file, initialParams: params } : { mode: "create", initialParams: params });
+    } catch (e) {
+      setLoadError(String(e));
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col p-6 overflow-y-auto">
+      <div className="max-w-2xl mx-auto w-full">
+        <div className="mb-6">
+          <SectionHead
+            icon="🧩"
+            title="Overlay Editor"
+            desc="Build and edit overlays — single widgets or multi-widget canvases"
+            right={
+              <div className="flex gap-2">
+                <Button variant="cta" size="sm" onClick={() => setMaker({ mode: "create" })}>
+                  🎨 New Widget
+                </Button>
+                <Button variant="cta" size="sm" onClick={() => setCanvasMaker({ mode: "create" })}>
+                  🧩 New Canvas
+                </Button>
+              </div>
+            }
+          />
+        </div>
+
+        {(error || loadError) && (
+          <Card padding={12} className="mb-4">
+            <p className="text-[11px]" style={{ color: "var(--bd-red-text)" }}>
+              {error || loadError}
+            </p>
+          </Card>
+        )}
+
+        <Card padding={20}>
+          <h3 className="text-[13px] font-semibold text-white/80 mb-3">Your Overlays</h3>
+          {editable.length === 0 ? (
+            <p className="text-[11px] text-white/25">
+              Nothing built yet — start with "New Widget" for a single element, or "New Canvas" for several
+              placed together. Plain uploaded files (not built here) show up in the Overlay Library app instead.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {editable.map((o) => (
+                <div key={o.file} className="flex items-center gap-3 bg-white/[0.02] rounded-xl px-3 py-2">
+                  <span className="text-[12px] text-white/70 flex-1 capitalize">{o.name}</span>
+                  <Badge variant="purple">{o.kind === "canvas" ? "Canvas" : "Widget"}</Badge>
+                  <Button variant="ghost" size="sm" onClick={() => openWithSavedParams(o.file, "edit", o.kind!)}>
+                    ✏️ Edit
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => openWithSavedParams(o.file, "create", o.kind!)}>
+                    ⎘ Duplicate
+                  </Button>
+                  <Button variant={copied === o.file ? "success" : "primary"} size="sm" onClick={() => copyUrl(customUrl(o.file), o.file)}>
+                    {copied === o.file ? "Copied ✓" : "Copy URL"}
+                  </Button>
+                  <button onClick={() => removeCustom(o.file)} className="text-[11px] text-white/25 hover:text-red-400 px-2">
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {maker && (
+        <OverlayMaker
+          mode={maker.mode}
+          editFile={maker.editFile}
+          initialParams={maker.initialParams}
+          onClose={() => setMaker(null)}
+          onSaved={() => {
+            setMaker(null);
+            refresh();
+          }}
+        />
+      )}
+
+      {canvasMaker && (
+        <CanvasMaker
+          mode={canvasMaker.mode}
+          editFile={canvasMaker.editFile}
+          initialElements={canvasMaker.initialElements}
+          onClose={() => setCanvasMaker(null)}
+          onSaved={() => {
+            setCanvasMaker(null);
+            refresh();
+          }}
+        />
+      )}
+    </div>
+  );
+}
