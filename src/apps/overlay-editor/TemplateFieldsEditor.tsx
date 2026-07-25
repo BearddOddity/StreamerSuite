@@ -3,10 +3,71 @@
 // Shared by OverlayMaker (a whole overlay = one of these) and CanvasMaker
 // (a whole overlay = several of these, each independently placed), so a
 // widget's own settings never drift between the two editors.
+import { useState } from "react";
 import { DEFAULT_TEMPLATE_PARAMS, TEMPLATES, type BoundField, type TemplateParams } from "../overlay-library/types";
 import { Select } from "../../design-system/components/forms";
 
 const FONT_PRESETS = ["", "Bebas Neue", "Anton", "Oswald", "Bungee", "Press Start 2P", "Poppins"];
+
+const RECENT_COLORS_KEY = "bd-overlay-recent-colors";
+
+function getRecentColors(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_COLORS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((c) => typeof c === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushRecentColor(color: string) {
+  try {
+    const next = [color, ...getRecentColors().filter((c) => c !== color)].slice(0, 8);
+    localStorage.setItem(RECENT_COLORS_KEY, JSON.stringify(next));
+  } catch {
+    // localStorage unavailable (private browsing, quota) — recent colors just won't persist
+  }
+}
+
+/** A color picker plus swatches for the last few colors used across any
+ * overlay — makes it fast to keep several widgets on a matching accent
+ * without re-typing (or re-eyedropping) the same hex code each time. */
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const [recent, setRecent] = useState<string[]>(() => getRecentColors());
+
+  const commit = (v: string) => {
+    onChange(v);
+    pushRecentColor(v);
+    setRecent(getRecentColors());
+  };
+
+  return (
+    <div>
+      <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">{label}</label>
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => commit(e.target.value)}
+        className="w-full h-9 rounded-lg bg-transparent border border-white/[0.06]"
+      />
+      {recent.length > 0 && (
+        <div className="flex gap-1 mt-1">
+          {recent.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => commit(c)}
+              title={c}
+              className="w-4 h-4 rounded border border-white/20 shrink-0"
+              style={{ background: c }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // The design system's Select defaults to a 16px web-form trigger font; this app's
 // chrome runs 11-13px everywhere else (see design-system/README.md), so every
@@ -168,24 +229,8 @@ export default function TemplateFieldsEditor({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">Text Color</label>
-          <input
-            type="color"
-            value={params.textColor}
-            onChange={(e) => set("textColor", e.target.value)}
-            className="w-full h-9 rounded-lg bg-transparent border border-white/[0.06]"
-          />
-        </div>
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">Accent Color</label>
-          <input
-            type="color"
-            value={params.accentColor}
-            onChange={(e) => set("accentColor", e.target.value)}
-            className="w-full h-9 rounded-lg bg-transparent border border-white/[0.06]"
-          />
-        </div>
+        <ColorField label="Text Color" value={params.textColor} onChange={(v) => set("textColor", v)} />
+        <ColorField label="Accent Color" value={params.accentColor} onChange={(v) => set("accentColor", v)} />
       </div>
 
       <div>

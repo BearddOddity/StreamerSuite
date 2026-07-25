@@ -92,11 +92,13 @@ export default function CanvasMaker({
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; elId: string } | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const pendingBeforeRef = useRef<CanvasElementT[] | null>(null);
   const historyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const liveSources = useLiveSources();
   const selected = elements.find((e) => e.id === selectedId) ?? null;
@@ -224,6 +226,17 @@ export default function CanvasMaker({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [past, future, elements, selected]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("contextmenu", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+    };
+  }, [contextMenu]);
 
   // Mouse-driven drag-to-move / handle-drag-to-resize with Canva-style
   // snapping to the canvas center/edges and other elements' edges — the
@@ -366,6 +379,84 @@ export default function CanvasMaker({
     }
   };
 
+  type AlignTo = "left" | "centerH" | "right" | "top" | "centerV" | "bottom";
+
+  const alignSelected = (align: AlignTo) => {
+    if (!selected) return;
+    recordBeforeChange(elements);
+    const patch: Partial<CanvasElementT> =
+      align === "left"
+        ? { xPct: 0 }
+        : align === "centerH"
+          ? { xPct: Math.max(0, (100 - selected.widthPct) / 2) }
+          : align === "right"
+            ? { xPct: Math.max(0, 100 - selected.widthPct) }
+            : align === "top"
+              ? { yPct: 0 }
+              : align === "centerV"
+                ? { yPct: Math.max(0, (100 - selected.heightPct) / 2) }
+                : { yPct: Math.max(0, 100 - selected.heightPct) };
+    setElements((prev) => prev.map((e) => (e.id === selected.id ? { ...e, ...patch } : e)));
+  };
+
+  const bringToFront = (id: string) => {
+    recordBeforeChange(elements);
+    const maxZ = elements.reduce((m, e) => Math.max(m, e.zIndex), 0);
+    setElements((prev) => prev.map((e) => (e.id === id ? { ...e, zIndex: maxZ + 1 } : e)));
+  };
+
+  const sendToBack = (id: string) => {
+    recordBeforeChange(elements);
+    const minZ = elements.reduce((m, e) => Math.min(m, e.zIndex), 0);
+    setElements((prev) => prev.map((e) => (e.id === id ? { ...e, zIndex: minZ - 1 } : e)));
+  };
+
+  const exportCanvas = () => {
+    if (elements.length === 0) return;
+    const blob = new Blob([JSON.stringify({ elements }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "overlay-canvas.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /** Re-IDs every imported element (so it can never collide with an id
+   * already in use) and drops anything that isn't at least shaped like a
+   * real element — a malformed or hand-edited file shouldn't be able to
+   * crash the canvas, just silently lose the elements that don't parse. */
+  const importCanvas = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        const incoming: unknown[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.elements) ? parsed.elements : [];
+        const cleaned: CanvasElementT[] = incoming
+          .filter(
+            (e): e is CanvasElementT =>
+              !!e &&
+              typeof e === "object" &&
+              typeof (e as CanvasElementT).params?.template === "string" &&
+              typeof (e as CanvasElementT).xPct === "number"
+          )
+          .slice(0, 20)
+          .map((e, i) => ({ ...e, id: `import-${Date.now()}-${i}` }));
+        if (cleaned.length === 0) {
+          setError("That file didn't contain any recognizable overlay elements");
+          return;
+        }
+        recordBeforeChange(elements);
+        setElements(cleaned);
+        setSelectedId(cleaned[0]!.id);
+        setError("");
+      } catch (e) {
+        setError(`Couldn't read that file as a canvas export: ${e}`);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   /** Drag-to-reorder in the Layers panel — reassigns every element's
    * z-index from the new top-to-bottom order (top of the list = highest
    * z-index = front-most), same visual convention as Canva/Photoshop
@@ -481,6 +572,26 @@ export default function CanvasMaker({
                 })}
             </div>
 
+            <div className="flex gap-1.5">
+              <Button variant="ghost" size="sm" onClick={exportCanvas} disabled={elements.length === 0} className="flex-1">
+                ⬇ Export
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => importInputRef.current?.click()} className="flex-1">
+                ⬆ Import
+              </Button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) importCanvas(file);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+
             {showTemplatePicker ? (
               <div className="space-y-1 pt-1">
                 {TEMPLATES.map((t) => (
@@ -536,13 +647,40 @@ export default function CanvasMaker({
           <div>
             {selected ? (
               <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1 block">Align to Canvas</label>
+                  <div className="flex gap-1">
+                    {([
+                      ["left", "⇤"],
+                      ["centerH", "↔"],
+                      ["right", "⇥"],
+                      ["top", "⇧"],
+                      ["centerV", "↕"],
+                      ["bottom", "⇩"],
+                    ] as [AlignTo, string][]).map(([align, icon]) => (
+                      <button
+                        key={align}
+                        onClick={() => alignSelected(align)}
+                        className="flex-1 py-1.5 rounded-lg text-[12px] bg-white/[0.03] border border-white/[0.06] text-white/60 hover:border-white/20 hover:text-white/90"
+                      >
+                        {icon}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <NumberField label="X (%)" value={selected.xPct} min={0} max={100} onChange={(v) => setSelectedPlacement({ xPct: v })} />
                   <NumberField label="Y (%)" value={selected.yPct} min={0} max={100} onChange={(v) => setSelectedPlacement({ yPct: v })} />
                   <NumberField label="Width (%)" value={selected.widthPct} min={2} max={100} onChange={(v) => setSelectedPlacement({ widthPct: v })} />
                   <NumberField label="Height (%)" value={selected.heightPct} min={2} max={100} onChange={(v) => setSelectedPlacement({ heightPct: v })} />
-                  <div className="col-span-2">
+                  <div className="col-span-2 grid grid-cols-[1fr_auto_auto] gap-2 items-end">
                     <NumberField label="Layer (z-order, higher = on top)" value={selected.zIndex} min={0} max={99} onChange={(v) => setSelectedPlacement({ zIndex: v })} />
+                    <Button variant="ghost" size="sm" onClick={() => bringToFront(selected.id)}>
+                      Front
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => sendToBack(selected.id)}>
+                      Back
+                    </Button>
                   </div>
                 </div>
                 <TemplateFieldsEditor
@@ -584,6 +722,12 @@ export default function CanvasMaker({
                   <div
                     key={el.id}
                     onMouseDown={(e) => startDrag(e, el, "move")}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSelectedId(el.id);
+                      setContextMenu({ x: e.clientX, y: e.clientY, elId: el.id });
+                    }}
                     className={`absolute cursor-move border-2 rounded ${
                       isSelected ? "border-purple-400" : "border-white/15 hover:border-white/35"
                     }`}
@@ -621,10 +765,55 @@ export default function CanvasMaker({
             </p>
             <p className="text-[10px] text-white/20">
               With an element selected: arrow keys nudge (Shift for bigger steps), Ctrl+D duplicates, Delete
-              removes. Ctrl+Z / Ctrl+Shift+Z undo/redo anywhere.
+              removes, right-click for more. Ctrl+Z / Ctrl+Shift+Z undo/redo anywhere.
             </p>
           </div>
         </div>
+
+        {contextMenu && (
+          <div
+            className="fixed z-[60] bg-black/95 border border-white/10 rounded-lg shadow-xl py-1 text-[11px] min-w-[150px]"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                duplicateSelected();
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-3 py-1.5 text-white/70 hover:bg-white/10"
+            >
+              ⎘ Duplicate
+            </button>
+            <button
+              onClick={() => {
+                bringToFront(contextMenu.elId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-3 py-1.5 text-white/70 hover:bg-white/10"
+            >
+              ⬆ Bring to Front
+            </button>
+            <button
+              onClick={() => {
+                sendToBack(contextMenu.elId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-3 py-1.5 text-white/70 hover:bg-white/10"
+            >
+              ⬇ Send to Back
+            </button>
+            <button
+              onClick={() => {
+                removeElement(contextMenu.elId);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-3 py-1.5 text-red-300 hover:bg-red-500/20"
+            >
+              ✕ Delete
+            </button>
+          </div>
+        )}
 
         <div className="flex justify-end gap-2 mt-6">
           <Button variant="ghost" onClick={onClose}>
