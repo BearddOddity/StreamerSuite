@@ -2645,6 +2645,7 @@ pub fn run() {
             overlay_manager::overlay_get_template_params,
             overlay_manager::overlay_update_template,
             overlay_manager::overlay_preview_canvas,
+            overlay_manager::overlay_generate_canvas_from_prompt,
             overlay_manager::overlay_create_from_canvas,
             overlay_manager::overlay_get_canvas_params,
             overlay_manager::overlay_update_canvas,

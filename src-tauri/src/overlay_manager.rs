@@ -803,6 +803,160 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
     ))
 }
 
+// --- "Design with AI": generate a whole Canvas layout from a text prompt ---
+// Same Hugging Face Inference Providers call as AI Co-Host (see cohost.rs) —
+// no local runtime, just the token already stored in Connections & Keys.
+
+const HF_ROUTER_URL: &str = "https://router.huggingface.co/v1/chat/completions";
+
+const VALID_TEMPLATES: &[&str] = &[
+    "lower-third", "corner-badge", "ticker", "text-box", "goal-bar", "cam-frame", "alert-banner", "countdown",
+];
+
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AiElementSpec {
+    #[serde(default)]
+    template: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    subtitle: String,
+    #[serde(default)]
+    text_color: String,
+    #[serde(default)]
+    accent_color: String,
+    #[serde(default)]
+    x_pct: f32,
+    #[serde(default)]
+    y_pct: f32,
+    #[serde(default)]
+    width_pct: f32,
+    #[serde(default)]
+    height_pct: f32,
+}
+
+/// Models sometimes wrap JSON in a ```json fenced block despite being told
+/// not to — stripped defensively rather than failing the whole generation.
+fn strip_json_fence(s: &str) -> &str {
+    s.trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim()
+}
+
+/// Turns model-provided (and therefore untrusted-for-bounds) specs into
+/// real `CanvasElement`s — unknown template ids are dropped rather than
+/// rendered, every numeric field is clamped to a sane range regardless of
+/// what the model said, and text is length-capped. Everything else
+/// (opacity, font, animation, effects) uses the same defaults a
+/// human-built element would start from.
+fn build_canvas_from_specs(specs: Vec<AiElementSpec>) -> Vec<CanvasElement> {
+    specs
+        .into_iter()
+        .take(6)
+        .enumerate()
+        .filter(|(_, spec)| VALID_TEMPLATES.contains(&spec.template.as_str()))
+        .map(|(i, spec)| CanvasElement {
+            id: format!("ai-{i}"),
+            x_pct: spec.x_pct.clamp(0.0, 90.0),
+            y_pct: spec.y_pct.clamp(0.0, 90.0),
+            width_pct: if spec.width_pct <= 0.0 { 30.0 } else { spec.width_pct.clamp(10.0, 60.0) },
+            height_pct: if spec.height_pct <= 0.0 { 20.0 } else { spec.height_pct.clamp(10.0, 50.0) },
+            z_index: i as i32,
+            params: TemplateParams {
+                template: spec.template,
+                title: BoundField { text: spec.title.chars().take(80).collect(), source: String::new() },
+                subtitle: BoundField { text: spec.subtitle.chars().take(80).collect(), source: String::new() },
+                text_color: safe_color(&spec.text_color, &default_text_color()),
+                accent_color: safe_color(&spec.accent_color, &default_accent_color()),
+                bg_opacity: default_bg_opacity(),
+                position: String::new(),
+                logo_data_uri: None,
+                speed_seconds: None,
+                font_family: String::new(),
+                border_radius: default_border_radius(),
+                animations_enabled: true,
+                animation_style: default_animation_style(),
+                goal: None,
+                text_shadow: false,
+                text_stroke: false,
+                countdown_target: String::new(),
+            },
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub(crate) async fn overlay_generate_canvas_from_prompt(prompt: String, model: String) -> Result<CanvasParams, String> {
+    if prompt.trim().is_empty() {
+        return Err("Describe what you want first".into());
+    }
+    let model = if model.trim().is_empty() { "meta-llama/Llama-3.1-8B-Instruct".to_string() } else { model };
+
+    let base = crate::app_base_dir()?;
+    let config = crate::auth::load_config_at(&base)?;
+    let token = config.api_keys.huggingface.clone();
+    if token.is_empty() {
+        return Err("Connect a Hugging Face API token in Settings → Connections & Keys first".into());
+    }
+
+    let template_list = VALID_TEMPLATES.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ");
+    let system_prompt = format!(
+        "You design browser-source overlay layouts for a livestream. Output ONLY a JSON array \
+         (no prose, no markdown fences), 2 to 4 items, each shaped exactly like: {{\"template\": \
+         one of [{template_list}], \"title\": \"short text\", \"subtitle\": \"short text or empty\", \
+         \"textColor\": \"#rrggbb\", \"accentColor\": \"#rrggbb\", \"xPct\": 0-90, \"yPct\": 0-90, \
+         \"widthPct\": 15-45, \"heightPct\": 12-35}}. Keep elements from overlapping too much and \
+         pick colors that match the requested mood."
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(45))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            { "role": "system", "content": system_prompt },
+            { "role": "user", "content": prompt },
+        ],
+        "max_tokens": 800,
+    });
+
+    let resp = client
+        .post(HF_ROUTER_URL)
+        .bearer_auth(&token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("Hugging Face API error {status}: {text}"));
+    }
+
+    let payload: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let content = payload["choices"]
+        .get(0)
+        .and_then(|c| c["message"]["content"].as_str())
+        .ok_or("Hugging Face returned an unexpected response shape")?;
+
+    let specs: Vec<AiElementSpec> = serde_json::from_str(strip_json_fence(content))
+        .map_err(|e| format!("Couldn't parse the generated layout — try again or rephrase ({e})"))?;
+
+    let elements = build_canvas_from_specs(specs);
+    if elements.is_empty() {
+        return Err("The model didn't return any usable elements — try again or rephrase".into());
+    }
+
+    Ok(CanvasParams { elements })
+}
+
 #[tauri::command]
 pub(crate) fn overlay_preview_canvas(elements: Vec<CanvasElement>) -> Result<String, String> {
     render_canvas(&elements)
@@ -1002,6 +1156,49 @@ mod tests {
             z_index: z,
             params: params(template),
         }
+    }
+
+    #[test]
+    fn strip_json_fence_removes_markdown_code_fences() {
+        assert_eq!(strip_json_fence("```json\n[{\"a\":1}]\n```"), "[{\"a\":1}]");
+        assert_eq!(strip_json_fence("[{\"a\":1}]"), "[{\"a\":1}]");
+    }
+
+    #[test]
+    fn build_canvas_from_specs_drops_unknown_templates_and_clamps_bounds() {
+        let specs = vec![
+            AiElementSpec {
+                template: "lower-third".to_string(),
+                title: "Now Playing".to_string(),
+                subtitle: String::new(),
+                text_color: "#ffffff".to_string(),
+                accent_color: "not-a-color".to_string(),
+                x_pct: 500.0,
+                y_pct: -20.0,
+                width_pct: 0.0,
+                height_pct: 999.0,
+            },
+            AiElementSpec {
+                template: "not-a-real-template".to_string(),
+                ..Default::default()
+            },
+        ];
+        let elements = build_canvas_from_specs(specs);
+        assert_eq!(elements.len(), 1, "unknown template should be dropped");
+        let el = &elements[0];
+        assert_eq!(el.x_pct, 90.0);
+        assert_eq!(el.y_pct, 0.0);
+        assert_eq!(el.width_pct, 30.0, "non-positive width falls back to a sane default");
+        assert_eq!(el.height_pct, 50.0);
+        assert_eq!(el.params.accent_color, default_accent_color(), "invalid color falls back to default");
+    }
+
+    #[test]
+    fn build_canvas_from_specs_caps_at_six_elements() {
+        let specs: Vec<AiElementSpec> = (0..10)
+            .map(|_| AiElementSpec { template: "text-box".to_string(), ..Default::default() })
+            .collect();
+        assert_eq!(build_canvas_from_specs(specs).len(), 6);
     }
 
     #[test]

@@ -85,12 +85,145 @@ export default function CanvasMaker({
   const [saving, setSaving] = useState(false);
   const [guideX, setGuideX] = useState<number | null>(null);
   const [guideY, setGuideY] = useState<number | null>(null);
+  const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
+  const [past, setPast] = useState<CanvasElementT[][]>([]);
+  const [future, setFuture] = useState<CanvasElementT[][]>([]);
+  const [showAiPanel, setShowAiPanel] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const pendingBeforeRef = useRef<CanvasElementT[] | null>(null);
+  const historyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const liveSources = useLiveSources();
   const selected = elements.find((e) => e.id === selectedId) ?? null;
+
+  // Undo/redo — every mutation (add/remove/drag/resize/field edit/reorder)
+  // records the state right before it changed, coalesced into one history
+  // step per burst (a drag's many mousemoves, or a run of keystrokes) via a
+  // short debounce rather than one step per individual event.
+  const recordBeforeChange = (before: CanvasElementT[]) => {
+    if (pendingBeforeRef.current === null) pendingBeforeRef.current = before;
+    if (historyDebounceRef.current) clearTimeout(historyDebounceRef.current);
+    historyDebounceRef.current = setTimeout(() => {
+      if (pendingBeforeRef.current) {
+        setPast((p) => [...p.slice(-49), pendingBeforeRef.current!]);
+        setFuture([]);
+      }
+      pendingBeforeRef.current = null;
+    }, 400);
+  };
+
+  /** Commits any still-debounced change into `past` immediately, without
+   * waiting out the rest of the debounce window. */
+  const flushPendingToPast = () => {
+    if (historyDebounceRef.current) {
+      clearTimeout(historyDebounceRef.current);
+      historyDebounceRef.current = null;
+    }
+    if (pendingBeforeRef.current !== null) {
+      setPast((p) => [...p.slice(-49), pendingBeforeRef.current!]);
+      setFuture([]);
+      pendingBeforeRef.current = null;
+    }
+  };
+
+  const undo = () => {
+    // A change still sitting in the debounce window (e.g. Ctrl+D followed
+    // immediately by Ctrl+Z) hasn't reached `past` yet — undo straight to
+    // it instead of reading `past` and finding nothing there.
+    if (pendingBeforeRef.current !== null) {
+      if (historyDebounceRef.current) clearTimeout(historyDebounceRef.current);
+      historyDebounceRef.current = null;
+      const target = pendingBeforeRef.current;
+      pendingBeforeRef.current = null;
+      setFuture((f) => [elements, ...f].slice(0, 50));
+      setElements(target);
+      setSelectedId(null);
+      return;
+    }
+    if (past.length === 0) return;
+    const prevState = past[past.length - 1]!;
+    setPast((p) => p.slice(0, -1));
+    setFuture((f) => [elements, ...f].slice(0, 50));
+    setElements(prevState);
+    setSelectedId(null);
+  };
+
+  const redo = () => {
+    flushPendingToPast();
+    if (future.length === 0) return;
+    const nextState = future[0]!;
+    setFuture((f) => f.slice(1));
+    setPast((p) => [...p, elements].slice(-50));
+    setElements(nextState);
+    setSelectedId(null);
+  };
+
+  const duplicateSelected = () => {
+    if (!selected) return;
+    recordBeforeChange(elements);
+    const copy: CanvasElementT = {
+      ...selected,
+      id: `el-${Date.now()}`,
+      params: { ...selected.params },
+      xPct: Math.min(96, selected.xPct + 3),
+      yPct: Math.min(96, selected.yPct + 3),
+      zIndex: elements.length,
+    };
+    setElements((prev) => [...prev, copy]);
+    setSelectedId(copy.id);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (mod && ((e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y")) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        duplicateSelected();
+        return;
+      }
+      if (!selected) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        removeElement(selected.id);
+        return;
+      }
+      // Arrow-key nudge — 1% per press, 5% with Shift, matching the same
+      // percent-of-canvas units the mouse drag and number inputs use.
+      const step = e.shiftKey ? 5 : 1;
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        recordBeforeChange(elements);
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        setElements((prev) =>
+          prev.map((el) =>
+            el.id === selected.id
+              ? { ...el, xPct: Math.min(98, Math.max(0, el.xPct + dx)), yPct: Math.min(98, Math.max(0, el.yPct + dy)) }
+              : el
+          )
+        );
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [past, future, elements, selected]);
 
   // Mouse-driven drag-to-move / handle-drag-to-resize with Canva-style
   // snapping to the canvas center/edges and other elements' edges — the
@@ -104,6 +237,7 @@ export default function CanvasMaker({
       setElements((prev) => {
         const el = prev.find((e2) => e2.id === d.id);
         if (!el) return prev;
+        recordBeforeChange(prev);
         const { xs, ys } = snapTargets(prev, d.id);
         let patch: Partial<CanvasElementT>;
         let hitX: number | null = null;
@@ -179,6 +313,7 @@ export default function CanvasMaker({
   }, [elements]);
 
   const addElement = (templateId: (typeof TEMPLATES)[number]["id"]) => {
+    recordBeforeChange(elements);
     const el = newCanvasElement(templateId, elements.length);
     setElements((prev) => [...prev, el]);
     setSelectedId(el.id);
@@ -186,18 +321,69 @@ export default function CanvasMaker({
   };
 
   const removeElement = (id: string) => {
+    recordBeforeChange(elements);
     setElements((prev) => prev.filter((e) => e.id !== id));
     if (selectedId === id) setSelectedId(null);
   };
 
   const setSelectedParam = <K extends keyof TemplateParams>(key: K, value: TemplateParams[K]) => {
+    recordBeforeChange(elements);
     setElements((prev) =>
       prev.map((e) => (e.id === selectedId ? { ...e, params: { ...e.params, [key]: value } } : e))
     );
   };
 
   const setSelectedPlacement = (patch: Partial<Pick<CanvasElementT, "xPct" | "yPct" | "widthPct" | "heightPct" | "zIndex">>) => {
+    recordBeforeChange(elements);
     setElements((prev) => prev.map((e) => (e.id === selectedId ? { ...e, ...patch } : e)));
+  };
+
+  /** Generates a whole layout from a text description via Hugging Face
+   * (same real-call pattern as AI Co-Host, not a mockup) and replaces the
+   * canvas with it — undoable like any other change, so a bad result is
+   * one Ctrl+Z away from gone. Adds to an empty canvas or on top of
+   * existing elements depending on what's already there isn't attempted
+   * here; it always replaces, since merging AI output with hand-placed
+   * elements risks landing them on top of each other. */
+  const generateWithAi = async () => {
+    if (!aiPrompt.trim() || aiBusy) return;
+    setAiBusy(true);
+    setAiError("");
+    try {
+      const result = await invoke<{ elements: CanvasElementT[] }>("overlay_generate_canvas_from_prompt", {
+        prompt: aiPrompt.trim(),
+        model: "",
+      });
+      recordBeforeChange(elements);
+      setElements(result.elements);
+      setSelectedId(result.elements[0]?.id ?? null);
+      setShowAiPanel(false);
+      setAiPrompt("");
+    } catch (e) {
+      setAiError(String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  /** Drag-to-reorder in the Layers panel — reassigns every element's
+   * z-index from the new top-to-bottom order (top of the list = highest
+   * z-index = front-most), same visual convention as Canva/Photoshop
+   * layers. */
+  const reorderLayers = (draggedId: string | null, targetId: string) => {
+    if (!draggedId || draggedId === targetId) return;
+    const sorted = [...elements].sort((a, b) => b.zIndex - a.zIndex);
+    const fromIdx = sorted.findIndex((e) => e.id === draggedId);
+    const toIdx = sorted.findIndex((e) => e.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const reordered = [...sorted];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved!);
+    const total = reordered.length;
+    const zByI = new Map(reordered.map((el, i) => [el.id, total - 1 - i]));
+    recordBeforeChange(elements);
+    setElements((prev) => prev.map((e) => ({ ...e, zIndex: zByI.get(e.id) ?? e.zIndex })));
+    setDraggingLayerId(null);
   };
 
   const save = async () => {
@@ -229,9 +415,17 @@ export default function CanvasMaker({
             title={mode === "edit" ? "Edit Canvas Overlay" : "Build a Canvas Overlay"}
             desc="Multiple widgets, placed and stacked freely, in one overlay"
             right={
-              <Button variant="ghost" size="sm" onClick={onClose}>
-                ✕
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={undo} disabled={past.length === 0}>
+                  ↶ Undo
+                </Button>
+                <Button variant="ghost" size="sm" onClick={redo} disabled={future.length === 0}>
+                  ↷ Redo
+                </Button>
+                <Button variant="ghost" size="sm" onClick={onClose}>
+                  ✕
+                </Button>
+              </div>
             }
           />
         </div>
@@ -245,38 +439,46 @@ export default function CanvasMaker({
         )}
 
         <div className="grid grid-cols-[180px_320px_1fr] gap-5">
-          {/* Element list */}
+          {/* Layers — top of the list is front-most (highest z-index), same
+              convention as Canva/Photoshop. Drag a row to restack it. */}
           <div className="space-y-2">
-            <label className="text-[10px] text-white/40 uppercase tracking-wide block">Elements</label>
-            <div className="space-y-1.5">
-              {elements.map((el) => {
-                const t = TEMPLATES.find((t) => t.id === el.params.template)!;
-                return (
-                  <button
-                    key={el.id}
-                    onClick={() => setSelectedId(el.id)}
-                    className={`w-full text-left flex items-center gap-1.5 px-2.5 py-2 rounded-lg border transition-all ${
-                      selectedId === el.id
-                        ? "bg-purple-500/15 border-purple-500/40"
-                        : "bg-white/[0.02] border-white/[0.06] hover:border-white/15"
-                    }`}
-                  >
-                    <span className="text-[13px]">{t.icon}</span>
-                    <span className="text-[11px] text-white/70 flex-1 truncate">
-                      {el.params.title.text || t.label}
-                    </span>
-                    <span
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        removeElement(el.id);
-                      }}
-                      className="text-[10px] text-white/20 hover:text-red-400 px-1"
+            <label className="text-[10px] text-white/40 uppercase tracking-wide block">Layers</label>
+            <div className="space-y-1">
+              {[...elements]
+                .sort((a, b) => b.zIndex - a.zIndex)
+                .map((el) => {
+                  const t = TEMPLATES.find((t) => t.id === el.params.template)!;
+                  return (
+                    <div
+                      key={el.id}
+                      draggable
+                      onDragStart={() => setDraggingLayerId(el.id)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => reorderLayers(draggingLayerId, el.id)}
+                      onClick={() => setSelectedId(el.id)}
+                      className={`w-full text-left flex items-center gap-1.5 px-2.5 py-2 rounded-lg border cursor-grab active:cursor-grabbing transition-all ${
+                        selectedId === el.id
+                          ? "bg-purple-500/15 border-purple-500/40"
+                          : "bg-white/[0.02] border-white/[0.06] hover:border-white/15"
+                      }`}
                     >
-                      ✕
-                    </span>
-                  </button>
-                );
-              })}
+                      <span className="text-white/15 text-[10px] leading-none">⋮⋮</span>
+                      <span className="text-[13px]">{t.icon}</span>
+                      <span className="text-[11px] text-white/70 flex-1 truncate">
+                        {el.params.title.text || t.label}
+                      </span>
+                      <span
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          removeElement(el.id);
+                        }}
+                        className="text-[10px] text-white/20 hover:text-red-400 px-1"
+                      >
+                        ✕
+                      </span>
+                    </div>
+                  );
+                })}
             </div>
 
             {showTemplatePicker ? (
@@ -297,6 +499,35 @@ export default function CanvasMaker({
             ) : (
               <Button variant="ghost" size="sm" onClick={() => setShowTemplatePicker(true)} className="w-full">
                 + Add Element
+              </Button>
+            )}
+
+            {showAiPanel ? (
+              <div className="space-y-1.5 pt-2 border-t border-white/[0.06]">
+                <textarea
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  placeholder="e.g. cozy pastel countdown with a webcam frame and follower goal"
+                  rows={3}
+                  className="w-full input-glass text-[11px] resize-none"
+                />
+                {aiError && <p className="text-[10px]" style={{ color: "var(--bd-red-text)" }}>{aiError}</p>}
+                <div className="flex gap-1.5">
+                  <Button variant="cta" size="sm" onClick={generateWithAi} disabled={aiBusy || !aiPrompt.trim()} className="flex-1">
+                    {aiBusy ? "Designing…" : "Generate"}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setShowAiPanel(false)}>
+                    Cancel
+                  </Button>
+                </div>
+                <p className="text-[9px] text-white/20">
+                  Replaces the whole canvas — undoable (Ctrl+Z) if you don't like it. Uses your Hugging Face
+                  connection from Connections & Keys.
+                </p>
+              </div>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={() => setShowAiPanel(true)} className="w-full">
+                ✨ Design with AI
               </Button>
             )}
           </div>
@@ -387,6 +618,10 @@ export default function CanvasMaker({
             <p className="text-[10px] text-white/25">
               Drag an element to move it, or its corner handle to resize — snaps to the canvas center/edges and
               other elements. Position/size are percent-based, so this holds up at any OBS Browser Source resolution.
+            </p>
+            <p className="text-[10px] text-white/20">
+              With an element selected: arrow keys nudge (Shift for bigger steps), Ctrl+D duplicates, Delete
+              removes. Ctrl+Z / Ctrl+Shift+Z undo/redo anywhere.
             </p>
           </div>
         </div>
