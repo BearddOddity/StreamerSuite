@@ -101,11 +101,17 @@ MANIFEST: dict[str, list[tuple[str, str]]] = {
     ],
     "overlay-library": [
         ("src/App.tsx", "src/apps/overlay-library/App.tsx"),
-        ("src/OverlayMaker.tsx", "src/apps/overlay-library/OverlayMaker.tsx"),
         ("src/index.ts", "src/apps/overlay-library/index.ts"),
         ("src/types.ts", "src/apps/overlay-library/types.ts"),
         ("src/useLiveSources.ts", "src/apps/overlay-library/useLiveSources.ts"),
         ("src/useOverlays.ts", "src/apps/overlay-library/useOverlays.ts"),
+    ],
+    "overlay-editor": [
+        ("src/App.tsx", "src/apps/overlay-editor/App.tsx"),
+        ("src/OverlayMaker.tsx", "src/apps/overlay-editor/OverlayMaker.tsx"),
+        ("src/CanvasMaker.tsx", "src/apps/overlay-editor/CanvasMaker.tsx"),
+        ("src/TemplateFieldsEditor.tsx", "src/apps/overlay-editor/TemplateFieldsEditor.tsx"),
+        ("src/index.ts", "src/apps/overlay-editor/index.ts"),
         ("src-tauri/src/overlay_manager.rs", "src-tauri/src/overlay_manager.rs"),
     ],
 }
