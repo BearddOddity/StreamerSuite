@@ -345,8 +345,11 @@ fn default_text_color() -> String {
 fn default_accent_color() -> String {
     "#9146ff".into()
 }
+// Lower than it used to be (was 0.85) — glassmorphism reads as glass only
+// when there's something to blur through; a near-opaque card hides the
+// backdrop-filter almost entirely and just looks like a plain dark box.
 fn default_bg_opacity() -> f32 {
-    0.85
+    0.5
 }
 fn default_border_radius() -> String {
     "rounded".into()
@@ -846,7 +849,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                     r#"<div id="card"><div class="accent-bar"></div><div class="text">{logo_html}{title_html}{subtitle_html}</div></div>"#
                 ),
                 format!(
-                    "#card {{ display: flex; align-items: center; gap: 14px; padding: 14px 24px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); {card_animation} }}\n\
+                    "#card {{ display: flex; align-items: center; gap: 14px; padding: 14px 24px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06); {card_animation} }}\n\
                      .accent-bar {{ width: 6px; align-self: stretch; border-radius: 4px; background: {accent}; }}\n\
                      .text {{ display: flex; flex-direction: column; gap: 2px; }}\n\
                      .title {{ font-size: 26px; font-weight: 800; color: {text_color}; }}\n\
@@ -867,7 +870,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                 format!("position: fixed; {corner_css}"),
                 format!(r#"<div id="card">{logo_html}<div class="text">{title_html}{subtitle_html}</div></div>"#),
                 format!(
-                    "#card {{ display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; box-shadow: 0 0 20px {accent}55; {card_animation} }}\n\
+                    "#card {{ display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; background: rgba(5, 5, 5, {bg_opacity}); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid {accent}; box-shadow: 0 0 20px {accent}55, inset 0 1px 0 rgba(255, 255, 255, 0.06); {card_animation} }}\n\
                      .text {{ display: flex; flex-direction: column; }}\n\
                      .title {{ font-size: 16px; font-weight: 800; color: {text_color}; }}\n\
                      .subtitle {{ font-size: 12px; color: {text_color}; opacity: 0.75; }}\n\
@@ -885,7 +888,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                     r#"<div id="bar"><div id="track">{logo_html}{title_html}{subtitle_html}</div></div>"#
                 ),
                 format!(
-                    "#bar {{ width: 100%; overflow: hidden; padding: 10px 0; background: rgba(5, 5, 5, {bg_opacity}); border-top: 2px solid {accent}; border-bottom: 2px solid {accent}; }}\n\
+                    "#bar {{ width: 100%; overflow: hidden; padding: 10px 0; background: rgba(5, 5, 5, {bg_opacity}); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: 2px solid {accent}; border-bottom: 2px solid {accent}; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06); }}\n\
                      #track {{ display: inline-flex; align-items: center; gap: 20px; white-space: nowrap; padding-left: 100%; animation: scroll {duration}s linear infinite; }}\n\
                      .title {{ font-size: 20px; font-weight: 800; color: {text_color}; }}\n\
                      .subtitle {{ font-size: 16px; color: {text_color}; opacity: 0.8; }}\n\
@@ -906,7 +909,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                 format!("position: fixed; {place_css}"),
                 format!(r#"<div id="card">{logo_html}<div class="text">{title_html}{subtitle_html}</div></div>"#),
                 format!(
-                    "#card {{ display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 40px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; text-align: center; {card_animation} }}\n\
+                    "#card {{ display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 40px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid {accent}; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06); text-align: center; {card_animation} }}\n\
                      .title {{ font-size: 34px; font-weight: 800; color: {text_color}; }}\n\
                      .subtitle {{ font-size: 18px; color: {text_color}; opacity: 0.8; }}\n\
                      .logo {{ height: 56px; width: auto; }}\n\
@@ -941,7 +944,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                     r#"<div id="card"><div class="goal-label">{title_html}</div><div class="goal-row">{current_html}<span class="goal-sep"> / </span><span class="goal-total">{goal}</span></div><div class="goal-track"><div class="goal-fill"{fill_attrs}></div></div></div>"#
                 ),
                 format!(
-                    "#card {{ display: flex; flex-direction: column; gap: 8px; padding: 16px 22px; min-width: 280px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; {card_animation} }}\n\
+                    "#card {{ display: flex; flex-direction: column; gap: 8px; padding: 16px 22px; min-width: 280px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid {accent}; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06); {card_animation} }}\n\
                      .goal-label {{ font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: {text_color}; opacity: 0.8; }}\n\
                      .goal-row {{ font-size: 24px; font-weight: 800; color: {text_color}; }}\n\
                      .goal-sep {{ opacity: 0.5; font-weight: 500; }}\n\
@@ -970,7 +973,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                 format!(r#"<div id="frame"></div>{badge_html}"#),
                 format!(
                     "#frame {{ position: fixed; inset: 6px; border: 6px solid {accent}; border-radius: {radius}; box-shadow: inset 0 0 24px {accent}66; pointer-events: none; }}\n\
-                     #card {{ display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 999px; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; {card_animation} }}\n\
+                     #card {{ display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 999px; background: rgba(5, 5, 5, {bg_opacity}); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid {accent}; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06); {card_animation} }}\n\
                      .title {{ font-size: 14px; font-weight: 800; color: {text_color}; }}\n\
                      .subtitle {{ font-size: 11px; color: {text_color}; opacity: 0.75; }}\n\
                      .logo {{ height: 24px; width: 24px; border-radius: 50%; object-fit: cover; }}\n\
@@ -991,7 +994,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                     r#"<div id="card"><div class="pulse-ring"></div>{logo_html}<div class="text">{title_html}{subtitle_html}</div></div>"#
                 ),
                 format!(
-                    "#card {{ position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; box-shadow: 0 0 24px {accent}88; {card_animation} }}\n\
+                    "#card {{ position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 22px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid {accent}; box-shadow: 0 0 24px {accent}88, inset 0 1px 0 rgba(255, 255, 255, 0.06); {card_animation} }}\n\
                      .pulse-ring {{ position: absolute; inset: -2px; border-radius: {radius}; border: 2px solid {accent}; animation: alert-pulse 1.4s ease-out infinite; }}\n\
                      .text {{ display: flex; flex-direction: column; gap: 2px; }}\n\
                      .title {{ font-size: 20px; font-weight: 800; color: {text_color}; text-transform: uppercase; letter-spacing: 0.03em; }}\n\
@@ -1017,7 +1020,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                     r#"<div id="card">{logo_html}{title_html}<div class="countdown" id="sb-countdown" data-target="{target}">--d --:--:--</div>{subtitle_html}</div>"#
                 ),
                 format!(
-                    "#card {{ display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px 36px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); border: 2px solid {accent}; text-align: center; {card_animation} }}\n\
+                    "#card {{ display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px 36px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid {accent}; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06); text-align: center; {card_animation} }}\n\
                      .title {{ font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: {text_color}; opacity: 0.8; }}\n\
                      .countdown {{ font-size: 40px; font-weight: 800; color: {text_color}; font-variant-numeric: tabular-nums; }}\n\
                      .subtitle {{ font-size: 14px; color: {text_color}; opacity: 0.7; }}\n\
@@ -1887,7 +1890,19 @@ mod tests {
             assert!(html.contains("Hello &lt;World&gt;"), "template {t} should escape title text");
             assert!(!html.contains("Hello <World>"), "template {t} should not contain raw unescaped text");
             assert!(html.contains(&default_accent_color()), "template {t} should use the accent color");
+            assert!(
+                html.contains("backdrop-filter: blur(20px)"),
+                "template {t} should render with real glassmorphism (backdrop blur), not just a flat translucent box"
+            );
         }
+    }
+
+    #[test]
+    fn default_background_opacity_is_translucent_enough_to_show_the_glass_blur() {
+        // A near-opaque card (the old 0.85 default) hides backdrop-filter
+        // almost entirely — glassmorphism only reads as "glass" when
+        // there's something visible to blur through.
+        assert!(default_bg_opacity() < 0.7);
     }
 
     #[test]

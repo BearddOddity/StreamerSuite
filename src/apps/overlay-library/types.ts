@@ -226,7 +226,7 @@ export const DEFAULT_TEMPLATE_PARAMS: TemplateParams = {
   subtitle: { text: "", source: "" },
   textColor: "#ffffff",
   accentColor: "#9146ff",
-  bgOpacity: 0.85,
+  bgOpacity: 0.5,
   position: "bottom-left",
   logoDataUri: null,
   speedSeconds: 18,
