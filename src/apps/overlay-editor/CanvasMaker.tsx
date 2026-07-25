@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { TEMPLATES, newCanvasElement, type CanvasElementT, type TemplateParams } from "../overlay-library/types";
 import { useLiveSources } from "../overlay-library/useLiveSources";
 import TemplateFieldsEditor from "./TemplateFieldsEditor";
+import { SaveChoiceDialog } from "./ConfirmDialogs";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
 
 function NumberField({ label, value, onChange, min, max }: { label: string; value: number; onChange: (v: number) => void; min: number; max: number }) {
@@ -89,6 +90,7 @@ export default function CanvasMaker({
   const [past, setPast] = useState<CanvasElementT[][]>([]);
   const [future, setFuture] = useState<CanvasElementT[][]>([]);
   const [showAiPanel, setShowAiPanel] = useState(false);
+  const [showSaveChoice, setShowSaveChoice] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
@@ -477,14 +479,27 @@ export default function CanvasMaker({
     setDraggingLayerId(null);
   };
 
-  const save = async () => {
+  // Same ambiguity as OverlayMaker's single-widget save: editing a
+  // pre-existing canvas could mean "update it" or "keep the original, make
+  // a variant" — worth asking rather than guessing. A brand-new canvas has
+  // nothing to be ambiguous about and saves immediately.
+  const save = () => {
     if (elements.length === 0) {
       setError("Add at least one element first");
       return;
     }
+    if (mode === "edit" && editFile) {
+      setShowSaveChoice(true);
+      return;
+    }
+    void doSave("create");
+  };
+
+  const doSave = async (which: "update" | "create") => {
+    setShowSaveChoice(false);
     setSaving(true);
     try {
-      if (mode === "edit" && editFile) {
+      if (which === "update" && editFile) {
         await invoke("overlay_update_canvas", { file: editFile, elements });
       } else {
         await invoke("overlay_create_from_canvas", { elements });
@@ -824,6 +839,14 @@ export default function CanvasMaker({
           </Button>
         </div>
       </Card>
+
+      {showSaveChoice && (
+        <SaveChoiceDialog
+          onUpdate={() => void doSave("update")}
+          onSaveAsNew={() => void doSave("create")}
+          onCancel={() => setShowSaveChoice(false)}
+        />
+      )}
     </div>
   );
 }

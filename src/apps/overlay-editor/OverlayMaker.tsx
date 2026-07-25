@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { DEFAULT_TEMPLATE_PARAMS, type TemplateParams } from "../overlay-library/types";
 import { useLiveSources } from "../overlay-library/useLiveSources";
 import TemplateFieldsEditor from "./TemplateFieldsEditor";
+import { SaveChoiceDialog } from "./ConfirmDialogs";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
 
 export default function OverlayMaker({
@@ -25,6 +26,7 @@ export default function OverlayMaker({
   const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showSaveChoice, setShowSaveChoice] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const liveSources = useLiveSources();
@@ -47,16 +49,29 @@ export default function OverlayMaker({
   const set = <K extends keyof TemplateParams>(key: K, value: TemplateParams[K]) =>
     setParams((p) => ({ ...p, [key]: value }));
 
-  const save = async () => {
+  // Editing a pre-existing overlay is the one ambiguous case — Save could
+  // reasonably mean "update it" or "keep the original, make a variant."
+  // A brand-new overlay (mode "create" with no editFile) has nothing to be
+  // ambiguous about, so it saves immediately with no prompt.
+  const save = () => {
+    if (mode === "edit" && editFile) {
+      setShowSaveChoice(true);
+      return;
+    }
+    void doSave("create");
+  };
+
+  const doSave = async (which: "update" | "create") => {
+    setShowSaveChoice(false);
     setSaving(true);
     try {
-      // "edit" targets editFile exactly — it can only ever overwrite the
-      // overlay it was opened from. Every other path (new overlay, or a
-      // "Duplicate" that pre-fills initialParams but keeps mode "create")
-      // asks the backend for a fresh, guaranteed-unique file name instead,
-      // so it's structurally impossible for this Save to touch any overlay
-      // other than the one it's explicitly targeting.
-      if (mode === "edit" && editFile) {
+      // "update" targets editFile exactly — it can only ever overwrite the
+      // overlay it was opened from. Every other path (new overlay, a
+      // "Duplicate", or "Save as New Variant" from the choice above) asks
+      // the backend for a fresh, guaranteed-unique file name instead, so
+      // it's structurally impossible for this to touch any overlay other
+      // than the one it's explicitly targeting.
+      if (which === "update" && editFile) {
         await invoke("overlay_update_template", { file: editFile, params });
       } else {
         await invoke("overlay_create_from_template", { params });
@@ -121,6 +136,14 @@ export default function OverlayMaker({
           </Button>
         </div>
       </Card>
+
+      {showSaveChoice && (
+        <SaveChoiceDialog
+          onUpdate={() => void doSave("update")}
+          onSaveAsNew={() => void doSave("create")}
+          onCancel={() => setShowSaveChoice(false)}
+        />
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useOverlays } from "../overlay-library/useOverlays";
 import OverlayMaker from "./OverlayMaker";
 import CanvasMaker from "./CanvasMaker";
+import { DeleteConfirmDialog } from "./ConfirmDialogs";
 import type { CanvasElementT, TemplateParams } from "../overlay-library/types";
 import "../../design-system/styles.css";
 import { Button, Card, SectionHead, Badge } from "../../design-system/components/core";
@@ -20,6 +21,7 @@ export default function OverlayEditorApp() {
   const [maker, setMaker] = useState<MakerState | null>(null);
   const [canvasMaker, setCanvasMaker] = useState<CanvasMakerState | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{ file: string; name: string } | null>(null);
 
   const editable = custom.filter((o) => o.editable && o.kind);
 
@@ -101,7 +103,10 @@ export default function OverlayEditorApp() {
                   <Button variant={copied === o.file ? "success" : "primary"} size="sm" onClick={() => copyUrl(customUrl(o.file), o.file)}>
                     {copied === o.file ? "Copied ✓" : "Copy URL"}
                   </Button>
-                  <button onClick={() => removeCustom(o.file)} className="text-[11px] text-white/25 hover:text-red-400 px-2">
+                  <button
+                    onClick={() => setDeleteTarget({ file: o.file, name: o.name })}
+                    className="text-[11px] text-white/25 hover:text-red-400 px-2"
+                  >
                     ✕
                   </button>
                 </div>
@@ -134,6 +139,17 @@ export default function OverlayEditorApp() {
             setCanvasMaker(null);
             refresh();
           }}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteConfirmDialog
+          name={deleteTarget.name}
+          onConfirm={() => {
+            removeCustom(deleteTarget.file);
+            setDeleteTarget(null);
+          }}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </div>
