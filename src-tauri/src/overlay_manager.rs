@@ -560,6 +560,204 @@ const COUNTDOWN_SCRIPT: &str = r#"<script>
 })();
 </script>"#;
 
+/// Shared polling/render logic for the StatusForge "Now Playing" family
+/// (Horizontal Left/Right, Vertical, Info Box — ported from the original
+/// widgets/overlay-runtime.js). One deliberate change from that file: token
+/// lookup goes through the shared `getOverlayToken()` (see
+/// `TOKEN_FROM_PATH_JS`, always emitted right before this) instead of that
+/// file's own narrower copy, since a Maker-built overlay is served from
+/// `/custom-overlay/...` — or has no real URL at all inside a Canvas
+/// element's `srcdoc` iframe — neither of which the original's
+/// forge-overlay/forge-widget-only lookup recognizes. A missing token
+/// (exactly the Editor's own live-preview case) shows the offline
+/// placeholder immediately instead of leaving the card blank. The offline
+/// fallback's icon comes from `/forge-overlay/<token>/icon.png` — an
+/// absolute, cross-directory URL — since a Maker-built overlay's own
+/// directory (`overlays/custom/`) has no `icon.png` of its own the way
+/// `widgets/` does.
+fn now_playing_script(has_cover: bool, offline_icon_size: &str, offline_icon_pos: &str) -> String {
+    format!(
+        r##"<script>
+(function() {{
+  var hasCover = {has_cover};
+  var offlineIcon = {{ size: "{offline_icon_size}", position: "{offline_icon_pos}" }};
+  function smoothTextUpdate(id, text) {{
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.style.opacity = 0;
+    setTimeout(function() {{ el.innerText = text; el.style.opacity = 1; }}, 500);
+  }}
+  function applyCoverArt(url) {{
+    var cover = document.getElementById("a");
+    if (!cover) return;
+    cover.style.opacity = 0;
+    setTimeout(function() {{
+      cover.style.backgroundSize = "cover";
+      cover.style.backgroundPosition = "center";
+      cover.style.backgroundRepeat = "no-repeat";
+      if (url) {{ cover.style.backgroundImage = "url(" + url + ")"; cover.style.backgroundColor = "#111"; }}
+      else {{ cover.style.backgroundImage = "none"; cover.style.backgroundColor = "#050505"; }}
+      cover.style.opacity = 1;
+    }}, 500);
+  }}
+  var lastGame = "", sessionInterval = null, titleShownAt = 0, startTime = 0, pollRate = 3000;
+  function updateTimer() {{
+    if (!startTime) return;
+    var diff = Math.floor(Date.now() / 1000) - Math.floor(startTime);
+    if (diff < 0) return;
+    var h = String(Math.floor(diff / 3600)).padStart(2, "0");
+    var m = String(Math.floor((diff % 3600) / 60)).padStart(2, "0");
+    var s = String(diff % 60).padStart(2, "0");
+    var el = document.getElementById("s");
+    if (el) el.innerText = h + ":" + m + ":" + s;
+  }}
+  function showOffline() {{
+    if (lastGame) return;
+    lastGame = "__offline__";
+    var w = document.getElementById("w");
+    w.style.opacity = "1";
+    document.getElementById("t").innerText = "StatusForge";
+    document.getElementById("r").innerText = "-";
+    document.getElementById("g").innerText = "OFFLINE";
+    document.getElementById("p").innerText = "ENGINE DISCONNECTED";
+    if (hasCover) {{
+      var token = getOverlayToken();
+      var cover = document.getElementById("a");
+      cover.style.backgroundImage = "url('http://127.0.0.1:53735/forge-overlay/" + encodeURIComponent(token) + "/icon.png')";
+      cover.style.backgroundSize = offlineIcon.size;
+      cover.style.backgroundRepeat = "no-repeat";
+      cover.style.backgroundPosition = offlineIcon.position;
+      cover.style.backgroundColor = "#1a1a2e";
+    }}
+  }}
+  function pollEngine() {{
+    var token = getOverlayToken();
+    if (!token) {{ showOffline(); return; }}
+    fetch("http://127.0.0.1:53735/status?nocache=" + Date.now() + "&token=" + encodeURIComponent(token))
+      .then(function(r) {{ return r.json(); }})
+      .then(function(data) {{
+        var w = document.getElementById("w");
+        if (data.is_playing) {{
+          startTime = data.start_time;
+          if (!sessionInterval) sessionInterval = setInterval(updateTimer, 1000);
+          if (data.game_title !== lastGame) {{
+            lastGame = data.game_title;
+            titleShownAt = Date.now();
+            smoothTextUpdate("t", data.game_title);
+            smoothTextUpdate("r", data.release_date || "UNKNOWN");
+            smoothTextUpdate("g", data.genre || "GAMING");
+            smoothTextUpdate("p", data.publisher || "INDIE / UNKNOWN");
+            if (hasCover) applyCoverArt(data.cover_url || "");
+          }}
+          if (data.fade_timer > 0) {{
+            var elapsed = (Date.now() - titleShownAt) / 1000;
+            w.style.opacity = elapsed >= data.fade_timer ? "0" : "1";
+          }} else {{
+            w.style.opacity = "1";
+          }}
+        }} else {{
+          w.style.opacity = "0";
+          lastGame = "";
+          clearInterval(sessionInterval);
+          sessionInterval = null;
+        }}
+      }})
+      .catch(function() {{}});
+  }}
+  function initialize() {{
+    var token = getOverlayToken();
+    if (!token) {{ setTimeout(showOffline, 300); return; }}
+    fetch("http://127.0.0.1:53735/settings?nocache=" + Date.now() + "&token=" + encodeURIComponent(token))
+      .then(function(r) {{ return r.json(); }})
+      .then(function(j) {{ pollRate = (j.overlay_poll_rate || 3) * 1000; }})
+      .catch(function() {{}})
+      .then(function() {{
+        setInterval(pollEngine, pollRate);
+        pollEngine();
+      }});
+  }}
+  setTimeout(showOffline, 1500);
+  initialize();
+}})();
+</script>"##,
+        has_cover = has_cover,
+        offline_icon_size = offline_icon_size,
+        offline_icon_pos = offline_icon_pos,
+    )
+}
+
+/// Ported from widgets/Logo.html: fades in the current game's `logo_url`
+/// from StatusForge's `/status`. A game with no logo of its own hides the
+/// card entirely rather than showing a placeholder (a substitute icon would
+/// look like a broken asset, not "no logo available") — that's distinct
+/// from the "nothing running at all" offline state, which shows a dimmed
+/// app icon instead, same distinction the original makes.
+fn game_logo_script() -> String {
+    r#"<script>
+(function() {
+  var lastGame = "", titleShownAt = 0, hasLogo = false, pollRate = 3000;
+  function showOfflineIcon() {
+    var token = getOverlayToken();
+    var logo = document.getElementById("lg");
+    var w = document.getElementById("w");
+    logo.classList.remove("visible");
+    logo.classList.add("offline-icon");
+    logo.src = "http://127.0.0.1:53735/forge-overlay/" + encodeURIComponent(token) + "/icon.png";
+    logo.classList.add("visible");
+    w.style.opacity = "1";
+  }
+  function pollEngine() {
+    var token = getOverlayToken();
+    if (!token) return;
+    fetch("http://127.0.0.1:53735/status?nocache=" + Date.now() + "&token=" + encodeURIComponent(token))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var w = document.getElementById("w");
+        var logo = document.getElementById("lg");
+        if (data.is_playing) {
+          if (data.game_title !== lastGame) {
+            lastGame = data.game_title;
+            titleShownAt = Date.now();
+            hasLogo = !!data.logo_url;
+            if (hasLogo) {
+              logo.classList.remove("visible", "offline-icon");
+              setTimeout(function() { logo.src = data.logo_url; logo.classList.add("visible"); }, 300);
+            }
+          }
+          if (!hasLogo) {
+            w.style.opacity = "0";
+          } else if (data.fade_timer > 0) {
+            var elapsed = (Date.now() - titleShownAt) / 1000;
+            w.style.opacity = elapsed >= data.fade_timer ? "0" : "1";
+          } else {
+            w.style.opacity = "1";
+          }
+        } else {
+          w.style.opacity = "0";
+          lastGame = "";
+        }
+      })
+      .catch(function() {});
+  }
+  function initialize() {
+    var token = getOverlayToken();
+    if (!token) { setTimeout(showOfflineIcon, 300); return; }
+    fetch("http://127.0.0.1:53735/settings?nocache=" + Date.now() + "&token=" + encodeURIComponent(token))
+      .then(function(r) { return r.json(); })
+      .then(function(j) { pollRate = (j.overlay_poll_rate || 3) * 1000; })
+      .catch(function() {})
+      .then(function() {
+        setInterval(pollEngine, pollRate);
+        pollEngine();
+      });
+  }
+  setTimeout(function() { if (!lastGame) showOfflineIcon(); }, 1500);
+  initialize();
+})();
+</script>"#
+        .to_string()
+}
+
 fn render_template(params: &TemplateParams) -> Result<String, String> {
     let text_color = safe_color(&params.text_color, &default_text_color());
     let accent = safe_color(&params.accent_color, &default_accent_color());
@@ -577,7 +775,19 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
     // back to the bundled system stack when unset or invalid.
     let custom_font_uri = safe_font_data_uri(&params.custom_font_data_uri);
     let font_family = safe_font_family(&params.font_family);
-    let (font_css, font_link, font_face_css) = if let Some(uri) = &custom_font_uri {
+    // The "Now Playing" card replicates a fixed StatusForge design that
+    // always uses Montserrat — loaded via a <link> (not a CSS @import,
+    // which the generic wrapper below can't put first in the stylesheet)
+    // regardless of whatever's in the (hidden, for this template) font
+    // fields.
+    let (font_css, font_link, font_face_css) = if params.template == "now-playing" {
+        (
+            "\"Montserrat\", sans-serif".to_string(),
+            r#"<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800;900&display=swap">"#
+                .to_string(),
+            String::new(),
+        )
+    } else if let Some(uri) = &custom_font_uri {
         let name = safe_font_name(&params.custom_font_name, "CustomOverlayFont");
         (
             format!("\"{name}\", {FONT_STACK}"),
@@ -815,6 +1025,104 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                 ),
             )
         }
+        // Replicates the original widgets/{Horizontal_Left,Horizontal_Right,
+        // Vertical,Info_Box}.html pixel-for-pixel — a fixed StatusForge
+        // design (metallic gradient text, glass info card, sliding stat
+        // carousel), not a themeable one, so unlike every arm above it
+        // ignores text_color/accent_color/bg_opacity/border_radius/logo
+        // entirely (those fields are hidden for this template in the
+        // frontend) and drives everything from `position` instead.
+        "now-playing" if params.position == "compact" => (
+            String::new(),
+            r#"<div class="widget-container" id="w"><div class="info-box"><div class="info-content"><div class="cover-thumb" id="a"></div><div class="info-text"><div id="t" class="metallic-text game-title">...</div><div class="slider-stage"><div class="slider-track"><div class="slide-item"><span class="label-text">Released</span><span id="r" class="metallic-text data-text">...</span></div><div class="slide-item"><span class="label-text">Genre</span><span id="g" class="metallic-text data-text">...</span></div><div class="slide-item"><span class="label-text">Publisher</span><span id="p" class="metallic-text data-text">...</span></div><div class="slide-item"><span class="label-text">Session</span><span id="s" class="metallic-text data-text">00:00:00</span></div></div></div></div></div></div>"#
+                .to_string(),
+            "body { display: flex; justify-content: center; align-items: center; }\n\
+             .widget-container { width: 620px; display: flex; justify-content: center; align-items: center; position: relative; opacity: 0; transition: opacity 1s ease-in-out; }\n\
+             .info-box { width: 100%; min-height: 210px; position: relative; border-radius: 35px; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: 10px 10px 30px rgba(0,0,0,0.6); overflow: hidden; }\n\
+             .info-content { position: relative; padding: 20px; display: flex; flex-direction: row; align-items: center; gap: 20px; }\n\
+             .cover-thumb { width: 127px; height: 173px; flex-shrink: 0; border-radius: 16px; background-size: cover; background-position: center; background-color: #111; box-shadow: 6px 6px 20px rgba(0,0,0,0.5); position: relative; overflow: hidden; }\n\
+             .cover-thumb::after { content: \"\"; position: absolute; top: -50%; left: -60%; width: 30%; height: 200%; background: rgba(255, 255, 255, 0.15); transform: rotate(35deg); animation: glossShine 7s infinite ease-in-out; }\n\
+             @keyframes glossShine { 0% { left: -100%; } 15% { left: 150%; } 100% { left: 150%; } }\n\
+             .info-text { flex: 1; min-width: 0; text-align: left; display: flex; flex-direction: column; justify-content: center; }\n\
+             .metallic-text { background: linear-gradient(to bottom, #ffffff 0%, #dcdcdc 50%, #ffffff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.8)); display: inline-block; }\n\
+             .game-title { font-weight: 900; margin-bottom: 8px; line-height: 1.1; font-size: 24px; letter-spacing: -0.5px; word-wrap: break-word; }\n\
+             .slider-stage { position: relative; height: 60px; overflow: hidden; width: 100%; }\n\
+             .slider-track { position: absolute; width: 100%; animation: slideData 16s infinite ease-in-out; }\n\
+             @keyframes slideData { 0%, 20% { transform: translateY(0); } 25%, 45% { transform: translateY(-60px); } 50%, 70% { transform: translateY(-120px); } 75%, 95% { transform: translateY(-180px); } 100% { transform: translateY(0); } }\n\
+             .slide-item { height: 60px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }\n\
+             .label-text { font-weight: 800; text-transform: uppercase; letter-spacing: 2px; font-size: 13px; margin-bottom: 2px; color: rgba(255, 255, 255, 0.4); }\n\
+             .data-text { font-weight: 800; font-size: 19px; line-height: 1.1; }"
+                .to_string(),
+        ),
+        "now-playing" => {
+            let (body_align, container_css, cover_html, info_box_css, info_content_css) = match params.position.as_str() {
+                "horizontal-right" => (
+                    "center",
+                    "width: 850px; flex-direction: row-reverse; align-items: flex-end;",
+                    r#"<div class="game-art" id="a"></div>"#,
+                    "width: 520px; min-height: 180px; margin-right: -100px; margin-bottom: 30px; border-radius: 35px; background: rgba(0, 0, 0, 0.65);",
+                    "padding: 25px 120px 25px 40px; text-align: right;",
+                ),
+                "vertical" => (
+                    "start",
+                    "width: 360px; flex-direction: column; align-items: center; margin-top: 25px;",
+                    r#"<div class="game-art" id="a" style="width: 360px; height: 450px;"></div>"#,
+                    "width: 360px; min-height: 180px; margin-top: -60px; border-radius: 40px; background: rgba(0, 0, 0, 0.65); padding-top: 60px;",
+                    "padding: 30px 20px 40px 20px; text-align: center;",
+                ),
+                "info-only" => (
+                    "center",
+                    "width: 560px; align-items: center;",
+                    "",
+                    "width: 100%; min-height: 180px; border-radius: 35px; background: rgba(0, 0, 0, 0.6);",
+                    "padding: 25px 40px; text-align: left;",
+                ),
+                _ => (
+                    "center",
+                    "width: 850px; flex-direction: row; align-items: flex-end;",
+                    r#"<div class="game-art" id="a"></div>"#,
+                    "width: 520px; min-height: 180px; margin-left: -100px; margin-bottom: 30px; border-radius: 35px; background: rgba(0, 0, 0, 0.6);",
+                    "padding: 25px 40px 25px 120px; text-align: left;",
+                ),
+            };
+            (
+                String::new(),
+                format!(
+                    r#"<div class="widget-container" id="w">{cover_html}<div class="info-box"><div class="info-content"><div id="t" class="metallic-text game-title">...</div><div class="slider-stage"><div class="slider-track"><div class="slide-item"><span class="label-text">Released</span><span id="r" class="metallic-text data-text">...</span></div><div class="slide-item"><span class="label-text">Genre</span><span id="g" class="metallic-text data-text">...</span></div><div class="slide-item"><span class="label-text">Publisher</span><span id="p" class="metallic-text data-text">...</span></div><div class="slide-item"><span class="label-text">Session</span><span id="s" class="metallic-text data-text">00:00:00</span></div></div></div></div></div>"#
+                ),
+                format!(
+                    "body {{ display: flex; justify-content: center; align-items: {body_align}; }}\n\
+                     .widget-container {{ display: flex; flex-direction: row; position: relative; opacity: 0; transition: opacity 1s ease-in-out; {container_css} }}\n\
+                     .game-art {{ width: 330px; height: 450px; background-size: cover; background-position: center; border-radius: 60px; z-index: 3; position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 10px 10px 40px rgba(0,0,0,0.8); flex-shrink: 0; background-color: #111; }}\n\
+                     .game-art::after {{ content: \"\"; position: absolute; top: -50%; left: -60%; width: 30%; height: 200%; background: rgba(255, 255, 255, 0.15); transform: rotate(35deg); animation: glossShine 7s infinite ease-in-out; }}\n\
+                     @keyframes glossShine {{ 0% {{ left: -100%; }} 15% {{ left: 150%; }} 100% {{ left: 150%; }} }}\n\
+                     .info-box {{ position: relative; z-index: 1; backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: 10px 10px 30px rgba(0,0,0,0.6); overflow: hidden; {info_box_css} }}\n\
+                     .info-content {{ position: relative; display: flex; flex-direction: column; justify-content: center; {info_content_css} }}\n\
+                     .metallic-text {{ background: linear-gradient(to bottom, #ffffff 0%, #dcdcdc 50%, #ffffff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.8)); display: inline-block; }}\n\
+                     .game-title {{ font-weight: 900; margin-bottom: 8px; line-height: 1.1; font-size: 26px; letter-spacing: -0.5px; word-wrap: break-word; }}\n\
+                     .slider-stage {{ position: relative; height: 60px; overflow: hidden; width: 100%; }}\n\
+                     .slider-track {{ position: absolute; width: 100%; animation: slideData 16s infinite ease-in-out; }}\n\
+                     @keyframes slideData {{ 0%, 20% {{ transform: translateY(0); }} 25%, 45% {{ transform: translateY(-60px); }} 50%, 70% {{ transform: translateY(-120px); }} 75%, 95% {{ transform: translateY(-180px); }} 100% {{ transform: translateY(0); }} }}\n\
+                     .slide-item {{ height: 60px; display: flex; flex-direction: column; align-items: {info_align}; justify-content: center; }}\n\
+                     .label-text {{ font-weight: 800; text-transform: uppercase; letter-spacing: 2px; font-size: 13px; margin-bottom: 2px; color: rgba(255, 255, 255, 0.5); }}\n\
+                     .data-text {{ font-weight: 800; font-size: 19px; line-height: 1.1; }}",
+                    info_align = if params.position == "horizontal-right" { "flex-end" } else if params.position == "vertical" { "center" } else { "flex-start" },
+                ),
+            )
+        }
+        "game-logo" => (
+            String::new(),
+            r#"<div class="widget-container" id="w"><div class="glow-panel"></div><div class="logo-stage"><img class="logo-img" id="lg" src="" alt="" onerror="this.onerror=null; this.classList.remove('visible'); document.getElementById('w').style.opacity='0';"></div></div>"#
+                .to_string(),
+            "body { display: flex; justify-content: center; align-items: center; }\n\
+             .widget-container { width: 560px; height: 280px; display: flex; justify-content: center; align-items: center; position: relative; opacity: 0; transition: opacity 1s ease-in-out; }\n\
+             .glow-panel { position: absolute; inset: 0; border-radius: 40px; background: radial-gradient(ellipse at center, rgba(255,255,255,0.08) 0%, rgba(0,0,0,0) 70%); backdrop-filter: blur(2px); }\n\
+             .logo-stage { position: relative; width: 92%; height: 82%; display: flex; justify-content: center; align-items: center; }\n\
+             .logo-img { max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0; transform: scale(0.94); transition: opacity 0.6s ease-in-out, transform 0.6s ease-in-out; filter: drop-shadow(0 0 40px rgba(0,0,0,0.55)) drop-shadow(0 12px 28px rgba(0,0,0,0.5)); }\n\
+             .logo-img.visible { opacity: 1; transform: scale(1); }\n\
+             .logo-img.offline-icon { max-width: 45%; max-height: 45%; opacity: 0.55; filter: drop-shadow(0 8px 20px rgba(0,0,0,0.4)); }"
+                .to_string(),
+        ),
         other => return Err(format!("unknown template: {other}")),
     };
 
@@ -825,6 +1133,19 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
     };
     if params.template == "countdown" {
         script.push_str(COUNTDOWN_SCRIPT);
+    }
+    if params.template == "now-playing" {
+        let (has_cover, icon_size, icon_pos) = match params.position.as_str() {
+            "info-only" => (false, "", ""),
+            "compact" => (true, "84px 84px", "center"),
+            _ => (true, "224px 224px", "center 40%"),
+        };
+        script.push_str(&format!("<script>{TOKEN_FROM_PATH_JS}</script>"));
+        script.push_str(&now_playing_script(has_cover, icon_size, icon_pos));
+    }
+    if params.template == "game-logo" {
+        script.push_str(&format!("<script>{TOKEN_FROM_PATH_JS}</script>"));
+        script.push_str(&game_logo_script());
     }
 
     // Applied globally (harmless no-op for classes the current template
@@ -1677,6 +1998,78 @@ mod tests {
         assert!(html.contains(r#"font-family: "My Stream Font""#));
         assert!(html.contains("data:font/ttf;base64,AAAA"));
         assert!(!html.contains("fonts.googleapis.com"), "an uploaded font should skip the Google Fonts link entirely");
+    }
+
+    #[test]
+    fn now_playing_renders_every_position_with_expected_structure() {
+        for (position, has_cover) in [
+            ("horizontal-left", true),
+            ("horizontal-right", true),
+            ("vertical", true),
+            ("compact", true),
+            ("info-only", false),
+            ("", true), // unrecognized/default falls back to horizontal-left
+        ] {
+            let mut p = params("now-playing");
+            p.position = position.to_string();
+            let html = render_template(&p).unwrap();
+            assert!(html.contains(r#"id="w""#), "{position}: missing root widget-container");
+            assert!(html.contains(r#"id="t""#), "{position}: missing title element");
+            assert!(html.contains(r#"id="r""#), "{position}: missing released element");
+            assert!(html.contains(r#"id="g""#), "{position}: missing genre element");
+            assert!(html.contains(r#"id="p""#), "{position}: missing publisher element");
+            assert!(html.contains(r#"id="s""#), "{position}: missing session timer element");
+            assert_eq!(html.contains(r#"id="a""#), has_cover, "{position}: cover-art element presence mismatch");
+            assert!(html.contains("Montserrat"), "{position}: should load the Montserrat font");
+            assert!(html.contains("metallic-text"), "{position}: should use the metallic gradient text style");
+        }
+    }
+
+    #[test]
+    fn now_playing_polling_script_uses_shared_token_lookup_and_statusforge_endpoints() {
+        let mut p = params("now-playing");
+        p.position = "horizontal-left".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(html.contains("function getOverlayToken()"), "should emit the shared token-lookup helper");
+        assert!(html.contains("custom-overlay"), "shared token lookup must recognize Maker-served custom-overlay URLs");
+        assert!(html.contains("http://127.0.0.1:53735/status"));
+        assert!(html.contains("http://127.0.0.1:53735/settings"));
+        assert!(
+            !html.contains("ws://127.0.0.1:53735/data-ws"),
+            "should use its own StatusForge polling, not the generic bound-field WebSocket"
+        );
+    }
+
+    #[test]
+    fn now_playing_ignores_text_color_accent_and_opacity_fields() {
+        let mut p = params("now-playing");
+        p.position = "horizontal-left".to_string();
+        p.text_color = "#ff0000".to_string();
+        p.accent_color = "#00ff00".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(!html.contains("#ff0000"), "text color should be ignored — this template's look is fixed");
+        assert!(!html.contains("#00ff00"), "accent color should be ignored — this template's look is fixed");
+    }
+
+    #[test]
+    fn compact_cover_nests_the_art_inside_the_info_box() {
+        let mut p = params("now-playing");
+        p.position = "compact".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(html.contains("cover-thumb"), "compact should use the inline cover-thumb style, not the standalone game-art panel");
+        assert!(!html.contains("game-art"), "compact should not also render the standalone game-art layout");
+    }
+
+    #[test]
+    fn game_logo_renders_glow_panel_and_polls_for_logo_url() {
+        let p = params("game-logo");
+        let html = render_template(&p).unwrap();
+        assert!(html.contains(r#"id="w""#));
+        assert!(html.contains(r#"id="lg""#), "missing the logo <img> element");
+        assert!(html.contains("glow-panel"));
+        assert!(html.contains("function getOverlayToken()"));
+        assert!(html.contains("http://127.0.0.1:53735/status"));
+        assert!(html.contains("logo_url"), "should poll for and use the game's logo_url");
     }
 
     #[test]

@@ -23,7 +23,9 @@ export type OverlayTemplateId =
   | "goal-bar"
   | "cam-frame"
   | "alert-banner"
-  | "countdown";
+  | "countdown"
+  | "now-playing"
+  | "game-logo";
 
 export interface TemplateDef {
   id: OverlayTemplateId;
@@ -132,6 +134,27 @@ export const TEMPLATES: TemplateDef[] = [
       { value: "bottom-right", label: "Bottom Right" },
     ],
     hasCountdownTarget: true,
+  },
+  {
+    id: "now-playing",
+    label: "Now Playing Card",
+    icon: "🎮",
+    description:
+      "Game art + sliding stats (Released/Genre/Publisher/Session), live from StatusForge — replicates the original Horizontal Left/Right, Vertical, and Info Box overlays",
+    positions: [
+      { value: "horizontal-left", label: "Horizontal (Art Left)" },
+      { value: "horizontal-right", label: "Horizontal (Art Right)" },
+      { value: "vertical", label: "Vertical" },
+      { value: "compact", label: "Compact Cover (Art Inside Box)" },
+      { value: "info-only", label: "Info Box Only (No Art)" },
+    ],
+  },
+  {
+    id: "game-logo",
+    label: "Game Logo",
+    icon: "🖼️",
+    description: "Just the current game's logo art on a soft glow panel — live from StatusForge, replicates the original Logo overlay",
+    positions: [],
   },
 ];
 

@@ -163,6 +163,11 @@ export default function TemplateFieldsEditor({
   showTemplatePicker?: boolean;
 }) {
   const template = TEMPLATES.find((t) => t.id === params.template)!;
+  // These two replicate a fixed StatusForge design (Now Playing card / Game
+  // Logo) pixel-for-pixel — text, colors, font, and art all come live from
+  // StatusForge's own polling, not from anything typed here, so every field
+  // below that would just be ignored gets hidden instead of shown-but-inert.
+  const isStatusForgeCard = template.id === "now-playing" || template.id === "game-logo";
 
   const pickLogo = (file: File | undefined) => {
     if (!file) return;
@@ -207,13 +212,23 @@ export default function TemplateFieldsEditor({
         </div>
       )}
 
-      <FieldRow
-        label={template.id === "goal-bar" ? "Label" : template.id === "cam-frame" ? "Corner Label (optional)" : "Title"}
-        field={params.title}
-        onChange={(f) => set("title", f)}
-        sources={liveSources}
-      />
-      {template.id !== "cam-frame" && (
+      {isStatusForgeCard && (
+        <p className="text-[10px] text-white/30 bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2">
+          This replicates StatusForge's built-in {template.label} design exactly — text, art, and colors are
+          always pulled live from whatever's currently playing, so there's nothing to type here beyond a layout
+          below.
+        </p>
+      )}
+
+      {!isStatusForgeCard && (
+        <FieldRow
+          label={template.id === "goal-bar" ? "Label" : template.id === "cam-frame" ? "Corner Label (optional)" : "Title"}
+          field={params.title}
+          onChange={(f) => set("title", f)}
+          sources={liveSources}
+        />
+      )}
+      {!isStatusForgeCard && template.id !== "cam-frame" && (
         <FieldRow
           label={template.id === "goal-bar" ? "Current Value" : "Subtitle"}
           field={params.subtitle}
@@ -224,13 +239,15 @@ export default function TemplateFieldsEditor({
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <Select
-          label="Position"
-          value={params.position}
-          onChange={(v) => set("position", v)}
-          options={template.positions}
-          style={SELECT_COMPACT_STYLE}
-        />
+        {template.positions.length > 0 && (
+          <Select
+            label="Position"
+            value={params.position}
+            onChange={(v) => set("position", v)}
+            options={template.positions}
+            style={SELECT_COMPACT_STYLE}
+          />
+        )}
         {template.hasSpeed && (
           <div>
             <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
@@ -271,138 +288,142 @@ export default function TemplateFieldsEditor({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <ColorField label="Text Color" value={params.textColor} onChange={(v) => set("textColor", v)} />
-        <ColorField label="Accent Color" value={params.accentColor} onChange={(v) => set("accentColor", v)} />
-      </div>
-      {params.bgOpacity >= 0.4 && contrastRatio(params.textColor, "#050505") < 3 && (
-        <p className="text-[10px] -mt-2" style={{ color: "var(--bd-red-text)" }}>
-          ⚠ This text color is hard to read against the card's dark background at {Math.round(params.bgOpacity * 100)}%
-          opacity — consider a lighter text color or lowering opacity.
-        </p>
+      {!isStatusForgeCard && (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <ColorField label="Text Color" value={params.textColor} onChange={(v) => set("textColor", v)} />
+            <ColorField label="Accent Color" value={params.accentColor} onChange={(v) => set("accentColor", v)} />
+          </div>
+          {params.bgOpacity >= 0.4 && contrastRatio(params.textColor, "#050505") < 3 && (
+            <p className="text-[10px] -mt-2" style={{ color: "var(--bd-red-text)" }}>
+              ⚠ This text color is hard to read against the card's dark background at{" "}
+              {Math.round(params.bgOpacity * 100)}% opacity — consider a lighter text color or lowering opacity.
+            </p>
+          )}
+
+          <div>
+            <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
+              Background Opacity ({Math.round(params.bgOpacity * 100)}%)
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={params.bgOpacity}
+              onChange={(e) => set("bgOpacity", Number(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Select
+              label="Font"
+              value={params.fontFamily}
+              onChange={(v) => set("fontFamily", v)}
+              options={FONT_PRESETS.map((f) => ({ value: f, label: f || "System Default" }))}
+              style={SELECT_COMPACT_STYLE}
+              disabled={!!params.customFontDataUri}
+            />
+            <Select
+              label="Corner Style"
+              value={params.borderRadius}
+              onChange={(v) => set("borderRadius", v as TemplateParams["borderRadius"])}
+              options={[
+                { value: "sharp", label: "Sharp" },
+                { value: "soft", label: "Soft" },
+                { value: "rounded", label: "Rounded" },
+              ]}
+              style={SELECT_COMPACT_STYLE}
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
+              Custom Font Upload (optional — overrides the preset above)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                accept=".ttf,.otf,.woff,.woff2"
+                onChange={(e) => pickFont(e.target.files?.[0])}
+                className="text-[11px] text-white/50"
+              />
+              {params.customFontDataUri && (
+                <button
+                  onClick={() => {
+                    set("customFontDataUri", null);
+                    set("customFontName", "");
+                  }}
+                  className="text-[10px] text-white/25 hover:text-red-400"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+            {params.customFontDataUri && <p className="text-[10px] text-white/30 mt-1">Using "{params.customFontName}"</p>}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] text-white/60">Entrance animation</label>
+              <input
+                type="checkbox"
+                checked={params.animationsEnabled}
+                onChange={(e) => set("animationsEnabled", e.target.checked)}
+              />
+            </div>
+            {params.animationsEnabled && (
+              <Select
+                label="Animation Style"
+                value={params.animationStyle}
+                onChange={(v) => set("animationStyle", v as TemplateParams["animationStyle"])}
+                options={[
+                  { value: "pop", label: "Pop" },
+                  { value: "slide", label: "Slide Up" },
+                  { value: "fade", label: "Fade" },
+                ]}
+                style={SELECT_COMPACT_STYLE}
+              />
+            )}
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] text-white/60">Text drop shadow</label>
+              <input
+                type="checkbox"
+                checked={params.textShadow}
+                onChange={(e) => set("textShadow", e.target.checked)}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] text-white/60">Text outline</label>
+              <input
+                type="checkbox"
+                checked={params.textStroke}
+                onChange={(e) => set("textStroke", e.target.checked)}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
+              Logo / Image (optional)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => pickLogo(e.target.files?.[0])}
+                className="text-[11px] text-white/50"
+              />
+              {params.logoDataUri && (
+                <button onClick={() => set("logoDataUri", null)} className="text-[10px] text-white/25 hover:text-red-400">
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+        </>
       )}
-
-      <div>
-        <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
-          Background Opacity ({Math.round(params.bgOpacity * 100)}%)
-        </label>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={params.bgOpacity}
-          onChange={(e) => set("bgOpacity", Number(e.target.value))}
-          className="w-full"
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Select
-          label="Font"
-          value={params.fontFamily}
-          onChange={(v) => set("fontFamily", v)}
-          options={FONT_PRESETS.map((f) => ({ value: f, label: f || "System Default" }))}
-          style={SELECT_COMPACT_STYLE}
-          disabled={!!params.customFontDataUri}
-        />
-        <Select
-          label="Corner Style"
-          value={params.borderRadius}
-          onChange={(v) => set("borderRadius", v as TemplateParams["borderRadius"])}
-          options={[
-            { value: "sharp", label: "Sharp" },
-            { value: "soft", label: "Soft" },
-            { value: "rounded", label: "Rounded" },
-          ]}
-          style={SELECT_COMPACT_STYLE}
-        />
-      </div>
-
-      <div>
-        <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
-          Custom Font Upload (optional — overrides the preset above)
-        </label>
-        <div className="flex items-center gap-2">
-          <input
-            type="file"
-            accept=".ttf,.otf,.woff,.woff2"
-            onChange={(e) => pickFont(e.target.files?.[0])}
-            className="text-[11px] text-white/50"
-          />
-          {params.customFontDataUri && (
-            <button
-              onClick={() => {
-                set("customFontDataUri", null);
-                set("customFontName", "");
-              }}
-              className="text-[10px] text-white/25 hover:text-red-400"
-            >
-              Remove
-            </button>
-          )}
-        </div>
-        {params.customFontDataUri && <p className="text-[10px] text-white/30 mt-1">Using "{params.customFontName}"</p>}
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="text-[11px] text-white/60">Entrance animation</label>
-          <input
-            type="checkbox"
-            checked={params.animationsEnabled}
-            onChange={(e) => set("animationsEnabled", e.target.checked)}
-          />
-        </div>
-        {params.animationsEnabled && (
-          <Select
-            label="Animation Style"
-            value={params.animationStyle}
-            onChange={(v) => set("animationStyle", v as TemplateParams["animationStyle"])}
-            options={[
-              { value: "pop", label: "Pop" },
-              { value: "slide", label: "Slide Up" },
-              { value: "fade", label: "Fade" },
-            ]}
-            style={SELECT_COMPACT_STYLE}
-          />
-        )}
-        <div className="flex items-center justify-between">
-          <label className="text-[11px] text-white/60">Text drop shadow</label>
-          <input
-            type="checkbox"
-            checked={params.textShadow}
-            onChange={(e) => set("textShadow", e.target.checked)}
-          />
-        </div>
-        <div className="flex items-center justify-between">
-          <label className="text-[11px] text-white/60">Text outline</label>
-          <input
-            type="checkbox"
-            checked={params.textStroke}
-            onChange={(e) => set("textStroke", e.target.checked)}
-          />
-        </div>
-      </div>
-
-      <div>
-        <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
-          Logo / Image (optional)
-        </label>
-        <div className="flex items-center gap-2">
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(e) => pickLogo(e.target.files?.[0])}
-            className="text-[11px] text-white/50"
-          />
-          {params.logoDataUri && (
-            <button onClick={() => set("logoDataUri", null)} className="text-[10px] text-white/25 hover:text-red-400">
-              Remove
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
