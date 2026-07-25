@@ -1,3 +1,11 @@
+/** A named/auto-save snapshot of an overlay's settings, listable and
+ * restorable via overlay_list_versions/overlay_restore_version. */
+export interface VersionInfo {
+  id: string;
+  label: string;
+  timestamp: number;
+}
+
 export interface OverlayEntry {
   file: string;
   name: string;
@@ -176,6 +184,9 @@ export interface TemplateParams {
   logoDataUri: string | null;
   speedSeconds: number | null;
   fontFamily: string;
+  /** A user-uploaded font file, embedded as a data URI — takes priority over fontFamily when set. */
+  customFontDataUri: string | null;
+  customFontName: string;
   borderRadius: "sharp" | "soft" | "rounded";
   animationsEnabled: boolean;
   animationStyle: "pop" | "slide" | "fade";
@@ -197,6 +208,8 @@ export const DEFAULT_TEMPLATE_PARAMS: TemplateParams = {
   logoDataUri: null,
   speedSeconds: 18,
   fontFamily: "",
+  customFontDataUri: null,
+  customFontName: "",
   borderRadius: "rounded",
   animationsEnabled: true,
   animationStyle: "pop",
@@ -217,6 +230,10 @@ export interface CanvasElementT {
   widthPct: number;
   heightPct: number;
   zIndex: number;
+  /** Prevents drag/resize in the Canvas Maker — editor-only, has no effect on the rendered overlay. */
+  locked?: boolean;
+  /** Elements sharing a groupId move together when any one of them is dragged. */
+  groupId?: string | null;
   params: TemplateParams;
 }
 

@@ -9,7 +9,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { TEMPLATES, newCanvasElement, type CanvasElementT, type TemplateParams } from "../overlay-library/types";
 import { useLiveSources } from "../overlay-library/useLiveSources";
 import TemplateFieldsEditor from "./TemplateFieldsEditor";
-import { SaveChoiceDialog } from "./ConfirmDialogs";
+import { SaveChoiceDialog, UnsavedChangesDialog } from "./ConfirmDialogs";
+import VersionHistoryPanel from "./VersionHistoryPanel";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
 
 function NumberField({ label, value, onChange, min, max }: { label: string; value: number; onChange: (v: number) => void; min: number; max: number }) {
@@ -63,6 +64,11 @@ interface DragState {
   startH: number;
   rectW: number;
   rectH: number;
+  /** Other elements sharing this element's groupId, and where they started —
+   * a move drag applies the anchor's own (post-snap) delta to each of these
+   * so the whole group slides together. Empty for an ungrouped element or a
+   * resize (resizing only ever affects the one element being resized). */
+  groupStarts: { id: string; startX: number; startY: number }[];
 }
 
 export default function CanvasMaker({
@@ -80,6 +86,9 @@ export default function CanvasMaker({
 }) {
   const [elements, setElements] = useState<CanvasElementT[]>(initialElements ?? []);
   const [selectedId, setSelectedId] = useState<string | null>(initialElements?.[0]?.id ?? null);
+  const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
+  const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
+  const initialSnapshotRef = useRef(JSON.stringify(initialElements ?? []));
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
@@ -104,6 +113,46 @@ export default function CanvasMaker({
 
   const liveSources = useLiveSources();
   const selected = elements.find((e) => e.id === selectedId) ?? null;
+  // Group/lock actions act on whichever is "selected" right now — the
+  // multi-select set from Ctrl/Shift-clicking Layers rows when there is
+  // one, otherwise just the single primary selection.
+  const effectiveSelection = multiSelected.size > 0 ? multiSelected : selectedId ? new Set([selectedId]) : new Set<string>();
+  const isDirty = JSON.stringify(elements) !== initialSnapshotRef.current;
+
+  const requestClose = () => {
+    if (isDirty) {
+      setShowUnsavedConfirm(true);
+    } else {
+      onClose();
+    }
+  };
+
+  const toggleLock = (id: string) => {
+    recordBeforeChange(elements);
+    setElements((prev) => prev.map((e) => (e.id === id ? { ...e, locked: !e.locked } : e)));
+  };
+
+  const groupSelected = () => {
+    if (effectiveSelection.size < 2) return;
+    recordBeforeChange(elements);
+    const groupId = `group-${Date.now()}`;
+    setElements((prev) => prev.map((e) => (effectiveSelection.has(e.id) ? { ...e, groupId } : e)));
+  };
+
+  const ungroupSelected = () => {
+    recordBeforeChange(elements);
+    setElements((prev) => prev.map((e) => (effectiveSelection.has(e.id) ? { ...e, groupId: null } : e)));
+  };
+
+  const toggleMultiSelect = (id: string) => {
+    setMultiSelected((prev) => {
+      const next = new Set(prev.size > 0 ? prev : selectedId ? [selectedId] : []);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setSelectedId(id);
+  };
 
   // Undo/redo — every mutation (add/remove/drag/resize/field edit/reorder)
   // records the state right before it changed, coalesced into one history
@@ -211,7 +260,7 @@ export default function CanvasMaker({
       // Arrow-key nudge — 1% per press, 5% with Shift, matching the same
       // percent-of-canvas units the mouse drag and number inputs use.
       const step = e.shiftKey ? 5 : 1;
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (!selected.locked && (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown")) {
         e.preventDefault();
         recordBeforeChange(elements);
         const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
@@ -265,6 +314,20 @@ export default function CanvasMaker({
           hitX = sx.hit;
           hitY = sy.hit;
           patch = { xPct: sx.value, yPct: sy.value };
+          // Group members ride along with the dragged element's own
+          // (post-snap) delta, each measured from where it started —
+          // the delta never accumulates across mousemoves.
+          if (d.groupStarts.length > 0) {
+            const groupDx = sx.value - d.startX;
+            const groupDy = sy.value - d.startY;
+            const byId = new Map(d.groupStarts.map((g) => [g.id, g]));
+            return prev.map((e2) => {
+              if (e2.id === d.id) return { ...e2, ...patch };
+              const g = byId.get(e2.id);
+              if (!g) return e2;
+              return { ...e2, xPct: Math.min(98, Math.max(0, g.startX + groupDx)), yPct: Math.min(98, Math.max(0, g.startY + groupDy)) };
+            });
+          }
         } else {
           const rawW = Math.min(100 - d.startX, Math.max(4, d.startW + dxPct));
           const rawH = Math.min(100 - d.startY, Math.max(4, d.startH + dyPct));
@@ -296,8 +359,14 @@ export default function CanvasMaker({
     e.preventDefault();
     e.stopPropagation();
     setSelectedId(el.id);
+    setMultiSelected(new Set());
+    if (el.locked) return; // still selectable (to unlock/inspect it), just not draggable
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
+    const groupStarts =
+      mode === "move" && el.groupId
+        ? elements.filter((e2) => e2.groupId === el.groupId && e2.id !== el.id && !e2.locked).map((e2) => ({ id: e2.id, startX: e2.xPct, startY: e2.yPct }))
+        : [];
     dragRef.current = {
       id: el.id,
       mode,
@@ -309,6 +378,7 @@ export default function CanvasMaker({
       startH: el.heightPct,
       rectW: rect.width,
       rectH: rect.height,
+      groupStarts,
     };
   };
 
@@ -513,7 +583,7 @@ export default function CanvasMaker({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={requestClose}>
       <Card padding={24} className="w-full max-w-6xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4">
           <SectionHead
@@ -528,7 +598,7 @@ export default function CanvasMaker({
                 <Button variant="ghost" size="sm" onClick={redo} disabled={future.length === 0}>
                   ↷ Redo
                 </Button>
-                <Button variant="ghost" size="sm" onClick={onClose}>
+                <Button variant="ghost" size="sm" onClick={requestClose}>
                   ✕
                 </Button>
               </div>
@@ -554,6 +624,7 @@ export default function CanvasMaker({
                 .sort((a, b) => b.zIndex - a.zIndex)
                 .map((el) => {
                   const t = TEMPLATES.find((t) => t.id === el.params.template)!;
+                  const isPicked = multiSelected.size > 0 ? multiSelected.has(el.id) : selectedId === el.id;
                   return (
                     <div
                       key={el.id}
@@ -561,9 +632,17 @@ export default function CanvasMaker({
                       onDragStart={() => setDraggingLayerId(el.id)}
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={() => reorderLayers(draggingLayerId, el.id)}
-                      onClick={() => setSelectedId(el.id)}
+                      onClick={(ev) => {
+                        if (ev.ctrlKey || ev.metaKey || ev.shiftKey) {
+                          toggleMultiSelect(el.id);
+                        } else {
+                          setSelectedId(el.id);
+                          setMultiSelected(new Set());
+                        }
+                      }}
+                      title="Click to select, Ctrl/Shift-click to multi-select for grouping"
                       className={`w-full text-left flex items-center gap-1.5 px-2.5 py-2 rounded-lg border cursor-grab active:cursor-grabbing transition-all ${
-                        selectedId === el.id
+                        isPicked
                           ? "bg-purple-500/15 border-purple-500/40"
                           : "bg-white/[0.02] border-white/[0.06] hover:border-white/15"
                       }`}
@@ -572,6 +651,17 @@ export default function CanvasMaker({
                       <span className="text-[13px]">{t.icon}</span>
                       <span className="text-[11px] text-white/70 flex-1 truncate">
                         {el.params.title.text || t.label}
+                      </span>
+                      {el.groupId && <span title="Grouped — moves together with linked elements" className="text-[10px] text-purple-300/70">🔗</span>}
+                      <span
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          toggleLock(el.id);
+                        }}
+                        title={el.locked ? "Unlock (allow drag/resize)" : "Lock (prevent drag/resize)"}
+                        className={`text-[10px] px-1 ${el.locked ? "text-amber-300/80" : "text-white/20 hover:text-white/50"}`}
+                      >
+                        {el.locked ? "🔒" : "🔓"}
                       </span>
                       <span
                         onClick={(ev) => {
@@ -586,6 +676,17 @@ export default function CanvasMaker({
                   );
                 })}
             </div>
+
+            {effectiveSelection.size >= 2 && (
+              <Button variant="ghost" size="sm" onClick={groupSelected} className="w-full">
+                🔗 Group Selected
+              </Button>
+            )}
+            {elements.some((e) => effectiveSelection.has(e.id) && e.groupId) && (
+              <Button variant="ghost" size="sm" onClick={ungroupSelected} className="w-full">
+                Ungroup
+              </Button>
+            )}
 
             <div className="flex gap-1.5">
               <Button variant="ghost" size="sm" onClick={exportCanvas} disabled={elements.length === 0} className="flex-1">
@@ -732,7 +833,7 @@ export default function CanvasMaker({
 
               {elements.map((el) => {
                 const t = TEMPLATES.find((tt) => tt.id === el.params.template)!;
-                const isSelected = el.id === selectedId;
+                const isSelected = multiSelected.size > 0 ? multiSelected.has(el.id) : el.id === selectedId;
                 return (
                   <div
                     key={el.id}
@@ -741,10 +842,11 @@ export default function CanvasMaker({
                       e.preventDefault();
                       e.stopPropagation();
                       setSelectedId(el.id);
+                      setMultiSelected(new Set());
                       setContextMenu({ x: e.clientX, y: e.clientY, elId: el.id });
                     }}
-                    className={`absolute cursor-move border-2 rounded ${
-                      isSelected ? "border-purple-400" : "border-white/15 hover:border-white/35"
+                    className={`absolute border-2 rounded ${el.locked ? "cursor-not-allowed" : "cursor-move"} ${
+                      isSelected ? "border-purple-400" : el.groupId ? "border-purple-400/30" : "border-white/15 hover:border-white/35"
                     }`}
                     style={{
                       left: `${el.xPct}%`,
@@ -755,14 +857,17 @@ export default function CanvasMaker({
                     }}
                   >
                     <span className="absolute -top-5 left-0 text-[9px] text-white/50 whitespace-nowrap">
+                      {el.locked && "🔒 "}
                       {t.icon} {el.params.title.text || t.label}
                     </span>
-                    <div
-                      onMouseDown={(e) => startDrag(e, el, "resize")}
-                      className={`absolute -right-1.5 -bottom-1.5 w-3 h-3 rounded-sm cursor-nwse-resize ${
-                        isSelected ? "bg-purple-400" : "bg-white/30"
-                      }`}
-                    />
+                    {!el.locked && (
+                      <div
+                        onMouseDown={(e) => startDrag(e, el, "resize")}
+                        className={`absolute -right-1.5 -bottom-1.5 w-3 h-3 rounded-sm cursor-nwse-resize ${
+                          isSelected ? "bg-purple-400" : "bg-white/30"
+                        }`}
+                      />
+                    )}
                   </div>
                 );
               })}
@@ -830,8 +935,14 @@ export default function CanvasMaker({
           </div>
         )}
 
+        {mode === "edit" && editFile && (
+          <div className="mt-4">
+            <VersionHistoryPanel file={editFile} onRestored={onSaved} />
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 mt-6">
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={requestClose}>
             Cancel
           </Button>
           <Button variant="cta" onClick={save} disabled={saving}>
@@ -846,6 +957,10 @@ export default function CanvasMaker({
           onSaveAsNew={() => void doSave("create")}
           onCancel={() => setShowSaveChoice(false)}
         />
+      )}
+
+      {showUnsavedConfirm && (
+        <UnsavedChangesDialog onDiscard={onClose} onCancel={() => setShowUnsavedConfirm(false)} />
       )}
     </div>
   );

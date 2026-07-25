@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { DEFAULT_TEMPLATE_PARAMS, type TemplateParams } from "../overlay-library/types";
 import { useLiveSources } from "../overlay-library/useLiveSources";
 import TemplateFieldsEditor from "./TemplateFieldsEditor";
-import { SaveChoiceDialog } from "./ConfirmDialogs";
+import { SaveChoiceDialog, UnsavedChangesDialog } from "./ConfirmDialogs";
+import VersionHistoryPanel from "./VersionHistoryPanel";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
 
 export default function OverlayMaker({
@@ -27,9 +28,20 @@ export default function OverlayMaker({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [showSaveChoice, setShowSaveChoice] = useState(false);
+  const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialSnapshotRef = useRef(JSON.stringify(initialParams ?? DEFAULT_TEMPLATE_PARAMS));
 
   const liveSources = useLiveSources();
+  const isDirty = JSON.stringify(params) !== initialSnapshotRef.current;
+
+  const requestClose = () => {
+    if (isDirty) {
+      setShowUnsavedConfirm(true);
+    } else {
+      onClose();
+    }
+  };
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -88,14 +100,14 @@ export default function OverlayMaker({
   const title = mode === "edit" ? "Edit Overlay" : initialParams ? "Duplicate Overlay" : "Build an Overlay";
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={requestClose}>
       <Card padding={24} className="w-full max-w-4xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4">
           <SectionHead
             icon={icon}
             title={title}
             right={
-              <Button variant="ghost" size="sm" onClick={onClose}>
+              <Button variant="ghost" size="sm" onClick={requestClose}>
                 ✕
               </Button>
             }
@@ -127,8 +139,14 @@ export default function OverlayMaker({
           </div>
         </div>
 
+        {mode === "edit" && editFile && (
+          <div className="mt-4">
+            <VersionHistoryPanel file={editFile} onRestored={onSaved} />
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 mt-6">
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={requestClose}>
             Cancel
           </Button>
           <Button variant="cta" onClick={save} disabled={saving}>
@@ -143,6 +161,10 @@ export default function OverlayMaker({
           onSaveAsNew={() => void doSave("create")}
           onCancel={() => setShowSaveChoice(false)}
         />
+      )}
+
+      {showUnsavedConfirm && (
+        <UnsavedChangesDialog onDiscard={onClose} onCancel={() => setShowUnsavedConfirm(false)} />
       )}
     </div>
   );

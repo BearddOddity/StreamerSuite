@@ -52,6 +52,50 @@ export function SaveChoiceDialog({
   );
 }
 
+/** Closing (✕ or backdrop click) with unsaved edits used to discard them
+ * silently — this catches an accidental click before real work is lost. */
+export function UnsavedChangesDialog({
+  onDiscard,
+  onCancel,
+}: {
+  onDiscard: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 animate-float-backdrop"
+      onClick={(e) => {
+        e.stopPropagation();
+        onCancel();
+      }}
+    >
+      <div
+        className="relative w-[380px] bg-black/20 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-6 animate-float-card-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 mb-3">
+          <span className="text-2xl">⚠️</span>
+          <h3 className="text-white font-semibold text-sm">Discard unsaved changes?</h3>
+        </div>
+        <p className="text-[12px] text-white/50 mb-5 leading-relaxed">
+          You've made changes since the last save. Closing now throws them away.
+        </p>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onCancel} className="btn-ghost text-[11px] px-3 py-1.5">
+            Keep Editing
+          </button>
+          <button
+            onClick={onDiscard}
+            className="text-[11px] px-3 py-1.5 rounded-lg border border-red-500/40 text-red-300 hover:bg-red-500/10"
+          >
+            Discard
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** A filesystem delete has no undo (unlike in-canvas edits, which have a
  * real undo stack) — this is the one guard against a stray click losing
  * real work. */

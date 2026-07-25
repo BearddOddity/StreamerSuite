@@ -22,8 +22,26 @@ export default function OverlayEditorApp() {
   const [canvasMaker, setCanvasMaker] = useState<CanvasMakerState | null>(null);
   const [loadError, setLoadError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ file: string; name: string } | null>(null);
+  const [renaming, setRenaming] = useState<{ file: string; value: string } | null>(null);
+  const [search, setSearch] = useState("");
 
   const editable = custom.filter((o) => o.editable && o.kind);
+  const visible = editable.filter((o) => o.name.toLowerCase().includes(search.trim().toLowerCase()));
+
+  // A rename only ever touches a small display-name override, never the
+  // overlay's actual filename — so it can't break a Browser Source URL
+  // already pasted into OBS, which is derived from the filename.
+  const commitRename = async () => {
+    if (!renaming) return;
+    const { file, value } = renaming;
+    setRenaming(null);
+    try {
+      await invoke("overlay_rename_custom", { file, name: value });
+      await refresh();
+    } catch (e) {
+      setLoadError(String(e));
+    }
+  };
 
   // Loads a Maker-built overlay's own saved settings before opening it —
   // each overlay's settings live only in its own sidecar file, so this
@@ -82,18 +100,53 @@ export default function OverlayEditorApp() {
         )}
 
         <Card padding={20}>
-          <h3 className="text-[13px] font-semibold text-white/80 mb-3">Your Overlays</h3>
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <h3 className="text-[13px] font-semibold text-white/80">Your Overlays</h3>
+            {editable.length > 0 && (
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search…"
+                className="input-glass text-[11px] w-40 py-1"
+              />
+            )}
+          </div>
           {editable.length === 0 ? (
             <p className="text-[11px] text-white/25">
               Nothing built yet — start with "New Widget" for a single element, or "New Canvas" for several
               placed together. Plain uploaded files (not built here) show up in the Overlay Library app instead.
             </p>
+          ) : visible.length === 0 ? (
+            <p className="text-[11px] text-white/25">No overlays match "{search}".</p>
           ) : (
             <div className="space-y-2">
-              {editable.map((o) => (
+              {visible.map((o) => (
                 <div key={o.file} className="flex items-center gap-3 bg-white/[0.02] rounded-xl px-3 py-2">
-                  <span className="text-[12px] text-white/70 flex-1 capitalize">{o.name}</span>
+                  {renaming?.file === o.file ? (
+                    <input
+                      autoFocus
+                      value={renaming.value}
+                      onChange={(e) => setRenaming({ file: o.file, value: e.target.value })}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename();
+                        if (e.key === "Escape") setRenaming(null);
+                      }}
+                      className="input-glass text-[12px] flex-1"
+                    />
+                  ) : (
+                    <span
+                      onDoubleClick={() => setRenaming({ file: o.file, value: o.name })}
+                      title="Double-click to rename"
+                      className="text-[12px] text-white/70 flex-1 capitalize cursor-text"
+                    >
+                      {o.name}
+                    </span>
+                  )}
                   <Badge variant="purple">{o.kind === "canvas" ? "Canvas" : "Widget"}</Badge>
+                  <Button variant="ghost" size="sm" onClick={() => setRenaming({ file: o.file, value: o.name })}>
+                    🏷️ Rename
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => openWithSavedParams(o.file, "edit", o.kind!)}>
                     ✏️ Edit
                   </Button>

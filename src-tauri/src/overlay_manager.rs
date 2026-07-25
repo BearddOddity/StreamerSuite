@@ -6,7 +6,8 @@
 //     broadcast + widgets/alerts-overlay.html)
 //   - custom: user-added files, copied into overlays/custom/ under the
 //     app's base directory and served by server.rs's custom_overlay_handler
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Serialize)]
 pub struct OverlayEntry {
@@ -41,6 +42,19 @@ fn canvas_sidecar_path(dir: &std::path::Path, html_file: &str) -> std::path::Pat
     dir.join(format!("{stem}.canvas.json"))
 }
 
+fn stem_of(html_file: &str) -> &str {
+    html_file.strip_suffix(".html").unwrap_or(html_file)
+}
+
+/// Where an overlay's version snapshots live — one subfolder per overlay
+/// (keyed by its stem) under a hidden `.history` folder, so a rename never
+/// disturbs its history (renames only touch the display-names map, never
+/// the underlying file/stem) and removing the overlay can delete its whole
+/// history in one `remove_dir_all`.
+fn history_dir(dir: &std::path::Path, stem: &str) -> std::path::PathBuf {
+    dir.join(".history").join(stem)
+}
+
 fn custom_overlays_dir() -> Result<std::path::PathBuf, String> {
     let dir = crate::app_base_dir()?.join("overlays").join("custom");
     std::fs::create_dir_all(&dir).map_err(|e| format!("couldn't create overlays/custom: {e}"))?;
@@ -50,6 +64,49 @@ fn custom_overlays_dir() -> Result<std::path::PathBuf, String> {
 fn humanize(file: &str) -> String {
     let stem = file.rsplit_once('.').map(|(s, _)| s).unwrap_or(file);
     stem.replace(['_', '-'], " ")
+}
+
+/// Display-name overrides live in their own tiny file, entirely separate
+/// from the overlay's actual filename — so renaming an overlay never
+/// touches its .html file or `.overlay.json`/`.canvas.json` sidecar, which
+/// means the Browser Source URL already pasted into OBS (built from the
+/// filename) keeps working across a rename.
+fn names_map_path(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.join(".display_names.json")
+}
+
+fn load_names_map(dir: &std::path::Path) -> HashMap<String, String> {
+    std::fs::read_to_string(names_map_path(dir))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_names_map(dir: &std::path::Path, map: &HashMap<String, String>) -> Result<(), String> {
+    let json = serde_json::to_string(map).map_err(|e| format!("couldn't serialize overlay names: {e}"))?;
+    std::fs::write(names_map_path(dir), json).map_err(|e| format!("couldn't write overlay names: {e}"))
+}
+
+/// Sets (or, given an empty/whitespace-only name, clears) a display-name
+/// override for a custom overlay. Purely cosmetic — never renames the
+/// underlying file, so it can't collide with or affect any other overlay.
+#[tauri::command]
+pub(crate) fn overlay_rename_custom(file: String, name: String) -> Result<(), String> {
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err("invalid file name".into());
+    }
+    let dir = custom_overlays_dir()?;
+    if !dir.join(&file).exists() {
+        return Err("overlay not found".into());
+    }
+    let mut map = load_names_map(&dir);
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        map.remove(&file);
+    } else {
+        map.insert(file, trimmed.chars().take(80).collect());
+    }
+    save_names_map(&dir, &map)
 }
 
 #[tauri::command]
@@ -70,12 +127,13 @@ pub(crate) fn overlay_list_builtin() -> Result<Vec<OverlayEntry>, String> {
 #[tauri::command]
 pub(crate) fn overlay_list_custom() -> Result<Vec<OverlayEntry>, String> {
     let dir = custom_overlays_dir()?;
+    let names = load_names_map(&dir);
     let mut entries = Vec::new();
     let read = std::fs::read_dir(&dir).map_err(|e| format!("couldn't read overlays/custom: {e}"))?;
     for entry in read.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_string();
-        if file_name.ends_with(".overlay.json") || file_name.ends_with(".canvas.json") {
-            continue; // a settings sidecar, not an overlay file itself
+        if file_name.ends_with(".overlay.json") || file_name.ends_with(".canvas.json") || file_name.starts_with('.') {
+            continue; // a settings sidecar, the names map, or the history dir — not an overlay file itself
         }
         let is_template = params_sidecar_path(&dir, &file_name).exists();
         let is_canvas = canvas_sidecar_path(&dir, &file_name).exists();
@@ -87,7 +145,8 @@ pub(crate) fn overlay_list_custom() -> Result<Vec<OverlayEntry>, String> {
         } else {
             None
         };
-        entries.push(OverlayEntry { name: humanize(&file_name), file: file_name, editable, kind });
+        let name = names.get(&file_name).cloned().unwrap_or_else(|| humanize(&file_name));
+        entries.push(OverlayEntry { name, file: file_name, editable, kind });
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)
@@ -127,6 +186,11 @@ pub(crate) fn overlay_remove_custom(file: String) -> Result<(), String> {
     // Best-effort — a plain uploaded file (not Maker-built) never had one.
     let _ = std::fs::remove_file(params_sidecar_path(&dir, &file));
     let _ = std::fs::remove_file(canvas_sidecar_path(&dir, &file));
+    let _ = std::fs::remove_dir_all(history_dir(&dir, stem_of(&file)));
+    let mut names = load_names_map(&dir);
+    if names.remove(&file).is_some() {
+        let _ = save_names_map(&dir, &names);
+    }
     Ok(())
 }
 
@@ -196,6 +260,13 @@ pub(crate) struct TemplateParams {
     /// bundled system font stack.
     #[serde(default)]
     font_family: String,
+    /// A user-uploaded font file, embedded as a data URI — takes priority
+    /// over `font_family` (the Google Fonts picker) when set, since a
+    /// custom upload is a deliberate override of the preset list.
+    #[serde(default)]
+    custom_font_data_uri: Option<String>,
+    #[serde(default)]
+    custom_font_name: String,
     #[serde(default = "default_border_radius")]
     border_radius: String,
     #[serde(default = "default_true")]
@@ -241,6 +312,13 @@ pub(crate) struct CanvasElement {
     height_pct: f32,
     #[serde(default)]
     z_index: i32,
+    /// Editor-only bookkeeping — never affects the rendered HTML, just
+    /// whether the Canvas Maker lets this element be dragged/resized and
+    /// whether it moves together with other elements sharing its `group_id`.
+    #[serde(default)]
+    locked: bool,
+    #[serde(default)]
+    group_id: Option<String>,
     params: TemplateParams,
 }
 
@@ -339,6 +417,24 @@ fn clamp01(v: f32) -> f32 {
     v.clamp(0.0, 1.0)
 }
 
+/// Only a `data:` URI is accepted for an uploaded font — most browsers/OSes
+/// report font files as `font/*`, `application/font-*`, or the generic
+/// `application/octet-stream`, so the check is on the scheme, not a narrow
+/// MIME allowlist. Capped well above any real font file to keep a malformed
+/// or huge upload from bloating every saved overlay HTML.
+fn safe_font_data_uri(input: &Option<String>) -> Option<String> {
+    input
+        .as_ref()
+        .filter(|s| s.starts_with("data:") && s.len() < 5_000_000)
+        .cloned()
+}
+
+/// Same character allowlist as `safe_font_family` — this becomes a CSS
+/// `@font-face` family name, so it's sanitized the same way.
+fn safe_font_name(input: &str, fallback: &str) -> String {
+    safe_font_family(input).unwrap_or_else(|| fallback.to_string())
+}
+
 /// Renders a bound field as HTML: static text is escaped and printed as-is;
 /// a live-bound field gets a `data-bind` span the generated page's poller
 /// (see `data_bind_script`) fills in and keeps current.
@@ -364,6 +460,18 @@ fn has_binding(params: &TemplateParams) -> bool {
 /// `[data-bind]` element that matches.
 const DATA_BIND_SCRIPT: &str = r#"<script>
 (function() {
+  // Representative stand-ins so a bound field never looks empty/broken while
+  // being designed — only used when there's no overlay token (i.e. this
+  // page isn't loaded from a real /forge-overlay or /custom-overlay URL,
+  // which is exactly the Maker's own live preview). A real OBS browser
+  // source always has a token and gets real data over the WebSocket below.
+  var SAMPLE_DATA = {
+    viewers: 128, followers: 1234, subscribers: 42, uptime: 5425, timer: 754,
+    scene: "Just Chatting", latest_chat: "GG that was awesome!",
+    now_playing_sound: "Airhorn", stream_title: "Chill stream, come hang out",
+    stream_category: "Just Chatting", latest_alert: "TestViewer just followed!",
+    cohost_reply: "Thanks for stopping by!"
+  };
   function fmt(key, value) {
     if (value == null) return "—";
     if (key === "uptime" || key === "timer") {
@@ -393,9 +501,10 @@ const DATA_BIND_SCRIPT: &str = r#"<script>
     var token = getOverlayToken();
     // No token in the URL means this page isn't loaded from a real
     // /forge-overlay or /custom-overlay path (e.g. the Overlay Maker's own
-    // live preview, which renders via srcDoc and has no such URL) — skip
-    // connecting rather than opening a WebSocket the server will reject.
-    if (!token) return;
+    // live preview, which renders via srcDoc and has no such URL) — show
+    // sample values once instead of opening a WebSocket the server would
+    // reject, so the preview never looks broken/empty while designing.
+    if (!token) { apply(SAMPLE_DATA); return; }
     var ws = new WebSocket("ws://127.0.0.1:53735/data-ws?token=" + token);
     ws.onmessage = function(ev) { try { apply(JSON.parse(ev.data)); } catch (e) {} };
     ws.onclose = function() { setTimeout(connect, 3000); };
@@ -466,20 +575,31 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
     // Same convention as StatusForge/Multi-Chat's own theme settings: an
     // optional Google Fonts family, loaded via a <link> tag, that falls
     // back to the bundled system stack when unset or invalid.
+    let custom_font_uri = safe_font_data_uri(&params.custom_font_data_uri);
     let font_family = safe_font_family(&params.font_family);
-    let font_css = font_family
-        .as_ref()
-        .map(|f| format!("\"{f}\", {FONT_STACK}"))
-        .unwrap_or_else(|| FONT_STACK.to_string());
-    let font_link = font_family
-        .as_ref()
-        .map(|f| {
-            let query = f.replace(' ', "+");
-            format!(
-                r#"<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family={query}:wght@400;500;700;800&display=swap">"#
-            )
-        })
-        .unwrap_or_default();
+    let (font_css, font_link, font_face_css) = if let Some(uri) = &custom_font_uri {
+        let name = safe_font_name(&params.custom_font_name, "CustomOverlayFont");
+        (
+            format!("\"{name}\", {FONT_STACK}"),
+            String::new(),
+            format!("@font-face {{ font-family: \"{name}\"; src: url({uri}); font-display: swap; }}"),
+        )
+    } else {
+        let css = font_family
+            .as_ref()
+            .map(|f| format!("\"{f}\", {FONT_STACK}"))
+            .unwrap_or_else(|| FONT_STACK.to_string());
+        let link = font_family
+            .as_ref()
+            .map(|f| {
+                let query = f.replace(' ', "+");
+                format!(
+                    r#"<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family={query}:wght@400;500;700;800&display=swap">"#
+                )
+            })
+            .unwrap_or_default();
+        (css, link, String::new())
+    };
 
     // A subtle pop-in, same spirit as widgets/alerts-overlay.html's entrance
     // animation — off entirely (not just neutralized) when the user disables
@@ -730,6 +850,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
 <title>StreamerSuite Overlay</title>
 {font_link}
 <style>
+  {font_face_css}
   html, body {{ margin: 0; padding: 0; background: transparent; overflow: hidden; font-family: {font_css}; }}
   #card, #bar {{ {position_css} }}
   {extra_style}
@@ -865,6 +986,8 @@ fn build_canvas_from_specs(specs: Vec<AiElementSpec>) -> Vec<CanvasElement> {
             width_pct: if spec.width_pct <= 0.0 { 30.0 } else { spec.width_pct.clamp(10.0, 60.0) },
             height_pct: if spec.height_pct <= 0.0 { 20.0 } else { spec.height_pct.clamp(10.0, 50.0) },
             z_index: i as i32,
+            locked: false,
+            group_id: None,
             params: TemplateParams {
                 template: spec.template,
                 title: BoundField { text: spec.title.chars().take(80).collect(), source: String::new() },
@@ -876,6 +999,8 @@ fn build_canvas_from_specs(specs: Vec<AiElementSpec>) -> Vec<CanvasElement> {
                 logo_data_uri: None,
                 speed_seconds: None,
                 font_family: String::new(),
+                custom_font_data_uri: None,
+                custom_font_name: String::new(),
                 border_radius: default_border_radius(),
                 animations_enabled: true,
                 animation_style: default_animation_style(),
@@ -962,6 +1087,171 @@ pub(crate) fn overlay_preview_canvas(elements: Vec<CanvasElement>) -> Result<Str
     render_canvas(&elements)
 }
 
+// --- Named version history / save-points ---
+// A snapshot is whatever's currently saved on disk (the sidecar content, not
+// the caller's in-flight edit) — so an "Auto-save" snapshot taken right
+// before `overlay_update_template`/`overlay_update_canvas` overwrites always
+// captures the last-saved-and-actually-working state, not a half-typed edit.
+
+#[derive(Serialize, Deserialize)]
+struct VersionEnvelope {
+    kind: String,
+    label: String,
+    timestamp: i64,
+    data: serde_json::Value,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct VersionInfo {
+    id: String,
+    label: String,
+    timestamp: i64,
+}
+
+/// Auto-saves keep piling up on every edit — capped well past what anyone
+/// would realistically scroll through, so the history stays useful without
+/// growing unbounded. Named checkpoints count against the same cap; the
+/// oldest entries (by timestamp, regardless of label) are pruned first.
+const MAX_HISTORY_ENTRIES: usize = 30;
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn prune_history(hdir: &std::path::Path) {
+    let Ok(read) = std::fs::read_dir(hdir) else { return };
+    let mut entries: Vec<(std::path::PathBuf, i64)> = read
+        .flatten()
+        .filter_map(|e| {
+            let path = e.path();
+            let json = std::fs::read_to_string(&path).ok()?;
+            let env: VersionEnvelope = serde_json::from_str(&json).ok()?;
+            Some((path, env.timestamp))
+        })
+        .collect();
+    if entries.len() <= MAX_HISTORY_ENTRIES {
+        return;
+    }
+    entries.sort_by_key(|(_, ts)| -*ts);
+    for (path, _) in entries.into_iter().skip(MAX_HISTORY_ENTRIES) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Snapshots whatever's currently on disk for `file` (template or canvas,
+/// whichever sidecar exists) into its history folder. `Ok(None)` when
+/// there's nothing saved yet to snapshot (e.g. an update racing a create
+/// that hasn't finished) rather than an error — a missed auto-snapshot
+/// should never block the save it's guarding.
+fn save_version_internal(dir: &std::path::Path, file: &str, label: &str) -> Result<Option<String>, String> {
+    let (kind, data) = if canvas_sidecar_path(dir, file).exists() {
+        let json = std::fs::read_to_string(canvas_sidecar_path(dir, file)).map_err(|e| e.to_string())?;
+        ("canvas".to_string(), serde_json::from_str::<serde_json::Value>(&json).map_err(|e| e.to_string())?)
+    } else if params_sidecar_path(dir, file).exists() {
+        let json = std::fs::read_to_string(params_sidecar_path(dir, file)).map_err(|e| e.to_string())?;
+        ("template".to_string(), serde_json::from_str::<serde_json::Value>(&json).map_err(|e| e.to_string())?)
+    } else {
+        return Ok(None);
+    };
+    let hdir = history_dir(dir, stem_of(file));
+    std::fs::create_dir_all(&hdir).map_err(|e| format!("couldn't create version history folder: {e}"))?;
+    let timestamp = now_millis();
+    let label = if label.trim().is_empty() { "Checkpoint".to_string() } else { label.trim().chars().take(60).collect() };
+    let envelope = VersionEnvelope { kind, label, timestamp, data };
+    // Two snapshots landing in the same millisecond (e.g. a fast automated
+    // test, or an auto-save immediately following a named checkpoint) must
+    // still get distinct file names — a plain timestamp alone isn't
+    // guaranteed unique.
+    let mut id = format!("{timestamp}.json");
+    let mut n = 2;
+    while hdir.join(&id).exists() {
+        id = format!("{timestamp}-{n}.json");
+        n += 1;
+    }
+    let json = serde_json::to_string(&envelope).map_err(|e| e.to_string())?;
+    std::fs::write(hdir.join(&id), json).map_err(|e| format!("couldn't write version snapshot: {e}"))?;
+    prune_history(&hdir);
+    Ok(Some(id))
+}
+
+/// Saves an explicit, user-named checkpoint of the overlay's currently
+/// *saved* state (not unsaved in-editor changes — save first, then
+/// checkpoint) that `overlay_restore_version` can roll back to later.
+#[tauri::command]
+pub(crate) fn overlay_save_version(file: String, label: String) -> Result<(), String> {
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err("invalid file name".into());
+    }
+    let dir = custom_overlays_dir()?;
+    if save_version_internal(&dir, &file, &label)?.is_none() {
+        return Err("overlay hasn't been saved yet".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn overlay_list_versions(file: String) -> Result<Vec<VersionInfo>, String> {
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err("invalid file name".into());
+    }
+    let dir = custom_overlays_dir()?;
+    let hdir = history_dir(&dir, stem_of(&file));
+    let mut versions: Vec<VersionInfo> = std::fs::read_dir(&hdir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let json = std::fs::read_to_string(e.path()).ok()?;
+            let env: VersionEnvelope = serde_json::from_str(&json).ok()?;
+            Some(VersionInfo { id: e.file_name().to_string_lossy().to_string(), label: env.label, timestamp: env.timestamp })
+        })
+        .collect();
+    versions.sort_by_key(|v| -v.timestamp);
+    Ok(versions)
+}
+
+/// Rolls `file` back to a prior snapshot — re-renders and overwrites the
+/// live HTML plus its sidecar, exactly like a normal update, and takes a
+/// safety snapshot of the state being replaced first (labeled distinctly)
+/// so a restore is itself never a one-way trip.
+#[tauri::command]
+pub(crate) fn overlay_restore_version(file: String, version_id: String) -> Result<(), String> {
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err("invalid file name".into());
+    }
+    if version_id.contains('/') || version_id.contains('\\') || version_id.contains("..") {
+        return Err("invalid version id".into());
+    }
+    let dir = custom_overlays_dir()?;
+    let dest = dir.join(&file);
+    crate::assert_path_in_base(&dest, &dir)?;
+    if !dest.exists() {
+        return Err("overlay not found".into());
+    }
+    let hdir = history_dir(&dir, stem_of(&file));
+    let version_path = hdir.join(&version_id);
+    crate::assert_path_in_base(&version_path, &hdir)?;
+    let json = std::fs::read_to_string(&version_path).map_err(|e| format!("couldn't read version snapshot: {e}"))?;
+    let envelope: VersionEnvelope = serde_json::from_str(&json).map_err(|e| format!("couldn't parse version snapshot: {e}"))?;
+
+    let _ = save_version_internal(&dir, &file, "Before restore");
+
+    if envelope.kind == "canvas" {
+        let canvas: CanvasParams = serde_json::from_value(envelope.data).map_err(|e| format!("couldn't parse version snapshot: {e}"))?;
+        let html = render_canvas(&canvas.elements)?;
+        std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
+        write_canvas_sidecar(&dir, &file, &canvas)
+    } else {
+        let params: TemplateParams = serde_json::from_value(envelope.data).map_err(|e| format!("couldn't parse version snapshot: {e}"))?;
+        let html = render_template(&params)?;
+        std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
+        write_params_sidecar(&dir, &file, &params)
+    }
+}
+
 fn write_canvas_sidecar(dir: &std::path::Path, html_file: &str, canvas: &CanvasParams) -> Result<(), String> {
     let json = serde_json::to_string(canvas).map_err(|e| format!("couldn't serialize overlay settings: {e}"))?;
     std::fs::write(canvas_sidecar_path(dir, html_file), json)
@@ -1020,6 +1310,7 @@ pub(crate) fn overlay_update_canvas(file: String, elements: Vec<CanvasElement>) 
     if !dest.exists() {
         return Err("overlay not found".into());
     }
+    let _ = save_version_internal(&dir, &file, "Auto-save");
     let html = render_canvas(&elements)?;
     std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
     write_canvas_sidecar(&dir, &file, &CanvasParams { elements })
@@ -1115,6 +1406,7 @@ pub(crate) fn overlay_update_template(file: String, params: TemplateParams) -> R
     if !dest.exists() {
         return Err("overlay not found".into());
     }
+    let _ = save_version_internal(&dir, &file, "Auto-save");
     let html = render_template(&params)?;
     std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
     write_params_sidecar(&dir, &file, &params)
@@ -1136,6 +1428,8 @@ mod tests {
             logo_data_uri: None,
             speed_seconds: None,
             font_family: String::new(),
+            custom_font_data_uri: None,
+            custom_font_name: String::new(),
             border_radius: default_border_radius(),
             animations_enabled: true,
             animation_style: default_animation_style(),
@@ -1154,6 +1448,8 @@ mod tests {
             width_pct: 30.0,
             height_pct: 20.0,
             z_index: z,
+            locked: false,
+            group_id: None,
             params: params(template),
         }
     }
@@ -1371,6 +1667,28 @@ mod tests {
     }
 
     #[test]
+    fn uploaded_custom_font_wins_over_google_font_and_embeds_a_font_face() {
+        let mut p = params("lower-third");
+        p.font_family = "Bebas Neue".to_string();
+        p.custom_font_data_uri = Some("data:font/ttf;base64,AAAA".to_string());
+        p.custom_font_name = "My Stream Font".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(html.contains("@font-face"));
+        assert!(html.contains(r#"font-family: "My Stream Font""#));
+        assert!(html.contains("data:font/ttf;base64,AAAA"));
+        assert!(!html.contains("fonts.googleapis.com"), "an uploaded font should skip the Google Fonts link entirely");
+    }
+
+    #[test]
+    fn non_data_uri_custom_font_is_rejected() {
+        let mut p = params("lower-third");
+        p.custom_font_data_uri = Some("https://evil.example/font.ttf".to_string());
+        let html = render_template(&p).unwrap();
+        assert!(!html.contains("@font-face"));
+        assert!(!html.contains("evil.example"));
+    }
+
+    #[test]
     fn invalid_font_family_falls_back_to_system_stack_no_google_link() {
         let mut p = params("lower-third");
         p.font_family = "Bebas'; </style><script>alert(1)</script>".to_string();
@@ -1497,6 +1815,93 @@ mod tests {
 
         assert!(params_sidecar_path(&dir, "made.html").exists());
         assert!(!params_sidecar_path(&dir, "uploaded.png").exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rename_sets_and_clears_a_display_name_override_without_touching_the_file() {
+        let dir = std::env::temp_dir().join(format!("sf-overlay-rename-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("lower-third.html"), "<html></html>").unwrap();
+
+        let mut names = load_names_map(&dir);
+        assert!(names.is_empty());
+        names.insert("lower-third.html".to_string(), "My Cool Overlay".to_string());
+        save_names_map(&dir, &names).unwrap();
+
+        let reloaded = load_names_map(&dir);
+        assert_eq!(reloaded.get("lower-third.html").unwrap(), "My Cool Overlay");
+        assert!(dir.join("lower-third.html").exists(), "renaming must never touch the actual file");
+
+        // Clearing (what overlay_rename_custom does for an empty name).
+        let mut cleared = reloaded;
+        cleared.remove("lower-third.html");
+        save_names_map(&dir, &cleared).unwrap();
+        assert!(load_names_map(&dir).get("lower-third.html").is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn version_history_saves_lists_newest_first_and_restores() {
+        let dir = std::env::temp_dir().join(format!("sf-overlay-history-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut p = params("lower-third");
+        p.title.text = "First".to_string();
+        std::fs::write(dir.join("hist.html"), render_template(&p).unwrap()).unwrap();
+        write_params_sidecar(&dir, "hist.html", &p).unwrap();
+
+        // First snapshot captures "First".
+        let id1 = save_version_internal(&dir, "hist.html", "Checkpoint one").unwrap().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        // Simulate an edit + save, then snapshot again — this captures "Second".
+        p.title.text = "Second".to_string();
+        write_params_sidecar(&dir, "hist.html", &p).unwrap();
+        let id2 = save_version_internal(&dir, "hist.html", "").unwrap().unwrap();
+        assert_ne!(id1, id2);
+
+        let hdir = history_dir(&dir, "hist");
+        let mut versions: Vec<VersionInfo> = std::fs::read_dir(&hdir)
+            .unwrap()
+            .flatten()
+            .map(|e| {
+                let env: VersionEnvelope = serde_json::from_str(&std::fs::read_to_string(e.path()).unwrap()).unwrap();
+                VersionInfo { id: e.file_name().to_string_lossy().to_string(), label: env.label, timestamp: env.timestamp }
+            })
+            .collect();
+        versions.sort_by_key(|v| -v.timestamp);
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].id, id2, "newest snapshot should sort first");
+        assert_eq!(versions[1].label, "Checkpoint one");
+        assert_eq!(versions[0].label, "Checkpoint", "an empty label falls back to a sane default");
+
+        // Restoring the first snapshot should bring "First" back.
+        let env1: VersionEnvelope = serde_json::from_str(&std::fs::read_to_string(hdir.join(&id1)).unwrap()).unwrap();
+        let restored: TemplateParams = serde_json::from_value(env1.data).unwrap();
+        assert_eq!(restored.title.text, "First");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn version_history_prunes_oldest_entries_past_the_cap() {
+        let dir = std::env::temp_dir().join(format!("sf-overlay-history-prune-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = params("lower-third");
+        std::fs::write(dir.join("prune.html"), render_template(&p).unwrap()).unwrap();
+        write_params_sidecar(&dir, "prune.html", &p).unwrap();
+
+        for _ in 0..(MAX_HISTORY_ENTRIES + 5) {
+            save_version_internal(&dir, "prune.html", "").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        let hdir = history_dir(&dir, "prune");
+        let count = std::fs::read_dir(&hdir).unwrap().count();
+        assert_eq!(count, MAX_HISTORY_ENTRIES, "history should be pruned back down to the cap");
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -88,6 +88,12 @@ function FieldRow({
   sourceOnly?: boolean;
   sources: { value: string; label: string }[];
 }) {
+  // A saved binding whose source no longer shows up among either the known
+  // or currently-discovered live sources is "dead" — most likely the tool
+  // that used to publish it was removed/renamed, or hasn't run yet this
+  // session. Purely a heads-up (the field still saves fine either way).
+  const isDead = field.source.trim() !== "" && !sources.some((s) => s.value === field.source);
+
   return (
     <div className="space-y-1.5">
       <label className="text-[10px] text-white/40 uppercase tracking-wide">{label}</label>
@@ -104,13 +110,40 @@ function FieldRow({
           <Select
             value={field.source}
             onChange={(v) => onChange({ ...field, source: v })}
-            options={sources}
+            options={isDead ? [{ value: field.source, label: `⚠ ${field.source} (not found)` }, ...sources] : sources}
             style={SELECT_COMPACT_STYLE}
           />
         </div>
       </div>
+      {isDead && (
+        <p className="text-[10px]" style={{ color: "var(--bd-red-text)" }}>
+          ⚠ "{field.source}" isn't a known or currently-published live source — this field may show nothing until
+          that source is available, or pick a different one.
+        </p>
+      )}
     </div>
   );
+}
+
+/** Relative luminance of a `#rrggbb`/`#rgb` hex color (WCAG formula). */
+function luminance(hex: string): number {
+  const full = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
+  const n = parseInt(full.slice(1), 16);
+  if (Number.isNaN(n) || full.length !== 7) return 1;
+  const channels = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  const [r, g, b] = [channels[0] ?? 0, channels[1] ?? 0, channels[2] ?? 0];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** WCAG contrast ratio between two hex colors, 1 (identical) to 21 (max). */
+function contrastRatio(a: string, b: string): number {
+  const sorted = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  const l1 = sorted[0] ?? 1;
+  const l2 = sorted[1] ?? 0;
+  return (l1 + 0.05) / (l2 + 0.05);
 }
 
 export { DEFAULT_TEMPLATE_PARAMS };
@@ -135,6 +168,16 @@ export default function TemplateFieldsEditor({
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => set("logoDataUri", String(reader.result));
+    reader.readAsDataURL(file);
+  };
+
+  const pickFont = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      set("customFontDataUri", String(reader.result));
+      set("customFontName", file.name.replace(/\.[^.]+$/, ""));
+    };
     reader.readAsDataURL(file);
   };
 
@@ -232,6 +275,12 @@ export default function TemplateFieldsEditor({
         <ColorField label="Text Color" value={params.textColor} onChange={(v) => set("textColor", v)} />
         <ColorField label="Accent Color" value={params.accentColor} onChange={(v) => set("accentColor", v)} />
       </div>
+      {params.bgOpacity >= 0.4 && contrastRatio(params.textColor, "#050505") < 3 && (
+        <p className="text-[10px] -mt-2" style={{ color: "var(--bd-red-text)" }}>
+          ⚠ This text color is hard to read against the card's dark background at {Math.round(params.bgOpacity * 100)}%
+          opacity — consider a lighter text color or lowering opacity.
+        </p>
+      )}
 
       <div>
         <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
@@ -255,6 +304,7 @@ export default function TemplateFieldsEditor({
           onChange={(v) => set("fontFamily", v)}
           options={FONT_PRESETS.map((f) => ({ value: f, label: f || "System Default" }))}
           style={SELECT_COMPACT_STYLE}
+          disabled={!!params.customFontDataUri}
         />
         <Select
           label="Corner Style"
@@ -267,6 +317,32 @@ export default function TemplateFieldsEditor({
           ]}
           style={SELECT_COMPACT_STYLE}
         />
+      </div>
+
+      <div>
+        <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
+          Custom Font Upload (optional — overrides the preset above)
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="file"
+            accept=".ttf,.otf,.woff,.woff2"
+            onChange={(e) => pickFont(e.target.files?.[0])}
+            className="text-[11px] text-white/50"
+          />
+          {params.customFontDataUri && (
+            <button
+              onClick={() => {
+                set("customFontDataUri", null);
+                set("customFontName", "");
+              }}
+              className="text-[10px] text-white/25 hover:text-red-400"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+        {params.customFontDataUri && <p className="text-[10px] text-white/30 mt-1">Using "{params.customFontName}"</p>}
       </div>
 
       <div className="space-y-2">
