@@ -30,6 +30,13 @@ function NumberField({ label, value, onChange, min, max }: { label: string; valu
 }
 
 const SNAP_THRESHOLD_PCT = 1.5;
+/** The underlying preview iframe renders at this true pixel size and gets
+ * CSS-scaled down to fit the canvas box — same idea as ScaledPreview's
+ * "Actual Size" mode, always on here since there's no scenario where you'd
+ * want the drag surface showing misleading (non-real-resolution) proportions
+ * while placing elements. */
+const NATIVE_W = 1920;
+const NATIVE_H = 1080;
 
 /** Canvas center/edges plus every other element's left/center/right (x) or
  * top/center/bottom (y) edge — what a dragged/resized element can snap to,
@@ -104,6 +111,7 @@ export default function CanvasMaker({
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; elId: string } | null>(null);
+  const [canvasScale, setCanvasScale] = useState(1);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -383,6 +391,16 @@ export default function CanvasMaker({
   };
 
   useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const update = () => setCanvasScale(el.clientWidth / NATIVE_W);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       invoke<string>("overlay_preview_canvas", { elements })
@@ -583,41 +601,44 @@ export default function CanvasMaker({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={requestClose}>
-      <Card padding={24} className="w-full max-w-6xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4">
-          <SectionHead
-            icon="🧩"
-            title={mode === "edit" ? "Edit Canvas Overlay" : "Build a Canvas Overlay"}
-            desc="Multiple widgets, placed and stacked freely, in one overlay"
-            right={
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="sm" onClick={undo} disabled={past.length === 0}>
-                  ↶ Undo
-                </Button>
-                <Button variant="ghost" size="sm" onClick={redo} disabled={future.length === 0}>
-                  ↷ Redo
-                </Button>
-                <Button variant="ghost" size="sm" onClick={requestClose}>
-                  ✕
-                </Button>
-              </div>
-            }
-          />
-        </div>
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "var(--bd-black)" }}>
+      <div className="px-5 py-3 shrink-0 border-b border-white/[0.06]">
+        <SectionHead
+          icon="🧩"
+          title={mode === "edit" ? "Edit Canvas Overlay" : "Build a Canvas Overlay"}
+          desc="Multiple widgets, placed and stacked freely, in one overlay"
+          right={
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" onClick={undo} disabled={past.length === 0}>
+                ↶ Undo
+              </Button>
+              <Button variant="ghost" size="sm" onClick={redo} disabled={future.length === 0}>
+                ↷ Redo
+              </Button>
+              <Button variant="ghost" size="sm" onClick={requestClose}>
+                ✕ Close
+              </Button>
+            </div>
+          }
+        />
+      </div>
 
-        {error && (
-          <Card padding={10} className="mb-3">
-            <p className="text-[11px]" style={{ color: "var(--bd-red-text)" }}>
-              {error}
-            </p>
-          </Card>
-        )}
+      {error && (
+        <Card padding={10} className="mx-5 mt-3 shrink-0">
+          <p className="text-[11px]" style={{ color: "var(--bd-red-text)" }}>
+            {error}
+          </p>
+        </Card>
+      )}
 
-        <div className="grid grid-cols-[180px_320px_1fr] gap-5">
+      {/* Below xl, panels stack top-to-bottom in one scroll column instead of
+          side-by-side — keeps this usable docked to half of a portrait
+          monitor, not just a wide landscape window. */}
+      <div className="flex-1 overflow-y-auto xl:overflow-hidden">
+        <div className="flex flex-col xl:flex-row xl:h-full gap-4 p-5">
           {/* Layers — top of the list is front-most (highest z-index), same
               convention as Canva/Photoshop. Drag a row to restack it. */}
-          <div className="space-y-2">
+          <Card padding={14} className="xl:w-[220px] shrink-0 xl:overflow-y-auto space-y-2">
             <label className="text-[10px] text-white/40 uppercase tracking-wide block">Layers</label>
             <div className="space-y-1">
               {[...elements]
@@ -757,10 +778,10 @@ export default function CanvasMaker({
                 ✨ Design with AI
               </Button>
             )}
-          </div>
+          </Card>
 
           {/* Selected element's fields */}
-          <div>
+          <Card padding={16} className="xl:w-[340px] shrink-0 xl:overflow-y-auto">
             {selected ? (
               <div className="space-y-4">
                 <div>
@@ -811,12 +832,12 @@ export default function CanvasMaker({
                 {elements.length === 0 ? "Add an element to get started." : "Select an element to edit it."}
               </p>
             )}
-          </div>
+          </Card>
 
           {/* Canvas — drag an element to move it, drag its bottom-right handle
               to resize, both snapping to the canvas center/edges and other
               elements' edges (thin purple guide lines while snapped). */}
-          <div className="space-y-2">
+          <Card padding={16} className="flex-1 min-w-0 space-y-2">
             <label className="text-[10px] text-white/40 uppercase tracking-wide block">Canvas</label>
             <div
               ref={canvasRef}
@@ -827,7 +848,8 @@ export default function CanvasMaker({
                 <iframe
                   title="canvas-preview"
                   srcDoc={preview}
-                  className="absolute inset-0 w-full h-full pointer-events-none"
+                  className="absolute top-0 left-0 pointer-events-none"
+                  style={{ width: NATIVE_W, height: NATIVE_H, transform: `scale(${canvasScale})`, transformOrigin: "top left", border: 0 }}
                 />
               )}
 
@@ -887,10 +909,17 @@ export default function CanvasMaker({
               With an element selected: arrow keys nudge (Shift for bigger steps), Ctrl+D duplicates, Delete
               removes, right-click for more. Ctrl+Z / Ctrl+Shift+Z undo/redo anywhere.
             </p>
-          </div>
+          </Card>
         </div>
 
-        {contextMenu && (
+        {mode === "edit" && editFile && (
+          <div className="px-5 pb-5">
+            <VersionHistoryPanel file={editFile} onRestored={onSaved} />
+          </div>
+        )}
+      </div>
+
+      {contextMenu && (
           <div
             className="fixed z-[60] bg-black/95 border border-white/10 rounded-lg shadow-xl py-1 text-[11px] min-w-[150px]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
@@ -935,21 +964,14 @@ export default function CanvasMaker({
           </div>
         )}
 
-        {mode === "edit" && editFile && (
-          <div className="mt-4">
-            <VersionHistoryPanel file={editFile} onRestored={onSaved} />
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 mt-6">
-          <Button variant="ghost" onClick={requestClose}>
-            Cancel
-          </Button>
-          <Button variant="cta" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : mode === "edit" ? "Save Changes" : "Save Overlay"}
-          </Button>
-        </div>
-      </Card>
+      <div className="flex justify-end gap-2 px-5 py-3 border-t border-white/[0.06] shrink-0">
+        <Button variant="ghost" onClick={requestClose}>
+          Cancel
+        </Button>
+        <Button variant="cta" onClick={save} disabled={saving}>
+          {saving ? "Saving…" : mode === "edit" ? "Save Changes" : "Save Overlay"}
+        </Button>
+      </div>
 
       {showSaveChoice && (
         <SaveChoiceDialog

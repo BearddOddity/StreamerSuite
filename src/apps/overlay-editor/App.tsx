@@ -72,7 +72,7 @@ export default function OverlayEditorApp() {
 
   return (
     <div className="h-full flex flex-col p-6 overflow-y-auto">
-      <div className="max-w-2xl mx-auto w-full">
+      <div className="max-w-5xl mx-auto w-full">
         <div className="mb-6">
           <SectionHead
             icon="🧩"
@@ -99,29 +99,42 @@ export default function OverlayEditorApp() {
           </Card>
         )}
 
-        <Card padding={20}>
-          <div className="flex items-center justify-between mb-3 gap-3">
-            <h3 className="text-[13px] font-semibold text-white/80">Your Overlays</h3>
-            {editable.length > 0 && (
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search…"
-                className="input-glass text-[11px] w-40 py-1"
-              />
-            )}
-          </div>
-          {editable.length === 0 ? (
+        <div className="flex items-center justify-between mb-3 gap-3">
+          <h3 className="text-[13px] font-semibold text-white/80">Your Overlays</h3>
+          {editable.length > 0 && (
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search…"
+              className="input-glass text-[11px] w-40 py-1"
+            />
+          )}
+        </div>
+        {editable.length === 0 ? (
+          <Card padding={20}>
             <p className="text-[11px] text-white/25">
               Nothing built yet — start with "New Widget" for a single element, or "New Canvas" for several
               placed together. Plain uploaded files (not built here) show up in the Overlay Library app instead.
             </p>
-          ) : visible.length === 0 ? (
+          </Card>
+        ) : visible.length === 0 ? (
+          <Card padding={20}>
             <p className="text-[11px] text-white/25">No overlays match "{search}".</p>
-          ) : (
-            <div className="space-y-2">
-              {visible.map((o) => (
-                <div key={o.file} className="flex items-center gap-3 bg-white/[0.02] rounded-xl px-3 py-2">
+          </Card>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {visible.map((o) => (
+              <Card key={o.file} padding={12} className="flex flex-col gap-2">
+                <div className="relative rounded-lg overflow-hidden border border-white/[0.06] bg-[repeating-conic-gradient(#111_0%_25%,#0a0a0a_0%_50%)] bg-[length:16px_16px] aspect-video">
+                  <iframe
+                    title={`${o.name} preview`}
+                    src={customUrl(o.file)}
+                    className="w-full h-full pointer-events-none"
+                    style={{ border: 0 }}
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
                   {renaming?.file === o.file ? (
                     <input
                       autoFocus
@@ -138,14 +151,23 @@ export default function OverlayEditorApp() {
                     <span
                       onDoubleClick={() => setRenaming({ file: o.file, value: o.name })}
                       title="Double-click to rename"
-                      className="text-[12px] text-white/70 flex-1 capitalize cursor-text"
+                      className="text-[12px] text-white/70 flex-1 capitalize cursor-text truncate"
                     >
                       {o.name}
                     </span>
                   )}
                   <Badge variant="purple">{o.kind === "canvas" ? "Canvas" : "Widget"}</Badge>
+                  <button
+                    onClick={() => setDeleteTarget({ file: o.file, name: o.name })}
+                    className="text-[11px] text-white/25 hover:text-red-400 px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <Button variant="ghost" size="sm" onClick={() => setRenaming({ file: o.file, value: o.name })}>
-                    🏷️ Rename
+                    🏷️
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => openWithSavedParams(o.file, "edit", o.kind!)}>
                     ✏️ Edit
@@ -153,20 +175,19 @@ export default function OverlayEditorApp() {
                   <Button variant="ghost" size="sm" onClick={() => openWithSavedParams(o.file, "create", o.kind!)}>
                     ⎘ Duplicate
                   </Button>
-                  <Button variant={copied === o.file ? "success" : "primary"} size="sm" onClick={() => copyUrl(customUrl(o.file), o.file)}>
+                  <Button
+                    variant={copied === o.file ? "success" : "primary"}
+                    size="sm"
+                    onClick={() => copyUrl(customUrl(o.file), o.file)}
+                    className="flex-1"
+                  >
                     {copied === o.file ? "Copied ✓" : "Copy URL"}
                   </Button>
-                  <button
-                    onClick={() => setDeleteTarget({ file: o.file, name: o.name })}
-                    className="text-[11px] text-white/25 hover:text-red-400 px-2"
-                  >
-                    ✕
-                  </button>
                 </div>
-              ))}
-            </div>
-          )}
-        </Card>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       {maker && (

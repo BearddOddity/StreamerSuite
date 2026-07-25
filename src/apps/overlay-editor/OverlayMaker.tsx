@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { DEFAULT_TEMPLATE_PARAMS, type TemplateParams } from "../overlay-library/types";
 import { useLiveSources } from "../overlay-library/useLiveSources";
 import TemplateFieldsEditor from "./TemplateFieldsEditor";
+import ScaledPreview from "./ScaledPreview";
 import { SaveChoiceDialog, UnsavedChangesDialog } from "./ConfirmDialogs";
 import VersionHistoryPanel from "./VersionHistoryPanel";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
@@ -29,8 +30,12 @@ export default function OverlayMaker({
   const [saving, setSaving] = useState(false);
   const [showSaveChoice, setShowSaveChoice] = useState(false);
   const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
+  const [past, setPast] = useState<TemplateParams[]>([]);
+  const [future, setFuture] = useState<TemplateParams[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialSnapshotRef = useRef(JSON.stringify(initialParams ?? DEFAULT_TEMPLATE_PARAMS));
+  const pendingBeforeRef = useRef<TemplateParams | null>(null);
+  const historyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const liveSources = useLiveSources();
   const isDirty = JSON.stringify(params) !== initialSnapshotRef.current;
@@ -42,6 +47,73 @@ export default function OverlayMaker({
       onClose();
     }
   };
+
+  // Same debounced-per-burst history as the Canvas Maker — a run of
+  // keystrokes in one text field, or a drag on the opacity slider, becomes
+  // one undo step instead of one per individual change event.
+  const recordBeforeChange = (before: TemplateParams) => {
+    if (pendingBeforeRef.current === null) pendingBeforeRef.current = before;
+    if (historyDebounceRef.current) clearTimeout(historyDebounceRef.current);
+    historyDebounceRef.current = setTimeout(() => {
+      if (pendingBeforeRef.current) {
+        setPast((p) => [...p.slice(-49), pendingBeforeRef.current!]);
+        setFuture([]);
+      }
+      pendingBeforeRef.current = null;
+    }, 400);
+  };
+
+  const undo = () => {
+    if (pendingBeforeRef.current !== null) {
+      if (historyDebounceRef.current) clearTimeout(historyDebounceRef.current);
+      historyDebounceRef.current = null;
+      const target = pendingBeforeRef.current;
+      pendingBeforeRef.current = null;
+      setFuture((f) => [params, ...f].slice(0, 50));
+      setParams(target);
+      return;
+    }
+    if (past.length === 0) return;
+    const prevState = past[past.length - 1]!;
+    setPast((p) => p.slice(0, -1));
+    setFuture((f) => [params, ...f].slice(0, 50));
+    setParams(prevState);
+  };
+
+  const redo = () => {
+    if (historyDebounceRef.current) {
+      clearTimeout(historyDebounceRef.current);
+      historyDebounceRef.current = null;
+    }
+    if (pendingBeforeRef.current !== null) {
+      setPast((p) => [...p.slice(-49), pendingBeforeRef.current!]);
+      pendingBeforeRef.current = null;
+    }
+    if (future.length === 0) return;
+    const nextState = future[0]!;
+    setFuture((f) => f.slice(1));
+    setPast((p) => [...p, params].slice(-50));
+    setParams(nextState);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (mod && ((e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y")) {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [past, future, params]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -58,8 +130,10 @@ export default function OverlayMaker({
     };
   }, [params]);
 
-  const set = <K extends keyof TemplateParams>(key: K, value: TemplateParams[K]) =>
+  const set = <K extends keyof TemplateParams>(key: K, value: TemplateParams[K]) => {
+    recordBeforeChange(params);
     setParams((p) => ({ ...p, [key]: value }));
+  };
 
   // Editing a pre-existing overlay is the one ambiguous case — Save could
   // reasonably mean "update it" or "keep the original, make a variant."
@@ -100,60 +174,65 @@ export default function OverlayMaker({
   const title = mode === "edit" ? "Edit Overlay" : initialParams ? "Duplicate Overlay" : "Build an Overlay";
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6" onClick={requestClose}>
-      <Card padding={24} className="w-full max-w-4xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4">
-          <SectionHead
-            icon={icon}
-            title={title}
-            right={
-              <Button variant="ghost" size="sm" onClick={requestClose}>
-                ✕
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "var(--bd-black)" }}>
+      <div className="px-5 py-3 shrink-0 border-b border-white/[0.06]">
+        <SectionHead
+          icon={icon}
+          title={title}
+          right={
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" onClick={undo} disabled={past.length === 0 && pendingBeforeRef.current === null}>
+                ↶ Undo
               </Button>
-            }
-          />
-        </div>
-
-        {error && (
-          <Card padding={10} className="mb-3">
-            <p className="text-[11px]" style={{ color: "var(--bd-red-text)" }}>
-              {error}
-            </p>
-          </Card>
-        )}
-
-        <div className="grid grid-cols-2 gap-6">
-          <TemplateFieldsEditor params={params} set={set} liveSources={liveSources} />
-
-          <div className="space-y-2">
-            <label className="text-[10px] text-white/40 uppercase tracking-wide block">Live Preview</label>
-            <div className="rounded-xl overflow-hidden border border-white/[0.06] bg-[repeating-conic-gradient(#111_0%_25%,#0a0a0a_0%_50%)] bg-[length:20px_20px] aspect-video">
-              {preview && (
-                <iframe title="overlay-preview" srcDoc={preview} className="w-full h-full pointer-events-none" />
-              )}
+              <Button variant="ghost" size="sm" onClick={redo} disabled={future.length === 0}>
+                ↷ Redo
+              </Button>
+              <Button variant="ghost" size="sm" onClick={requestClose}>
+                ✕ Close
+              </Button>
             </div>
-            <p className="text-[10px] text-white/25">
-              Checkered background simulates OBS transparency. Live-bound fields show a placeholder here — they'll
-              update for real once the overlay is added to a scene.
-            </p>
+          }
+        />
+      </div>
+
+      {error && (
+        <Card padding={10} className="mx-5 mt-3 shrink-0">
+          <p className="text-[11px]" style={{ color: "var(--bd-red-text)" }}>
+            {error}
+          </p>
+        </Card>
+      )}
+
+      {/* Below lg, this scrolls as one column (fields, then preview, then
+          history) instead of splitting into two independently-scrolling
+          panes — keeps everything reachable docked to half of a portrait
+          monitor, not just a wide landscape window. */}
+      <div className="flex-1 overflow-y-auto lg:overflow-hidden">
+        <div className="flex flex-col lg:flex-row lg:h-full gap-4 p-5">
+          <div className="lg:w-[420px] shrink-0 lg:overflow-y-auto">
+            <Card padding={16}>
+              <TemplateFieldsEditor params={params} set={set} liveSources={liveSources} />
+            </Card>
+          </div>
+
+          <div className="flex-1 lg:overflow-y-auto space-y-4">
+            <Card padding={16}>
+              <ScaledPreview html={preview} title="overlay-preview" />
+            </Card>
+
+            {mode === "edit" && editFile && <VersionHistoryPanel file={editFile} onRestored={onSaved} />}
           </div>
         </div>
+      </div>
 
-        {mode === "edit" && editFile && (
-          <div className="mt-4">
-            <VersionHistoryPanel file={editFile} onRestored={onSaved} />
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 mt-6">
-          <Button variant="ghost" onClick={requestClose}>
-            Cancel
-          </Button>
-          <Button variant="cta" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : mode === "edit" ? "Save Changes" : "Save Overlay"}
-          </Button>
-        </div>
-      </Card>
+      <div className="flex justify-end gap-2 px-5 py-3 border-t border-white/[0.06] shrink-0">
+        <Button variant="ghost" onClick={requestClose}>
+          Cancel
+        </Button>
+        <Button variant="cta" onClick={save} disabled={saving}>
+          {saving ? "Saving…" : mode === "edit" ? "Save Changes" : "Save Overlay"}
+        </Button>
+      </div>
 
       {showSaveChoice && (
         <SaveChoiceDialog
