@@ -1,8 +1,10 @@
 export interface OverlayEntry {
   file: string;
   name: string;
-  /** True when this overlay was built with the Maker (has saved settings to reload for edit/duplicate). */
+  /** True when this overlay was built with a Maker (has saved settings to reload for edit/duplicate). */
   editable: boolean;
+  /** Which Maker built it, so the frontend opens the matching editor. Absent for a plain upload. */
+  kind?: "template" | "canvas";
 }
 
 export type OverlayTemplateId =
@@ -203,3 +205,33 @@ export const DEFAULT_TEMPLATE_PARAMS: TemplateParams = {
   textStroke: false,
   countdownTarget: "",
 };
+
+/** One placed widget inside a Canvas overlay — the exact same per-widget
+ * fields as a standalone overlay (`params`), plus where it sits and how big
+ * it is inside the canvas (percent of the canvas, not pixels, so it holds
+ * up across any OBS Browser Source resolution) and its stacking order. */
+export interface CanvasElementT {
+  id: string;
+  xPct: number;
+  yPct: number;
+  widthPct: number;
+  heightPct: number;
+  zIndex: number;
+  params: TemplateParams;
+}
+
+export function newCanvasElement(template: OverlayTemplateId, index: number): CanvasElementT {
+  // Staggers new elements diagonally so they don't land exactly on top of
+  // each other — purely a convenience for the first drag/nudge, not a
+  // meaningful default.
+  const offset = (index % 4) * 8;
+  return {
+    id: `el-${Date.now()}-${index}`,
+    xPct: 8 + offset,
+    yPct: 8 + offset,
+    widthPct: 32,
+    heightPct: 22,
+    zIndex: index,
+    params: { ...DEFAULT_TEMPLATE_PARAMS, template },
+  };
+}

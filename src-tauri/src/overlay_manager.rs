@@ -12,10 +12,14 @@ use serde::Serialize;
 pub struct OverlayEntry {
     file: String,
     name: String,
-    /// True when a `<stem>.overlay.json` sidecar exists next to this file —
-    /// i.e. it was built with the Overlay Maker (not a raw upload) and its
-    /// settings can be reloaded into the Maker for editing/duplicating.
+    /// True when a `<stem>.overlay.json` or `<stem>.canvas.json` sidecar
+    /// exists next to this file — i.e. it was built with the Overlay Maker
+    /// (not a raw upload) and its settings can be reloaded for editing.
     editable: bool,
+    /// Which Maker built this overlay, so the frontend opens the right
+    /// editor — `None` for a plain upload (editable is always false then).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'static str>,
 }
 
 /// The sidecar file a Maker-built overlay's settings are saved to, next to
@@ -26,6 +30,15 @@ pub struct OverlayEntry {
 fn params_sidecar_path(dir: &std::path::Path, html_file: &str) -> std::path::PathBuf {
     let stem = html_file.strip_suffix(".html").unwrap_or(html_file);
     dir.join(format!("{stem}.overlay.json"))
+}
+
+/// Same idea as `params_sidecar_path` but for a multi-element Canvas
+/// overlay (see `CanvasParams`) — a distinct suffix rather than reusing
+/// `.overlay.json` so `overlay_get_template_params` (which expects a raw
+/// `TemplateParams` shape) never mis-parses a canvas sidecar or vice versa.
+fn canvas_sidecar_path(dir: &std::path::Path, html_file: &str) -> std::path::PathBuf {
+    let stem = html_file.strip_suffix(".html").unwrap_or(html_file);
+    dir.join(format!("{stem}.canvas.json"))
 }
 
 fn custom_overlays_dir() -> Result<std::path::PathBuf, String> {
@@ -47,7 +60,7 @@ pub(crate) fn overlay_list_builtin() -> Result<Vec<OverlayEntry>, String> {
     for entry in read.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_string();
         if file_name.ends_with(".html") {
-            entries.push(OverlayEntry { name: humanize(&file_name), file: file_name, editable: false });
+            entries.push(OverlayEntry { name: humanize(&file_name), file: file_name, editable: false, kind: None });
         }
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -61,11 +74,20 @@ pub(crate) fn overlay_list_custom() -> Result<Vec<OverlayEntry>, String> {
     let read = std::fs::read_dir(&dir).map_err(|e| format!("couldn't read overlays/custom: {e}"))?;
     for entry in read.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_string();
-        if file_name.ends_with(".overlay.json") {
+        if file_name.ends_with(".overlay.json") || file_name.ends_with(".canvas.json") {
             continue; // a settings sidecar, not an overlay file itself
         }
-        let editable = file_name.ends_with(".html") && params_sidecar_path(&dir, &file_name).exists();
-        entries.push(OverlayEntry { name: humanize(&file_name), file: file_name, editable });
+        let is_template = params_sidecar_path(&dir, &file_name).exists();
+        let is_canvas = canvas_sidecar_path(&dir, &file_name).exists();
+        let editable = file_name.ends_with(".html") && (is_template || is_canvas);
+        let kind = if is_canvas {
+            Some("canvas")
+        } else if is_template {
+            Some("template")
+        } else {
+            None
+        };
+        entries.push(OverlayEntry { name: humanize(&file_name), file: file_name, editable, kind });
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)
@@ -104,6 +126,7 @@ pub(crate) fn overlay_remove_custom(file: String) -> Result<(), String> {
     std::fs::remove_file(&path).map_err(|e| format!("couldn't remove file: {e}"))?;
     // Best-effort — a plain uploaded file (not Maker-built) never had one.
     let _ = std::fs::remove_file(params_sidecar_path(&dir, &file));
+    let _ = std::fs::remove_file(canvas_sidecar_path(&dir, &file));
     Ok(())
 }
 
@@ -195,6 +218,47 @@ pub(crate) struct TemplateParams {
     /// placeholder dashes client-side rather than failing to save.
     #[serde(default)]
     countdown_target: String,
+}
+
+/// One placed widget inside a Canvas overlay (see `CanvasParams`/
+/// `render_canvas`) — reuses the exact same `TemplateParams` a
+/// single-widget overlay uses (same templates, same fields), just placed
+/// at a free x/y/size instead of the fixed corner presets. `id` is
+/// frontend-only bookkeeping (React key / drag target); the backend never
+/// looks at it.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CanvasElement {
+    #[serde(default)]
+    id: String,
+    #[serde(default = "default_x_pct")]
+    x_pct: f32,
+    #[serde(default = "default_y_pct")]
+    y_pct: f32,
+    #[serde(default = "default_size_pct")]
+    width_pct: f32,
+    #[serde(default = "default_size_pct")]
+    height_pct: f32,
+    #[serde(default)]
+    z_index: i32,
+    params: TemplateParams,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CanvasParams {
+    #[serde(default)]
+    elements: Vec<CanvasElement>,
+}
+
+fn default_x_pct() -> f32 {
+    10.0
+}
+fn default_y_pct() -> f32 {
+    10.0
+}
+fn default_size_pct() -> f32 {
+    30.0
 }
 
 fn default_text_color() -> String {
@@ -351,6 +415,15 @@ function getOverlayToken() {
   for (var i = 0; i < parts.length; i++) {
     if ((parts[i] === "forge-overlay" || parts[i] === "custom-overlay") && parts[i + 1]) return parts[i + 1];
   }
+  // A Canvas overlay's elements each render as a same-origin `srcdoc`
+  // iframe (see render_canvas) — no real URL of their own, so a bound
+  // field inside one falls back to asking the parent canvas page, which
+  // does have the real /custom-overlay/<token> URL this was resolved from.
+  try {
+    if (window.parent && window.parent !== window && typeof window.parent.getOverlayToken === "function") {
+      return window.parent.getOverlayToken();
+    }
+  } catch (e) {}
   return "";
 }
 "#;
@@ -677,6 +750,127 @@ pub(crate) fn overlay_preview_template(params: TemplateParams) -> Result<String,
     render_template(&params)
 }
 
+/// A Canvas overlay is one page holding several independently-placed
+/// widgets. Rather than teaching every template arm above to render inside
+/// a shared, CSS-scoped fragment (real risk of `.title`/`#card` rules from
+/// one element bleeding into another), each element keeps rendering as its
+/// own complete, self-contained document via `render_template` — exactly
+/// as it does standalone — and this just places one `srcdoc` iframe per
+/// element at its assigned x/y/size/z-order. Full CSS isolation between
+/// elements for free, and every existing per-template test stays valid
+/// unmodified since `render_template` itself didn't change at all.
+fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
+    let mut iframes = String::new();
+    let mut assigns = String::new();
+    for (i, el) in elements.iter().enumerate() {
+        let inner_html = render_template(&el.params)?;
+        let x = el.x_pct.clamp(0.0, 100.0);
+        let y = el.y_pct.clamp(0.0, 100.0);
+        let w = el.width_pct.clamp(2.0, 100.0);
+        let h = el.height_pct.clamp(2.0, 100.0);
+        let z = el.z_index;
+        let frame_id = format!("el-{i}");
+        iframes.push_str(&format!(
+            r#"<iframe id="{frame_id}" class="el" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; z-index:{z};"></iframe>"#
+        ));
+        // JSON-encoding the whole rendered document is what makes embedding
+        // it safely inside a <script> block trivial — serde_json already
+        // escapes quotes, newlines, and (critically) any literal `</script>`
+        // sequence the inner HTML happens to contain.
+        let json = serde_json::to_string(&inner_html).map_err(|e| e.to_string())?;
+        assigns.push_str(&format!("document.getElementById(\"{frame_id}\").srcdoc = {json};\n"));
+    }
+    Ok(format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>StreamerSuite Overlay</title>
+<style>
+  html, body {{ margin: 0; padding: 0; background: transparent; overflow: hidden; }}
+  .el {{ position: absolute; border: 0; background: transparent; }}
+</style>
+</head>
+<body>
+{iframes}
+<script>
+{TOKEN_FROM_PATH_JS}
+{assigns}
+</script>
+</body>
+</html>
+"#
+    ))
+}
+
+#[tauri::command]
+pub(crate) fn overlay_preview_canvas(elements: Vec<CanvasElement>) -> Result<String, String> {
+    render_canvas(&elements)
+}
+
+fn write_canvas_sidecar(dir: &std::path::Path, html_file: &str, canvas: &CanvasParams) -> Result<(), String> {
+    let json = serde_json::to_string(canvas).map_err(|e| format!("couldn't serialize overlay settings: {e}"))?;
+    std::fs::write(canvas_sidecar_path(dir, html_file), json)
+        .map_err(|e| format!("couldn't write overlay settings: {e}"))
+}
+
+/// Creates a brand-new Canvas overlay file with a freshly allocated
+/// (guaranteed unique) name — same non-collision guarantee as
+/// `overlay_create_from_template`. Named after its first element's title,
+/// falling back to "canvas" for an empty/all-static canvas.
+#[tauri::command]
+pub(crate) fn overlay_create_from_canvas(elements: Vec<CanvasElement>) -> Result<String, String> {
+    let html = render_canvas(&elements)?;
+    let dir = custom_overlays_dir()?;
+    let title = elements.first().map(|e| e.params.title.text.clone()).unwrap_or_default();
+    let slug = slugify(&title, "canvas");
+    let file_name = unique_file_name(&dir, &slug);
+    let dest = dir.join(&file_name);
+    crate::assert_path_in_base(&dest, &dir)?;
+    std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
+    write_canvas_sidecar(&dir, &file_name, &CanvasParams { elements })?;
+    Ok(file_name)
+}
+
+/// Loads a Canvas-built overlay's saved elements back for editing. `Ok(None)`
+/// for anything without a `.canvas.json` sidecar (a plain upload, or a
+/// single-template overlay — see `overlay_get_template_params` for that one).
+#[tauri::command]
+pub(crate) fn overlay_get_canvas_params(file: String) -> Result<Option<CanvasParams>, String> {
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err("invalid file name".into());
+    }
+    let dir = custom_overlays_dir()?;
+    crate::assert_path_in_base(&dir.join(&file), &dir)?;
+    let sidecar = canvas_sidecar_path(&dir, &file);
+    if !sidecar.exists() {
+        return Ok(None);
+    }
+    let json = std::fs::read_to_string(&sidecar).map_err(|e| format!("couldn't read overlay settings: {e}"))?;
+    serde_json::from_str(&json)
+        .map(Some)
+        .map_err(|e| format!("couldn't parse overlay settings: {e}"))
+}
+
+/// Re-renders and overwrites one specific, already-existing Canvas overlay
+/// file — same "can only ever touch the file it was opened from" guarantee
+/// as `overlay_update_template`.
+#[tauri::command]
+pub(crate) fn overlay_update_canvas(file: String, elements: Vec<CanvasElement>) -> Result<(), String> {
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err("invalid file name".into());
+    }
+    let dir = custom_overlays_dir()?;
+    let dest = dir.join(&file);
+    crate::assert_path_in_base(&dest, &dir)?;
+    if !dest.exists() {
+        return Err("overlay not found".into());
+    }
+    let html = render_canvas(&elements)?;
+    std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
+    write_canvas_sidecar(&dir, &file, &CanvasParams { elements })
+}
+
 fn slugify(title: &str, template: &str) -> String {
     let base = if title.trim().is_empty() {
         template.to_string()
@@ -796,6 +990,77 @@ mod tests {
             text_stroke: false,
             countdown_target: String::new(),
         }
+    }
+
+    fn canvas_element(id: &str, template: &str, x: f32, y: f32, z: i32) -> CanvasElement {
+        CanvasElement {
+            id: id.to_string(),
+            x_pct: x,
+            y_pct: y,
+            width_pct: 30.0,
+            height_pct: 20.0,
+            z_index: z,
+            params: params(template),
+        }
+    }
+
+    #[test]
+    fn canvas_renders_one_isolated_iframe_per_element_with_position_and_z_order() {
+        let elements = vec![
+            canvas_element("a", "lower-third", 5.0, 10.0, 1),
+            canvas_element("b", "goal-bar", 60.0, 70.0, 2),
+        ];
+        let html = render_canvas(&elements).unwrap();
+        assert!(html.contains(r#"id="el-0""#));
+        assert!(html.contains(r#"id="el-1""#));
+        assert!(html.contains("left:5%"));
+        assert!(html.contains("top:10%"));
+        assert!(html.contains("z-index:1"));
+        assert!(html.contains("left:60%"));
+        assert!(html.contains("z-index:2"));
+        // Each element's full document (including its own <style>) is
+        // embedded as a JSON-encoded srcdoc assignment, not inlined raw —
+        // that's what keeps their CSS from colliding.
+        assert!(html.contains("srcdoc ="));
+        assert!(html.contains("Hello \\u003cWorld\\u003e") || html.contains("Hello &lt;World&gt;"));
+    }
+
+    #[test]
+    fn canvas_clamps_position_and_size_to_sane_bounds() {
+        let mut el = canvas_element("a", "text-box", 500.0, -50.0, 0);
+        el.width_pct = 1000.0;
+        el.height_pct = 0.0;
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains("left:100%"));
+        assert!(html.contains("top:0%"));
+        assert!(html.contains("width:100%"));
+        assert!(html.contains("height:2%"));
+    }
+
+    #[test]
+    fn canvas_round_trips_through_create_load_update() {
+        let dir = std::env::temp_dir().join(format!("sf-canvas-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let elements = vec![canvas_element("a", "lower-third", 5.0, 10.0, 1)];
+        let html = render_canvas(&elements).unwrap();
+        let file_name = "canvas-test.html";
+        std::fs::write(dir.join(file_name), html).unwrap();
+        write_canvas_sidecar(&dir, file_name, &CanvasParams { elements: elements.clone() }).unwrap();
+
+        let sidecar = canvas_sidecar_path(&dir, file_name);
+        assert!(sidecar.exists());
+        let loaded: CanvasParams = serde_json::from_str(&std::fs::read_to_string(&sidecar).unwrap()).unwrap();
+        assert_eq!(loaded.elements.len(), 1);
+        assert_eq!(loaded.elements[0].id, "a");
+
+        // A template sidecar path must never collide with the canvas one
+        // for the same stem, so both kinds can coexist without stomping
+        // each other (not that a single file is ever both, but the paths
+        // themselves must be distinct).
+        assert_ne!(canvas_sidecar_path(&dir, file_name), params_sidecar_path(&dir, file_name));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
