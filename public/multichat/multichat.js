@@ -1341,12 +1341,13 @@ async function shoutoutUser(m) {
 }
 // Chat-triggered shout-out for when the streamer already knows a chatter's
 // handle on a DIFFERENT platform than the one they're typing from —
-// `!shoutout <platform> <handle>` lets a mod/broadcaster shout that handle
-// out on the named platform without needing a message from them to
-// right-click on that platform. Mod/broadcaster-gated (m.role), same bar
-// as every other chat-triggered action in this file (timeout/ban/delete) —
-// otherwise any viewer could spam shoutout messages across every platform.
-const SHOUTOUT_COMMAND_RE = /^!shoutout\s+(\S+)\s+@?(\S+)/i;
+// `!shoutout <platform> <handle>` (or its shorter alias `!so`) lets a
+// mod/broadcaster shout that handle out on the named platform without
+// needing a message from them to right-click on that platform.
+// Mod/broadcaster-gated (m.role), same bar as every other chat-triggered
+// action in this file (timeout/ban/delete) — otherwise any viewer could
+// spam shoutout messages across every platform.
+const SHOUTOUT_COMMAND_RE = /^!(?:shoutout|so)\s+(\S+)\s+@?(\S+)/i;
 const SHOUTOUT_PLATFORM_ALIASES = {
   twitch: "twitch", ttv: "twitch",
   kick: "kick",
