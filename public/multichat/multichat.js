@@ -643,7 +643,7 @@ function linkPreviewTwitchChannel(login, url) {
 function linkPreviewStaticChip(kind, tag, title, sub, url, fallbackLetter, iconSvg) {
   const { wrap, body } = linkPreviewWrap(kind, tag, url);
   body.innerHTML = "";
-  const icon = el("div", "cv-linkpreview-thumb cv-linkpreview-thumb-round cv-linkpreview-fallback");
+  const icon = el("div", "cv-linkpreview-thumb cv-linkpreview-thumb-round cv-linkpreview-fallback cv-linkpreview-brandicon");
   if (iconSvg) icon.innerHTML = iconSvg; // trusted constant, never user-supplied
   else icon.textContent = fallbackLetter;
   const info = el("div", "cv-linkpreview-info");
