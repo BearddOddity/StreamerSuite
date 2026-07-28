@@ -5,7 +5,7 @@
 // widget's own settings never drift between the two editors.
 import { useState } from "react";
 import { DEFAULT_TEMPLATE_PARAMS, TEMPLATES, type BoundField, type TemplateParams } from "../overlay-library/types";
-import { Select } from "../../design-system/components/forms";
+import { RangeSlider, Select } from "../../design-system/components/forms";
 
 const FONT_PRESETS = ["", "Bebas Neue", "Anton", "Oswald", "Bungee", "Press Start 2P", "Poppins"];
 
@@ -196,7 +196,7 @@ export default function TemplateFieldsEditor({
               <button
                 key={t.id}
                 onClick={() => set("template", t.id)}
-                className={`text-left p-2.5 rounded-xl border transition-all ${
+                className={`text-left p-2.5 rounded-lg border transition-all ${
                   params.template === t.id
                     ? "bg-purple-500/15 border-purple-500/40"
                     : "bg-white/[0.02] border-white/[0.06] hover:border-white/15"
@@ -305,15 +305,7 @@ export default function TemplateFieldsEditor({
             <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
               Background Opacity ({Math.round(params.bgOpacity * 100)}%)
             </label>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={params.bgOpacity}
-              onChange={(e) => set("bgOpacity", Number(e.target.value))}
-              className="w-full"
-            />
+            <RangeSlider min={0} max={1} step={0.05} value={params.bgOpacity} onChange={(v) => set("bgOpacity", v)} showValue={false} />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
