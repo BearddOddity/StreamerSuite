@@ -73,7 +73,7 @@ export default function OverlayLibraryApp() {
           ) : (
             <div className="space-y-2">
               {builtin.map((o) => (
-                <div key={o.file} className="flex items-center gap-3 bg-white/[0.02] rounded-xl px-3 py-2">
+                <div key={o.file} className="flex items-center gap-3 bg-white/[0.02] rounded-lg px-3 py-2">
                   <OverlayPreview url={builtinUrl(o.file)} />
                   <span className="text-[12px] text-white/70 flex-1 capitalize">{o.name}</span>
                   {o.file === "alerts-overlay.html" && (
@@ -116,7 +116,7 @@ export default function OverlayLibraryApp() {
           ) : (
             <div className="space-y-2">
               {visibleCustom.map((o) => (
-                <div key={o.file} className="flex items-center gap-3 bg-white/[0.02] rounded-xl px-3 py-2">
+                <div key={o.file} className="flex items-center gap-3 bg-white/[0.02] rounded-lg px-3 py-2">
                   <OverlayPreview url={customUrl(o.file)} />
 
                   {renaming?.file === o.file ? (
