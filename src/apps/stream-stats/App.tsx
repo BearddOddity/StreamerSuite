@@ -40,8 +40,8 @@ export default function StreamStatsApp() {
   const anyLive = !!twitch?.is_live || !!kick?.is_live;
 
   const platforms = [
-    twitch ? { platform: "twitch" as const, viewers: twitchViewers, live: twitch.is_live, color: "bg-[#9146ff]" } : null,
-    kick ? { platform: "kick" as const, viewers: kickViewers, live: kick.is_live, color: "bg-[#53fc18]" } : null,
+    twitch ? { platform: "twitch" as const, viewers: twitchViewers, live: twitch.is_live, color: "#9146ff" } : null,
+    kick ? { platform: "kick" as const, viewers: kickViewers, live: kick.is_live, color: "#53fc18" } : null,
   ].filter((p): p is NonNullable<typeof p> => p !== null && p.live);
 
   return (
@@ -56,7 +56,7 @@ export default function StreamStatsApp() {
             right={
               <button
                 onClick={refresh}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all border ${
+                className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all border ${
                   anyLive ? "bg-red-500/10 text-red-400 border-red-500/25" : "btn-ghost"
                 }`}
               >
@@ -176,8 +176,17 @@ export default function StreamStatsApp() {
                   <div key={p.platform} className="flex items-center gap-3">
                     <PlatformIcon platform={p.platform} size="sm" />
                     <span className="text-[11px] text-white/50 w-16 capitalize">{p.platform}</span>
-                    <div className="flex-1 h-2 rounded-full bg-white/[0.04] overflow-hidden">
-                      <div className={`h-full rounded-full ${p.color}`} style={{ width: `${pct}%` }} />
+                    <div className="bd-progress-track flex-1">
+                      {Array.from({ length: 20 }, (_, i) => {
+                        const on = i < Math.round((pct / 100) * 20);
+                        return (
+                          <div
+                            key={i}
+                            className={`bd-progress-seg ${on ? "on" : ""}`.trim()}
+                            style={on ? { background: p.color, boxShadow: `0 0 8px color-mix(in srgb, ${p.color} 40%, transparent)` } : undefined}
+                          />
+                        );
+                      })}
                     </div>
                     <span className="text-[11px] text-white/40 w-12 text-right">{p.viewers}</span>
                     <span className="text-[10px] text-white/20 w-8 text-right">{pct}%</span>
