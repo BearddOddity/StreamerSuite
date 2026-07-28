@@ -918,6 +918,7 @@ function buildLinkPreviewNode(m) {
   if ((match = BLUESKY_RE.exec(text))) return hit(linkPreviewBluesky(match[1], firstUrl(text)), match[0]);
   if ((match = STEAM_APP_RE.exec(text))) return hit(linkPreviewSteam(match[1], firstUrl(text)), match[0]);
   if ((match = TWITCH_SUBS_RE.exec(text))) return hit(linkPreviewTwitchChannel(match[1], firstUrl(text)), match[0]);
+  if ((match = TWITCH_SUBS_BASE_RE.exec(text))) return hit(linkPreviewTwitchSubs(firstUrl(text)), match[0]);
   if (!TWITCH_CLIP_RE.test(text) && (match = TWITCH_CHANNEL_RE.exec(text)) && !TWITCH_RESERVED_PATHS.has(match[1].toLowerCase())) {
     return hit(linkPreviewTwitchChannel(match[1], firstUrl(text)), match[0]);
   }
@@ -1217,6 +1218,17 @@ function stripAvatarBoxBackground(img) {
         px[i + 3] = 0;
         stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
       }
+      // Some badges/emotes draw a circular or otherwise shaped border in a
+      // color close enough to the true background (within tolerance) that
+      // the fill treats the border itself as background and breaks through
+      // it into the subject — corrupting the artwork with holes instead of
+      // just clearing the box around it. The dead center of a real subject
+      // should never legitimately match the background, so if the fill
+      // reached there, the detection broke through something it shouldn't
+      // have — bail out and leave the original image untouched rather than
+      // ship a corrupted one.
+      const centerIdx = Math.floor(h / 2) * w + Math.floor(w / 2);
+      if (px[centerIdx * 4 + 3] === 0) return;
       ctx.putImageData(data, 0, 0);
       img.src = canvas.toDataURL("image/png");
     } catch (_e) {
