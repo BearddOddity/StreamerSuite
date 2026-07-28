@@ -872,6 +872,7 @@ function passesFilters(m) {
 }
 
 function addMessage(m) {
+  handleShoutoutCommand(m);
   const finish = () => {
     m.id = state.nextId++;
     m.ts = m.ts || Date.now();
@@ -1317,12 +1318,10 @@ function shoutoutLink(platformId, handle) {
   if (platformId === "chaturbate") return `chaturbate.com/${handle}`;
   return "";
 }
-async function shoutoutUser(m) {
+async function sendShoutout(platformId, handle) {
   if (!composeTargets.length) { showToast("Connect a platform (Settings → Connections & Keys) to send a shoutout"); return; }
-  const handle = (m.login || m.user || "").trim();
-  if (!handle) return;
-  const platformLabel = PLATFORM_MAP[m.platform]?.label || m.platform;
-  const link = shoutoutLink(m.platform, handle);
+  const platformLabel = PLATFORM_MAP[platformId]?.label || platformId;
+  const link = shoutoutLink(platformId, handle);
   // The link (e.g. kick.com/handle) already carries the handle in its path —
   // no need to also spell the plain handle out separately in the message.
   const text = link
@@ -1334,6 +1333,35 @@ async function shoutoutUser(m) {
     if (failed.length) showToast(`Shoutout sent to ${composeTargets.length - failed.length}/${composeTargets.length} — failed: ${failed.map(f => shortTargetLabel(f.t.label)).join(", ")}`);
     else showToast(`Shoutout sent for ${handle} across ${composeTargets.length} platform${composeTargets.length > 1 ? "s" : ""}`);
   } catch (e) { showToast(`Shoutout failed: ${e}`); }
+}
+async function shoutoutUser(m) {
+  const handle = (m.login || m.user || "").trim();
+  if (!handle) return;
+  await sendShoutout(m.platform, handle);
+}
+// Chat-triggered shout-out for when the streamer already knows a chatter's
+// handle on a DIFFERENT platform than the one they're typing from —
+// `!shoutout <platform> <handle>` lets a mod/broadcaster shout that handle
+// out on the named platform without needing a message from them to
+// right-click on that platform. Mod/broadcaster-gated (m.role), same bar
+// as every other chat-triggered action in this file (timeout/ban/delete) —
+// otherwise any viewer could spam shoutout messages across every platform.
+const SHOUTOUT_COMMAND_RE = /^!shoutout\s+(\S+)\s+@?(\S+)/i;
+const SHOUTOUT_PLATFORM_ALIASES = {
+  twitch: "twitch", ttv: "twitch",
+  kick: "kick",
+  youtube: "youtube", yt: "youtube",
+  joystick: "joystick", jtv: "joystick",
+  chaturbate: "chaturbate", cb: "chaturbate",
+};
+function handleShoutoutCommand(m) {
+  if (m.system || m.event || !m.text) return;
+  const match = SHOUTOUT_COMMAND_RE.exec(m.text.trim());
+  if (!match) return;
+  if (m.role !== "mod" && m.role !== "host") return;
+  const platformId = SHOUTOUT_PLATFORM_ALIASES[match[1].toLowerCase()];
+  if (!platformId) { showToast(`!shoutout: unknown platform "${match[1]}" — try twitch/kick/youtube/joystick`); return; }
+  sendShoutout(platformId, match[2]);
 }
 function msgMenuItems(m) {
   const items = [
