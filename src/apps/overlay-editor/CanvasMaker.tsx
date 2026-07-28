@@ -12,6 +12,7 @@ import TemplateFieldsEditor from "./TemplateFieldsEditor";
 import { SaveChoiceDialog, UnsavedChangesDialog } from "./ConfirmDialogs";
 import VersionHistoryPanel from "./VersionHistoryPanel";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
+import { Tooltip } from "../../design-system/components/overlay";
 
 function NumberField({ label, value, onChange, min, max }: { label: string; value: number; onChange: (v: number) => void; min: number; max: number }) {
   return (
@@ -673,17 +674,22 @@ export default function CanvasMaker({
                       <span className="text-[11px] text-white/70 flex-1 truncate">
                         {el.params.title.text || t.label}
                       </span>
-                      {el.groupId && <span title="Grouped — moves together with linked elements" className="text-[10px] text-purple-300/70">🔗</span>}
-                      <span
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          toggleLock(el.id);
-                        }}
-                        title={el.locked ? "Unlock (allow drag/resize)" : "Lock (prevent drag/resize)"}
-                        className={`text-[10px] px-1 ${el.locked ? "text-amber-300/80" : "text-white/20 hover:text-white/50"}`}
-                      >
-                        {el.locked ? "🔒" : "🔓"}
-                      </span>
+                      {el.groupId && (
+                        <Tooltip label="Grouped — moves together with linked elements">
+                          <span className="text-[10px] text-purple-300/70">🔗</span>
+                        </Tooltip>
+                      )}
+                      <Tooltip label={el.locked ? "Unlock (allow drag/resize)" : "Lock (prevent drag/resize)"}>
+                        <span
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            toggleLock(el.id);
+                          }}
+                          className={`text-[10px] px-1 ${el.locked ? "text-amber-300/80" : "text-white/20 hover:text-white/50"}`}
+                        >
+                          {el.locked ? "🔒" : "🔓"}
+                        </span>
+                      </Tooltip>
                       <span
                         onClick={(ev) => {
                           ev.stopPropagation();

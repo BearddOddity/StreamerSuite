@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { Tooltip } from "../../../design-system/components/overlay";
 
 // ─── Sub-tab button ──────────────────────────────────────────────────────────
 export function SubTabBtn({
@@ -336,9 +337,11 @@ export function EditRemoveButtons({
   return (
     <div className="flex items-center gap-1.5 shrink-0">
       {onOpenLink && (
-        <button onClick={onOpenLink} className="btn-icon-sm link" title="Open provider's key page">
-          {linkLabel}
-        </button>
+        <Tooltip label="Open provider's key page">
+          <button onClick={onOpenLink} className="btn-icon-sm link">
+            {linkLabel}
+          </button>
+        </Tooltip>
       )}
       <button onClick={onToggleEdit} className={`btn-icon-sm edit ${isEditing ? "active" : ""}`}>
         {isEditing ? "Close" : "Edit"}

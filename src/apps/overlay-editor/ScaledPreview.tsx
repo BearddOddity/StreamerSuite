@@ -7,6 +7,7 @@
 // whole thing down uniformly with a CSS transform, so what's on screen is
 // pixel-accurate to what a real 1920×1080 OBS canvas would show.
 import { useEffect, useRef, useState } from "react";
+import { Tooltip } from "../../design-system/components/overlay";
 
 const NATIVE_W = 1920;
 const NATIVE_H = 1080;
@@ -42,13 +43,14 @@ export default function ScaledPreview({
     <div className={className}>
       <div className="flex items-center justify-between mb-1.5 gap-2">
         <label className="text-[10px] text-white/40 uppercase tracking-wide">Live Preview</label>
-        <button
-          onClick={() => setActualSize((s) => !s)}
-          title="Toggle between a quick-fit view and true 1920×1080 scale"
-          className="text-[10px] text-white/40 hover:text-white/70 px-2 py-0.5 rounded-md border border-white/10 shrink-0"
-        >
-          {actualSize ? "↺ Fit" : "⤢ Actual Size"}
-        </button>
+        <Tooltip label="Toggle between a quick-fit view and true 1920×1080 scale">
+          <button
+            onClick={() => setActualSize((s) => !s)}
+            className="text-[10px] text-white/40 hover:text-white/70 px-2 py-0.5 rounded-md border border-white/10 shrink-0"
+          >
+            {actualSize ? "↺ Fit" : "⤢ Actual Size"}
+          </button>
+        </Tooltip>
       </div>
       <div
         ref={containerRef}

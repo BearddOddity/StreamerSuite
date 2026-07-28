@@ -4,6 +4,7 @@ import { useStreamStats } from "./useStreamStats";
 import { openJoystickReporting } from "./joystickReporting";
 import "../../design-system/styles.css";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
+import { Tooltip } from "../../design-system/components/overlay";
 
 function formatUptime(startedAt: string | undefined): string {
   if (!startedAt) return "—";
@@ -148,12 +149,12 @@ export default function StreamStatsApp() {
                 {history.map((sample) => {
                   const height = peak > 0 ? Math.max(4, (sample.total / peak) * 100) : 4;
                   return (
-                    <div
-                      key={sample.timestamp}
-                      className="flex-1 rounded-t-sm bg-[var(--accent-system)]/30 hover:bg-[var(--accent-system)]/60 transition-colors cursor-pointer"
-                      style={{ height: `${height}%` }}
-                      title={`${sample.total} viewers at ${new Date(sample.timestamp).toLocaleTimeString()}`}
-                    />
+                    <Tooltip key={sample.timestamp} label={`${sample.total} viewers at ${new Date(sample.timestamp).toLocaleTimeString()}`} className="flex-1 self-stretch items-end">
+                      <div
+                        className="w-full rounded-t-sm bg-[var(--accent-system)]/30 hover:bg-[var(--accent-system)]/60 transition-colors cursor-pointer"
+                        style={{ height: `${height}%` }}
+                      />
+                    </Tooltip>
                   );
                 })}
               </div>

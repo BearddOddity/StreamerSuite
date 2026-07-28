@@ -5,6 +5,7 @@ import { openAppInNewWindow } from "../../shell/popout";
 import { DeleteConfirmDialog } from "../overlay-editor/ConfirmDialogs";
 import "../../design-system/styles.css";
 import { Button, Card, SectionHead, Badge } from "../../design-system/components/core";
+import { Tooltip } from "../../design-system/components/overlay";
 
 function OverlayPreview({ url }: { url: string }) {
   return (
@@ -132,24 +133,26 @@ export default function OverlayLibraryApp() {
                       className="input-glass text-[12px] flex-1"
                     />
                   ) : (
-                    <span
-                      onDoubleClick={() => setRenaming({ file: o.file, value: o.name })}
-                      title="Double-click to rename"
-                      className="text-[12px] text-white/70 flex-1 capitalize cursor-text truncate"
-                    >
-                      {o.name}
-                    </span>
+                    <Tooltip label="Double-click to rename" className="flex-1 min-w-0">
+                      <span
+                        onDoubleClick={() => setRenaming({ file: o.file, value: o.name })}
+                        className="text-[12px] text-white/70 capitalize cursor-text truncate block"
+                      >
+                        {o.name}
+                      </span>
+                    </Tooltip>
                   )}
 
                   {o.editable && <Badge variant="purple">{o.kind === "canvas" ? "Canvas" : "Widget"}</Badge>}
 
-                  <button
-                    onClick={() => setRenaming({ file: o.file, value: o.name })}
-                    className="text-[11px] text-white/25 hover:text-white/60 px-1"
-                    title="Rename"
-                  >
-                    🏷️
-                  </button>
+                  <Tooltip label="Rename">
+                    <button
+                      onClick={() => setRenaming({ file: o.file, value: o.name })}
+                      className="text-[11px] text-white/25 hover:text-white/60 px-1"
+                    >
+                      🏷️
+                    </button>
+                  </Tooltip>
 
                   {o.editable && o.kind && (
                     <>

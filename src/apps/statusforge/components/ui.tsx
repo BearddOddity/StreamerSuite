@@ -1,5 +1,6 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { resolveImageSrc } from "@statusforge/utils/imageSrc";
+import { Tooltip } from "../../../design-system/components/overlay";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Card — surface container (glass treatment)
@@ -283,36 +284,40 @@ export function MetadataField({
         {label}
       </label>
       <div className="flex items-center gap-2">
-        <span
-          className="flex-1 text-white/80 text-sm truncate cursor-pointer hover:text-white transition-colors min-w-0 py-1"
-          onClick={() => setEditing(true)}
-          title="Click to edit"
-        >
-          {value || <span className="text-white/20 italic">Not set</span>}
-        </span>
-        {onSearch && (
-          <button
-            onClick={onSearch}
-            className="text-white/25 hover:text-purple-400 transition-all text-xs cursor-pointer bg-transparent border-none shrink-0 p-1 rounded-md hover:bg-white/[0.04]"
-            title="Search APIs"
+        <Tooltip label="Click to edit" className="flex-1 min-w-0">
+          <span
+            className="text-white/80 text-sm truncate cursor-pointer hover:text-white transition-colors min-w-0 py-1 block"
+            onClick={() => setEditing(true)}
           >
-            🔍
-          </button>
+            {value || <span className="text-white/20 italic">Not set</span>}
+          </span>
+        </Tooltip>
+        {onSearch && (
+          <Tooltip label="Search APIs">
+            <button
+              onClick={onSearch}
+              className="text-white/25 hover:text-purple-400 transition-all text-xs cursor-pointer bg-transparent border-none shrink-0 p-1 rounded-md hover:bg-white/[0.04]"
+            >
+              🔍
+            </button>
+          </Tooltip>
         )}
-        <button
-          onClick={() => onSave(value)}
-          className="text-white/25 hover:text-green-400 transition-all text-xs cursor-pointer bg-transparent border-none shrink-0 p-1 rounded-md hover:bg-white/[0.04]"
-          title="Save"
-        >
-          💾
-        </button>
-        <button
-          onClick={() => setEditing(true)}
-          className="text-white/25 hover:text-white/60 transition-all text-xs cursor-pointer bg-transparent border-none shrink-0 p-1 rounded-md hover:bg-white/[0.04]"
-          title="Edit"
-        >
-          ✎
-        </button>
+        <Tooltip label="Save">
+          <button
+            onClick={() => onSave(value)}
+            className="text-white/25 hover:text-green-400 transition-all text-xs cursor-pointer bg-transparent border-none shrink-0 p-1 rounded-md hover:bg-white/[0.04]"
+          >
+            💾
+          </button>
+        </Tooltip>
+        <Tooltip label="Edit">
+          <button
+            onClick={() => setEditing(true)}
+            className="text-white/25 hover:text-white/60 transition-all text-xs cursor-pointer bg-transparent border-none shrink-0 p-1 rounded-md hover:bg-white/[0.04]"
+          >
+            ✎
+          </button>
+        </Tooltip>
       </div>
       {hint && <p className="text-[10px] text-white/30 mt-1.5 leading-snug">{hint}</p>}
     </div>

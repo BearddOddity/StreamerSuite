@@ -12,6 +12,7 @@ import { Card, Btn, FieldSection } from "@statusforge/components/ui";
 import { Toggle } from "@statusforge/components/SettingsComponents";
 import { resolveImageSrc } from "@statusforge/utils/imageSrc";
 import { loadSystemPrefs, saveSystemPrefs } from "@statusforge/systemPrefs";
+import { Tooltip } from "../../../design-system/components/overlay";
 
 const idleCover = "/just%20chatting.png";
 const offlineCover = "/offline.svg";
@@ -684,19 +685,20 @@ export default function DashboardView({
                         }}
                       />
                       {reauth ? (
-                        <button
-                          onClick={() => {
-                            onNavigate("settings");
-                            toast(
-                              `${p.name} needs to be reconnected — open API & Routing to sign in again.`,
-                              "info"
-                            );
-                          }}
-                          className="text-[10px] font-semibold text-amber-400/80 hover:text-amber-400 transition-colors cursor-pointer bg-transparent border-none p-0"
-                          title={`${p.name}'s connection expired — click to reconnect`}
-                        >
-                          Reconnect
-                        </button>
+                        <Tooltip label={`${p.name}'s connection expired — click to reconnect`}>
+                          <button
+                            onClick={() => {
+                              onNavigate("settings");
+                              toast(
+                                `${p.name} needs to be reconnected — open API & Routing to sign in again.`,
+                                "info"
+                              );
+                            }}
+                            className="text-[10px] font-semibold text-amber-400/80 hover:text-amber-400 transition-colors cursor-pointer bg-transparent border-none p-0"
+                          >
+                            Reconnect
+                          </button>
+                        </Tooltip>
                       ) : (
                         <span
                           className={`text-[10px] font-medium ${connected ? "text-white/50" : "text-white/25"}`}
@@ -829,31 +831,32 @@ export default function DashboardView({
                   <p className="text-[10px] font-medium text-white/40 mb-0.5">{o.label}</p>
                   <p className="text-[11px] font-mono text-white/50 break-all">{maskUrl(o.url)}</p>
                 </div>
-                <button
-                  onClick={() => {
-                    navigator.clipboard?.writeText(o.url);
-                    toast("Overlay URL copied to clipboard", "success");
-                  }}
-                  className="shrink-0 p-1.5 rounded-md bg-white/[0.06] border border-white/10 text-white/40 hover:text-white/70 hover:bg-white/[0.1] transition-all cursor-pointer"
-                  title="Copy full URL"
-                >
-                  <svg
-                    className="w-3.5 h-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+                <Tooltip label="Copy full URL">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard?.writeText(o.url);
+                      toast("Overlay URL copied to clipboard", "success");
+                    }}
+                    className="shrink-0 p-1.5 rounded-md bg-white/[0.06] border border-white/10 text-white/40 hover:text-white/70 hover:bg-white/[0.1] transition-all cursor-pointer"
                   >
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
-                </button>
+                    <svg
+                      className="w-3.5 h-3.5"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  </button>
+                </Tooltip>
+                <Tooltip label="Remove overlay">
                 <button
                   onClick={() => removeOverlayUrl(o.id)}
                   className="shrink-0 p-1.5 rounded-md bg-white/[0.03] border border-white/10 text-white/25 hover:text-red-400/70 hover:bg-red-500/10 hover:border-red-500/20 transition-all cursor-pointer"
-                  title="Remove overlay"
                 >
                   <svg
                     className="w-3.5 h-3.5"
@@ -868,6 +871,7 @@ export default function DashboardView({
                     <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
                 </button>
+                </Tooltip>
               </div>
             ))}
             <div className="flex items-center justify-center mt-1">

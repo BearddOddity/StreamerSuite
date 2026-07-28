@@ -26,6 +26,7 @@ import { THEME_PREFS_EVENT, loadThemePrefs, saveThemePrefs, applyThemePrefs } fr
 import SettingsView from "@statusforge/SettingsView";
 import DevView from "@statusforge/dev/DevView";
 import OnboardingWizard from "@statusforge/components/OnboardingWizard";
+import { Tooltip } from "../../design-system/components/overlay";
 
 function App() {
   const [currentView, setCurrentView] = useState<ViewId>("dashboard");
@@ -297,24 +298,25 @@ function App() {
           />
         </div>
 
-        <button
-          className="nav-item cursor-pointer"
-          onClick={toggleSidebar}
-          title={sidebarIconOnly ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <span className="nav-item-icon">
-            <svg
-              viewBox="0 0 16 16"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              className="w-4 h-4"
-            >
-              <rect x="1" y="3" width="14" height="2" rx="1" fill="currentColor" opacity="0.7" />
-              <rect x="1" y="7" width="14" height="2" rx="1" fill="currentColor" opacity="0.7" />
-              <rect x="1" y="11" width="14" height="2" rx="1" fill="currentColor" opacity="0.7" />
-            </svg>
-          </span>
-        </button>
+        <Tooltip label={sidebarIconOnly ? "Expand sidebar" : "Collapse sidebar"} className="w-full">
+          <button
+            className="nav-item cursor-pointer"
+            onClick={toggleSidebar}
+          >
+            <span className="nav-item-icon">
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-4 h-4"
+              >
+                <rect x="1" y="3" width="14" height="2" rx="1" fill="currentColor" opacity="0.7" />
+                <rect x="1" y="7" width="14" height="2" rx="1" fill="currentColor" opacity="0.7" />
+                <rect x="1" y="11" width="14" height="2" rx="1" fill="currentColor" opacity="0.7" />
+              </svg>
+            </span>
+          </button>
+        </Tooltip>
 
         <NavButton id="dashboard" label="Dashboard" icon="⏳" />
         <NavButton id="library" label="Library" icon="📚" />

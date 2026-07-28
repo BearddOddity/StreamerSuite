@@ -10,6 +10,7 @@ import {
   ExiledManagerPanel,
   AddGameOverlayPanel,
 } from "@statusforge/components/Overlays";
+import { Tooltip } from "../../design-system/components/overlay";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -443,27 +444,28 @@ export default function LibraryView({ toast }: { toast: (msg: string, type?: Toa
 
           {/* Sort */}
           <div className="relative shrink-0" ref={sortBtnRef}>
-            <button
-              onClick={() => setSortOpen(!sortOpen)}
-              className="flex items-center gap-1.5 px-2.5 py-2 text-xs font-semibold text-white/50 hover:text-white/80 active:text-white transition-all cursor-pointer border-none rounded-lg bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.1]"
-              title="Sort by"
-            >
-              <svg
-                className="w-4 h-4 transition-transform duration-200"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                style={{ transform: sortDir === "desc" ? "rotate(180deg)" : "rotate(0deg)" }}
+            <Tooltip label="Sort by">
+              <button
+                onClick={() => setSortOpen(!sortOpen)}
+                className="flex items-center gap-1.5 px-2.5 py-2 text-xs font-semibold text-white/50 hover:text-white/80 active:text-white transition-all cursor-pointer border-none rounded-lg bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.1]"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
-                />
-              </svg>
-              <span className="hidden sm:inline">{sortLabel}</span>
-            </button>
+                <svg
+                  className="w-4 h-4 transition-transform duration-200"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  style={{ transform: sortDir === "desc" ? "rotate(180deg)" : "rotate(0deg)" }}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+                  />
+                </svg>
+                <span className="hidden sm:inline">{sortLabel}</span>
+              </button>
+            </Tooltip>
           </div>
 
           {/* Divider */}
@@ -471,38 +473,40 @@ export default function LibraryView({ toast }: { toast: (msg: string, type?: Toa
 
           {/* View toggle */}
           <div className="flex items-center overflow-hidden rounded-lg bg-white/[0.04] border border-white/[0.06]">
-            <button
-              onClick={() => setViewMode("carousel")}
-              className={`px-2.5 py-2 text-xs font-semibold transition-all cursor-pointer rounded-lg ${
-                viewMode === "carousel"
-                  ? "toggle-active"
-                  : "bg-transparent text-white/50 hover:text-white/80 hover:bg-white/[0.04] border-none"
-              }`}
-              title="Carousel view"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <rect x="2" y="6" width="20" height="12" rx="2" strokeWidth={2} />
-                <circle cx="6" cy="12" r="1.5" fill="currentColor" />
-                <circle cx="12" cy="12" r="1.5" fill="currentColor" />
-                <circle cx="18" cy="12" r="1.5" fill="currentColor" />
-              </svg>
-            </button>
-            <button
-              onClick={() => setViewMode("grid")}
-              className={`px-2.5 py-2 text-xs font-semibold transition-all cursor-pointer rounded-lg ${
-                viewMode === "grid"
-                  ? "toggle-active"
-                  : "bg-transparent text-white/50 hover:text-white/80 hover:bg-white/[0.04] border-none"
-              }`}
-              title="Grid view"
-            >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <rect x="3" y="3" width="7" height="7" rx="1" />
-                <rect x="14" y="3" width="7" height="7" rx="1" />
-                <rect x="3" y="14" width="7" height="7" rx="1" />
-                <rect x="14" y="14" width="7" height="7" rx="1" />
-              </svg>
-            </button>
+            <Tooltip label="Carousel view">
+              <button
+                onClick={() => setViewMode("carousel")}
+                className={`px-2.5 py-2 text-xs font-semibold transition-all cursor-pointer rounded-lg ${
+                  viewMode === "carousel"
+                    ? "toggle-active"
+                    : "bg-transparent text-white/50 hover:text-white/80 hover:bg-white/[0.04] border-none"
+                }`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="2" y="6" width="20" height="12" rx="2" strokeWidth={2} />
+                  <circle cx="6" cy="12" r="1.5" fill="currentColor" />
+                  <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+                  <circle cx="18" cy="12" r="1.5" fill="currentColor" />
+                </svg>
+              </button>
+            </Tooltip>
+            <Tooltip label="Grid view">
+              <button
+                onClick={() => setViewMode("grid")}
+                className={`px-2.5 py-2 text-xs font-semibold transition-all cursor-pointer rounded-lg ${
+                  viewMode === "grid"
+                    ? "toggle-active"
+                    : "bg-transparent text-white/50 hover:text-white/80 hover:bg-white/[0.04] border-none"
+                }`}
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="7" height="7" rx="1" />
+                  <rect x="14" y="3" width="7" height="7" rx="1" />
+                  <rect x="3" y="14" width="7" height="7" rx="1" />
+                  <rect x="14" y="14" width="7" height="7" rx="1" />
+                </svg>
+              </button>
+            </Tooltip>
           </div>
 
           {/* Divider */}
@@ -510,48 +514,50 @@ export default function LibraryView({ toast }: { toast: (msg: string, type?: Toa
 
           {/* Action buttons */}
           <div className="flex items-center overflow-hidden rounded-lg bg-white/[0.04] border border-white/[0.06]">
-            <button
-              onClick={() => setShowAddGame(true)}
-              className="px-2.5 py-2 text-xs font-semibold text-white/50 hover:text-white/80 active:text-white transition-all cursor-pointer border-none bg-transparent hover:bg-white/[0.06] active:bg-white/[0.1]"
-              title="Add Game"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-            </button>
-            <button
-              onClick={() => setShowExiled(true)}
-              className="px-2.5 py-2 text-xs font-semibold text-white/50 hover:text-white/80 active:text-white transition-all cursor-pointer border-none bg-transparent hover:bg-white/[0.06] active:bg-white/[0.1]"
-              title="Exiled Apps"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
-                />
-              </svg>
-            </button>
-            <label
-              className="px-2.5 py-2 text-xs font-semibold text-white/50 hover:text-white/80 active:text-white transition-all cursor-pointer border-none bg-transparent hover:bg-white/[0.06] active:bg-white/[0.1] flex items-center"
-              title="Import Game Metadata (.json)"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 16V4m0 0L8 8m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"
-                />
-              </svg>
-              <input
-                type="file"
+            <Tooltip label="Add Game">
+              <button
+                onClick={() => setShowAddGame(true)}
+                className="px-2.5 py-2 text-xs font-semibold text-white/50 hover:text-white/80 active:text-white transition-all cursor-pointer border-none bg-transparent hover:bg-white/[0.06] active:bg-white/[0.1]"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 4v16m8-8H4"
+                  />
+                </svg>
+              </button>
+            </Tooltip>
+            <Tooltip label="Exiled Apps">
+              <button
+                onClick={() => setShowExiled(true)}
+                className="px-2.5 py-2 text-xs font-semibold text-white/50 hover:text-white/80 active:text-white transition-all cursor-pointer border-none bg-transparent hover:bg-white/[0.06] active:bg-white/[0.1]"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                  />
+                </svg>
+              </button>
+            </Tooltip>
+            <Tooltip label="Import Game Metadata (.json)">
+              <label
+                className="px-2.5 py-2 text-xs font-semibold text-white/50 hover:text-white/80 active:text-white transition-all cursor-pointer border-none bg-transparent hover:bg-white/[0.06] active:bg-white/[0.1] flex items-center"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 16V4m0 0L8 8m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                  />
+                </svg>
+                <input
+                  type="file"
                 accept=".json,application/json"
                 className="hidden"
                 onChange={(e) => {
@@ -561,6 +567,7 @@ export default function LibraryView({ toast }: { toast: (msg: string, type?: Toa
                 }}
               />
             </label>
+            </Tooltip>
           </div>
         </div>
       </div>

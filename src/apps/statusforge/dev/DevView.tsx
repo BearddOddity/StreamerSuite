@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Tooltip } from "../../../design-system/components/overlay";
 
 // Module-scoped (not component state): App.tsx only renders `views[currentView]`,
 // so switching away from Dev Tools (including toggling its sidebar visibility
@@ -513,28 +514,30 @@ export default function DevView() {
               <span className="text-[10px] text-white/30 font-mono ml-2">debug.log</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setFriendly((v) => !v)}
-                title="Rewrite log lines into plain English"
-                className={`text-[9px] px-2 py-1 rounded-md border transition-colors cursor-pointer ${
-                  friendly
-                    ? "bg-purple-500/15 border-purple-500/25 text-purple-300"
-                    : "bg-white/[0.04] border-white/10 text-white/40 hover:text-white/70"
-                }`}
-              >
-                {friendly ? "Plain English" : "Raw"}
-              </button>
-              <button
-                onClick={() => setErrorsOnly((v) => !v)}
-                title="Show only warnings and errors"
-                className={`text-[9px] px-2 py-1 rounded-md border transition-colors cursor-pointer ${
-                  errorsOnly
-                    ? "bg-red-500/15 border-red-500/25 text-red-300"
-                    : "bg-white/[0.04] border-white/10 text-white/40 hover:text-white/70"
-                }`}
-              >
-                Errors only{errorCount ? ` (${errorCount})` : ""}
-              </button>
+              <Tooltip label="Rewrite log lines into plain English">
+                <button
+                  onClick={() => setFriendly((v) => !v)}
+                  className={`text-[9px] px-2 py-1 rounded-md border transition-colors cursor-pointer ${
+                    friendly
+                      ? "bg-purple-500/15 border-purple-500/25 text-purple-300"
+                      : "bg-white/[0.04] border-white/10 text-white/40 hover:text-white/70"
+                  }`}
+                >
+                  {friendly ? "Plain English" : "Raw"}
+                </button>
+              </Tooltip>
+              <Tooltip label="Show only warnings and errors">
+                <button
+                  onClick={() => setErrorsOnly((v) => !v)}
+                  className={`text-[9px] px-2 py-1 rounded-md border transition-colors cursor-pointer ${
+                    errorsOnly
+                      ? "bg-red-500/15 border-red-500/25 text-red-300"
+                      : "bg-white/[0.04] border-white/10 text-white/40 hover:text-white/70"
+                  }`}
+                >
+                  Errors only{errorCount ? ` (${errorCount})` : ""}
+                </button>
+              </Tooltip>
             </div>
           </div>
 

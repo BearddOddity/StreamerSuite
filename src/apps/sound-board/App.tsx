@@ -4,6 +4,7 @@ import type { SoundPad } from "./types";
 import "../../design-system/styles.css";
 import { Button, Card, Chip, Kbd, SectionHead } from "../../design-system/components/core";
 import { RangeSlider } from "../../design-system/components/forms";
+import { Tooltip } from "../../design-system/components/overlay";
 
 export default function SoundBoardApp() {
   const { pads, masterVolume, setMasterVolume, activePad, brokenPads, addPad, removePad, renamePad, setPadHotkey, play, stopAll } =
@@ -83,9 +84,11 @@ export default function SoundBoardApp() {
                     className="w-full bg-transparent text-center text-[11px] font-medium text-white/70 border-b border-white/10 focus:outline-none"
                   />
                 ) : (
-                  <span className="text-[11px] font-medium text-white/60 block truncate" title={brokenPads.has(pad.id) ? "File not found" : pad.name}>
-                    {pad.name}
-                  </span>
+                  <Tooltip label={brokenPads.has(pad.id) ? "File not found" : pad.name} className="w-full">
+                    <span className="text-[11px] font-medium text-white/60 block truncate">
+                      {pad.name}
+                    </span>
+                  </Tooltip>
                 )}
               </button>
               {editing && (
