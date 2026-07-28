@@ -128,7 +128,7 @@ function EngineSubTab({
         defaultOpen={true}
         badge={
           <span
-            className={`text-[10px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1.5 border transition-all duration-300 ${
+            className={`text-[10px] px-2.5 py-1 rounded-md font-bold flex items-center gap-1.5 border transition-all duration-300 ${
               engineStatus.running
                 ? "bg-green-500/10 border-green-500/20 text-green-400"
                 : "bg-red-500/10 border-red-500/20 text-red-400"
@@ -209,7 +209,7 @@ function EngineSubTab({
               description="How the detection engine decides what you're playing."
               icon="🔄"
               badge={
-                <span className="text-[10px] px-2.5 py-1 rounded-full font-bold flex items-center gap-1.5 border transition-all duration-300 bg-emerald-500/10 border-emerald-500/20 text-emerald-400">
+                <span className="text-[10px] px-2.5 py-1 rounded-md font-bold flex items-center gap-1.5 border transition-all duration-300 bg-emerald-500/10 border-emerald-500/20 text-emerald-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                   {engineStatus.running ? "RUNNING" : "STOPPED"}
                 </span>
@@ -872,7 +872,7 @@ function EngineSubTab({
           description="What to show when no game is running."
           icon="🌙"
           badge={
-            <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-full font-semibold max-w-[120px] truncate">
+            <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-md font-semibold max-w-[120px] truncate">
               {config.engine_settings.idle_category || "None"}
             </span>
           }
@@ -945,7 +945,7 @@ function EngineSubTab({
         badge={
           keychainInfo && (
             <span
-              className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+              className={`text-[10px] px-2 py-0.5 rounded-md font-semibold border ${
                 keychainInfo.count > 0
                   ? "bg-green-500/10 border-green-500/20 text-green-400"
                   : "bg-yellow-500/10 border-yellow-500/20 text-yellow-400"
@@ -1119,7 +1119,7 @@ function AboutSubTab({ toast }: { toast: (msg: string, type?: ToastType) => void
         icon="ℹ️"
         defaultOpen={true}
         badge={
-          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-full font-semibold">
+          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-md font-semibold">
             StatusForge v{appVersion || "…"}
           </span>
         }
@@ -1297,7 +1297,7 @@ function SystemSubTab({
         description="Control what happens when your computer starts."
         icon="🚀"
         badge={
-          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-full font-semibold">
+          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-md font-semibold">
             {startupCount} / 3 Enabled
           </span>
         }
@@ -1340,7 +1340,7 @@ function SystemSubTab({
         icon="📺"
         badge={
           <span
-            className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+            className={`text-[10px] px-2 py-0.5 rounded-md font-semibold border ${
               prefs.hardwareAccel
                 ? "bg-green-500/10 border-green-500/20 text-green-400"
                 : "bg-white/5 border-white/5 text-white/40"
@@ -1367,7 +1367,7 @@ function SystemSubTab({
         description="Get desktop notifications for important events."
         icon="🔔"
         badge={
-          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-full font-semibold">
+          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-md font-semibold">
             {notifyCount} / 3 Active
           </span>
         }
@@ -1412,7 +1412,7 @@ function SystemSubTab({
         description="Publish live status events to a custom webhook."
         icon="🎮"
         badge={
-          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-full font-semibold">
+          <span className="text-[10px] bg-[color-mix(in_srgb,var(--user-accent,#9146ff)_10%,transparent)] border border-[color-mix(in_srgb,var(--user-accent,#9146ff)_20%,transparent)] text-[color-mix(in_srgb,var(--user-accent,#9146ff)_100%,white_30%)] px-2.5 py-1 rounded-md font-semibold">
             {integrationsCount} / 1 Hooked
           </span>
         }
@@ -1451,7 +1451,7 @@ function SystemSubTab({
         icon="🌐"
         badge={
           <span
-            className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+            className={`text-[10px] px-2 py-0.5 rounded-md font-semibold border ${
               prefs.wsAutoReconnect
                 ? "bg-green-500/10 border-green-500/20 text-green-400"
                 : "bg-white/5 border-white/5 text-white/40"

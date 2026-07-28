@@ -288,7 +288,7 @@ body::before {
   top: 6px;
   left: 6px;
   padding: 3px 10px;
-  border-radius: 9999px;
+  border-radius: 7px;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(6px);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -466,7 +466,7 @@ input[type="submit"]:not(:disabled):hover {
   align-items: center;
   gap: 6px;
   padding: 3px 10px;
-  border-radius: 9999px;
+  border-radius: 7px;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -551,7 +551,7 @@ input[type="range"].accent-purple-500 {
 /* ── Progress bar (gradient fill, subtle track) ────────────────────────────── */
 .progress-track {
   height: 6px;
-  border-radius: 9999px;
+  border-radius: 3px;
   background: rgba(255, 255, 255, 0.05);
   overflow: hidden;
 }
@@ -858,7 +858,7 @@ input[type="range"].accent-purple-500 {
 /* ── Toast notification ────────────────────────────────────────────────────── */
 .toast {
   padding: 12px 18px;
-  border-radius: 12px;
+  border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
   backdrop-filter: blur(10px);
@@ -952,7 +952,7 @@ input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
-  border-radius: 9999px;
+  border-radius: 3px;
   background: rgba(255, 255, 255, 0.08);
   outline: none;
 }
@@ -961,7 +961,7 @@ input[type="range"]::-webkit-slider-thumb {
   appearance: none;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  border-radius: 4px;
   background: #9146FF;
   cursor: pointer;
   border: 2px solid rgba(0, 0, 0, 0.3);
@@ -974,7 +974,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 input[type="range"]::-moz-range-thumb {
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  border-radius: 4px;
   background: #9146FF;
   cursor: pointer;
   border: 2px solid rgba(0, 0, 0, 0.3);

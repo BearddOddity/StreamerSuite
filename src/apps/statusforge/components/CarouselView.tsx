@@ -90,7 +90,7 @@ export default function CarouselView({
     <div className="relative w-full" style={{ height: 520 }}>
       <button
         onClick={() => goTo(activeIndex - 1)}
-        className="absolute z-20 w-11 h-11 flex items-center justify-center bg-black/60 border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-black/80 transition-all cursor-pointer backdrop-blur-sm"
+        className="absolute z-20 w-11 h-11 flex items-center justify-center bg-black/60 border border-white/10 rounded-xl text-white/60 hover:text-white hover:bg-black/80 transition-all cursor-pointer backdrop-blur-sm"
         style={{ left: -8, top: "50%", transform: "translateY(-50%)" }}
       >
         ‹
@@ -127,7 +127,7 @@ export default function CarouselView({
 
       <button
         onClick={() => goTo(activeIndex + 1)}
-        className="absolute z-20 w-11 h-11 flex items-center justify-center bg-black/60 border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-black/80 transition-all cursor-pointer backdrop-blur-sm"
+        className="absolute z-20 w-11 h-11 flex items-center justify-center bg-black/60 border border-white/10 rounded-xl text-white/60 hover:text-white hover:bg-black/80 transition-all cursor-pointer backdrop-blur-sm"
         style={{ right: -8, top: 240, transform: "translateY(-50%)" }}
       >
         ›
@@ -265,7 +265,7 @@ function CarouselCard({
           isActive ? "max-h-12 opacity-100" : "max-h-0 opacity-0"
         }`}
       >
-        <div className="inline-flex mx-auto items-center px-4 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.1] backdrop-blur-sm shadow-sm shadow-black/20">
+        <div className="inline-flex mx-auto items-center px-4 py-1.5 rounded-lg bg-white/[0.06] border border-white/[0.1] backdrop-blur-sm shadow-sm shadow-black/20">
           <span
             className={`text-xs font-medium truncate transition-all duration-300 ${
               isActive ? "text-white/90" : "text-white/30"

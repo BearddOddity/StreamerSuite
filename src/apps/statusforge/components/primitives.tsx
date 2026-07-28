@@ -82,7 +82,7 @@ export function Tag({
   };
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wider ${variants[variant]}`}
+      className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-semibold uppercase tracking-wider ${variants[variant]}`}
     >
       {children}
     </span>

@@ -367,7 +367,7 @@ function App() {
       {showOnboarding && onboardingHidden && (
         <button
           onClick={() => setOnboardingHidden(false)}
-          className="fixed bottom-5 right-5 z-[290] px-4 py-2.5 rounded-full text-xs font-semibold text-white cursor-pointer shadow-lg transition-transform hover:scale-105"
+          className="fixed bottom-5 right-5 z-[290] px-4 py-2.5 rounded-lg text-xs font-semibold text-white cursor-pointer shadow-lg transition-transform hover:scale-105"
           style={{ background: "linear-gradient(135deg, #9146FF 0%, #6441A5 100%)" }}
         >
           ← Resume Setup Guide

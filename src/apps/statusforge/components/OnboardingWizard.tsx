@@ -631,13 +631,13 @@ export default function OnboardingWizard({ onFinish, onBrowseOverlays, hidden }:
                     }`}
                   >
                     <span
-                      className="w-4 h-4 rounded-full border shrink-0 mt-0.5 flex items-center justify-center"
+                      className="w-4 h-4 rounded-[5px] border shrink-0 mt-0.5 flex items-center justify-center"
                       style={{
                         borderColor: minimizeToTray ? "#9146FF" : "rgba(255,255,255,0.3)",
                       }}
                     >
                       {minimizeToTray && (
-                        <span className="w-2 h-2 rounded-full" style={{ background: "#9146FF" }} />
+                        <span className="w-2 h-2 rounded-[2px]" style={{ background: "#9146FF" }} />
                       )}
                     </span>
                     <span>
@@ -660,13 +660,13 @@ export default function OnboardingWizard({ onFinish, onBrowseOverlays, hidden }:
                     }`}
                   >
                     <span
-                      className="w-4 h-4 rounded-full border shrink-0 mt-0.5 flex items-center justify-center"
+                      className="w-4 h-4 rounded-[5px] border shrink-0 mt-0.5 flex items-center justify-center"
                       style={{
                         borderColor: !minimizeToTray ? "#9146FF" : "rgba(255,255,255,0.3)",
                       }}
                     >
                       {!minimizeToTray && (
-                        <span className="w-2 h-2 rounded-full" style={{ background: "#9146FF" }} />
+                        <span className="w-2 h-2 rounded-[2px]" style={{ background: "#9146FF" }} />
                       )}
                     </span>
                     <span>
@@ -711,13 +711,13 @@ export default function OnboardingWizard({ onFinish, onBrowseOverlays, hidden }:
                     }`}
                   >
                     <span
-                      className="w-4 h-4 rounded-full border shrink-0 mt-0.5 flex items-center justify-center"
+                      className="w-4 h-4 rounded-[5px] border shrink-0 mt-0.5 flex items-center justify-center"
                       style={{
                         borderColor: hardwareAccel ? "#9146FF" : "rgba(255,255,255,0.3)",
                       }}
                     >
                       {hardwareAccel && (
-                        <span className="w-2 h-2 rounded-full" style={{ background: "#9146FF" }} />
+                        <span className="w-2 h-2 rounded-[2px]" style={{ background: "#9146FF" }} />
                       )}
                     </span>
                     <span>
@@ -739,13 +739,13 @@ export default function OnboardingWizard({ onFinish, onBrowseOverlays, hidden }:
                     }`}
                   >
                     <span
-                      className="w-4 h-4 rounded-full border shrink-0 mt-0.5 flex items-center justify-center"
+                      className="w-4 h-4 rounded-[5px] border shrink-0 mt-0.5 flex items-center justify-center"
                       style={{
                         borderColor: !hardwareAccel ? "#9146FF" : "rgba(255,255,255,0.3)",
                       }}
                     >
                       {!hardwareAccel && (
-                        <span className="w-2 h-2 rounded-full" style={{ background: "#9146FF" }} />
+                        <span className="w-2 h-2 rounded-[2px]" style={{ background: "#9146FF" }} />
                       )}
                     </span>
                     <span>

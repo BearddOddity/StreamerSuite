@@ -973,7 +973,7 @@ export default function DashboardView({
                     onClick={() =>
                       setOverlayIndex((p) => (p - 1 + overlays.length) % overlays.length)
                     }
-                    className="shrink-0 w-10 h-10 flex items-center justify-center bg-black/50 border border-white/10 rounded-full text-white/60 hover:text-white transition-all cursor-pointer text-base"
+                    className="shrink-0 w-10 h-10 flex items-center justify-center bg-black/50 border border-white/10 rounded-lg text-white/60 hover:text-white transition-all cursor-pointer text-base"
                   >
                     ‹
                   </button>
@@ -1026,7 +1026,7 @@ export default function DashboardView({
                   </div>
                   <button
                     onClick={() => setOverlayIndex((p) => (p + 1) % overlays.length)}
-                    className="shrink-0 w-10 h-10 flex items-center justify-center bg-black/50 border border-white/10 rounded-full text-white/60 hover:text-white transition-all cursor-pointer text-base"
+                    className="shrink-0 w-10 h-10 flex items-center justify-center bg-black/50 border border-white/10 rounded-lg text-white/60 hover:text-white transition-all cursor-pointer text-base"
                   >
                     ›
                   </button>
