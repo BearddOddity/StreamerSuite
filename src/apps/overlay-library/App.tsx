@@ -4,7 +4,7 @@ import { useOverlays } from "./useOverlays";
 import { openAppInNewWindow } from "../../shell/popout";
 import { DeleteConfirmDialog } from "../overlay-editor/ConfirmDialogs";
 import "../../design-system/styles.css";
-import { Button, Card, SectionHead, Badge } from "../../design-system/components/core";
+import { Button, Card, SectionHead, Badge, CopyButton } from "../../design-system/components/core";
 import { Tooltip } from "../../design-system/components/overlay";
 
 function OverlayPreview({ url }: { url: string }) {
@@ -23,7 +23,7 @@ function editInEditor(file: string, kind: "template" | "canvas", mode: "edit" | 
 }
 
 export default function OverlayLibraryApp() {
-  const { builtin, custom, error, copied, builtinUrl, customUrl, copyUrl, addCustom, removeCustom, refresh, sendTestAlert } = useOverlays();
+  const { builtin, custom, error, builtinUrl, customUrl, addCustom, removeCustom, refresh, sendTestAlert } = useOverlays();
   const [search, setSearch] = useState("");
   const [renaming, setRenaming] = useState<{ file: string; value: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ file: string; name: string } | null>(null);
@@ -82,9 +82,7 @@ export default function OverlayLibraryApp() {
                       Send Test Alert
                     </Button>
                   )}
-                  <Button variant={copied === o.file ? "success" : "primary"} size="sm" onClick={() => copyUrl(builtinUrl(o.file), o.file)}>
-                    {copied === o.file ? "Copied ✓" : "Copy URL"}
-                  </Button>
+                  <CopyButton value={builtinUrl(o.file)} label="Copy URL" />
                 </div>
               ))}
             </div>
@@ -165,9 +163,7 @@ export default function OverlayLibraryApp() {
                     </>
                   )}
 
-                  <Button variant={copied === o.file ? "success" : "primary"} size="sm" onClick={() => copyUrl(customUrl(o.file), o.file)}>
-                    {copied === o.file ? "Copied ✓" : "Copy URL"}
-                  </Button>
+                  <CopyButton value={customUrl(o.file)} label="Copy URL" />
 
                   <button
                     onClick={() => setDeleteTarget({ file: o.file, name: o.name })}

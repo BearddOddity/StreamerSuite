@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Tooltip } from "../../../design-system/components/overlay";
+import { StepperInput } from "../../../design-system/components/forms";
 
 // Module-scoped (not component state): App.tsx only renders `views[currentView]`,
 // so switching away from Dev Tools (including toggling its sidebar visibility
@@ -430,19 +431,12 @@ export default function DevView() {
 
           <div className="flex flex-col gap-3">
             <SettingRow label="Tail Lines">
-              <input
-                type="number"
+              <StepperInput
                 min={50}
                 max={5000}
                 step={50}
                 value={settings.logTailLines}
-                onChange={(e) =>
-                  updateSetting(
-                    "logTailLines",
-                    Math.max(50, Math.min(5000, parseInt(e.target.value) || 200))
-                  )
-                }
-                className="input-glass w-20 text-right"
+                onChange={(v) => updateSetting("logTailLines", v)}
               />
             </SettingRow>
 
@@ -455,19 +449,12 @@ export default function DevView() {
 
             {settings.autoRefresh && (
               <SettingRow label="Interval (ms)">
-                <input
-                  type="number"
+                <StepperInput
                   min={500}
                   max={10000}
                   step={500}
                   value={settings.autoRefreshMs}
-                  onChange={(e) =>
-                    updateSetting(
-                      "autoRefreshMs",
-                      Math.max(500, Math.min(10000, parseInt(e.target.value) || 2000))
-                    )
-                  }
-                  className="input-glass w-20 text-right"
+                  onChange={(v) => updateSetting("autoRefreshMs", v)}
                 />
               </SettingRow>
             )}

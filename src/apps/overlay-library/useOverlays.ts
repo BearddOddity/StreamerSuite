@@ -10,7 +10,6 @@ export function useOverlays() {
   const [builtin, setBuiltin] = useState<OverlayEntry[]>([]);
   const [custom, setCustom] = useState<OverlayEntry[]>([]);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -34,16 +33,6 @@ export function useOverlays() {
 
   const builtinUrl = useCallback((file: string) => `${SERVER}/forge-overlay/${encodeURIComponent(token)}/${encodeURIComponent(file)}`, [token]);
   const customUrl = useCallback((file: string) => `${SERVER}/custom-overlay/${encodeURIComponent(token)}/${encodeURIComponent(file)}`, [token]);
-
-  const copyUrl = useCallback(async (url: string, file: string) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(file);
-      setTimeout(() => setCopied((cur) => (cur === file ? null : cur)), 1800);
-    } catch {
-      // clipboard permission denied — non-fatal, URL is still shown/selectable
-    }
-  }, []);
 
   const addCustom = useCallback(async () => {
     const selected = await open({ multiple: false });
@@ -79,5 +68,5 @@ export function useOverlays() {
     invoke("alerts_broadcast_to_overlay", { event }).catch((e) => setError(String(e)));
   }, []);
 
-  return { token, builtin, custom, error, copied, refresh, builtinUrl, customUrl, copyUrl, addCustom, removeCustom, sendTestAlert };
+  return { token, builtin, custom, error, refresh, builtinUrl, customUrl, addCustom, removeCustom, sendTestAlert };
 }

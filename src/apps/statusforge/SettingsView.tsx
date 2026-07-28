@@ -16,8 +16,7 @@ import {
   saveSystemPrefs,
 } from "@statusforge/systemPrefs";
 import { Tooltip } from "../../design-system/components/overlay";
-
-import { clampInt } from "@statusforge/utils/number";
+import { StepperInput } from "../../design-system/components/forms";
 
 // ─── Engine Sub-tab ─────────────────────────────────────────────────────────
 function EngineSubTab({
@@ -813,54 +812,44 @@ function EngineSubTab({
               <label className="block text-[11px] uppercase tracking-wider text-white/50 mb-1.5">
                 Scan Interval (s)
               </label>
-              <input
-                type="number"
+              <StepperInput
                 min={2}
                 max={60}
                 value={config.engine_settings.scan_interval}
-                onChange={(e) => setEngine("scan_interval", clampInt(e.target.value, 2, 60, 2))}
-                className="input-glass font-mono"
+                onChange={(v) => setEngine("scan_interval", v)}
               />
             </div>
             <div>
               <label className="block text-[11px] uppercase tracking-wider text-white/50 mb-1.5">
                 Grace Period (s)
               </label>
-              <input
-                type="number"
+              <StepperInput
                 min={0}
                 max={120}
                 value={config.engine_settings.grace_period}
-                onChange={(e) => setEngine("grace_period", clampInt(e.target.value, 0, 120, 0))}
-                className="input-glass font-mono"
+                onChange={(v) => setEngine("grace_period", v)}
               />
             </div>
             <div>
               <label className="block text-[11px] uppercase tracking-wider text-white/50 mb-1.5">
                 Overlay Poll Rate (s)
               </label>
-              <input
-                type="number"
+              <StepperInput
                 min={1}
                 max={60}
                 value={config.engine_settings.overlay_poll_rate}
-                onChange={(e) => setEngine("overlay_poll_rate", clampInt(e.target.value, 1, 60, 1))}
-                className="input-glass font-mono"
+                onChange={(v) => setEngine("overlay_poll_rate", v)}
               />
             </div>
             <div>
               <label className="block text-[11px] uppercase tracking-wider text-white/50 mb-1.5">
                 Overlay Fade Timer (s)
               </label>
-              <input
-                type="number"
+              <StepperInput
                 min={0}
                 max={120}
                 value={config.engine_settings.overlay_fade_timer}
-                onChange={(e) =>
-                  setEngine("overlay_fade_timer", clampInt(e.target.value, 0, 120, 0))
-                }
-                className="input-glass font-mono"
+                onChange={(v) => setEngine("overlay_fade_timer", v)}
               />
             </div>
           </div>
