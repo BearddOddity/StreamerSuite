@@ -52,7 +52,7 @@ export function SettingsPanel({
             <StatusDot status={toDotStatus(twitchStatus)} />
           </div>
           {twitchAccount ? (
-            <div className="flex items-center justify-between bg-white/[0.03] rounded-xl px-3 py-2">
+            <div className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2">
               <span className="text-[12px] text-white/70">Connected via StreamerSuite Settings</span>
             </div>
           ) : (

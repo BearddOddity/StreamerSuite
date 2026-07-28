@@ -93,7 +93,7 @@ export default function AlertsHubApp() {
             <button
               key={i}
               onClick={() => push(e)}
-              className={`px-3 py-2 rounded-xl text-[11px] font-medium border transition-all hover:-translate-y-0.5 ${KIND_STYLE[e.kind].color}`}
+              className={`px-3 py-2 rounded-lg text-[11px] font-medium border transition-all hover:-translate-y-0.5 ${KIND_STYLE[e.kind].color}`}
             >
               {KIND_STYLE[e.kind].icon} test {e.kind}
             </button>
