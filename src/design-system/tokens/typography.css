@@ -1,22 +1,22 @@
 /* ============================================================================
    TYPOGRAPHY — BearddOddity Design System
    ----------------------------------------------------------------------------
-   The streamer tools render UI chrome in the native system stack for a true
-   "desktop app" feel; PanelForge uses Inter. Both share JetBrains Mono for
-   data/metadata rows. Type runs SMALL and dense (10–13px chrome) with heavy
-   use of uppercase micro-labels at wide tracking.
+   Montserrat (self-hosted, see tokens/fonts.css) is the app-wide default
+   per design preference. PanelForge still layers Inter for body copy via
+   --font-sans. Both share JetBrains Mono for data/metadata rows. Type runs
+   SMALL and dense (10–13px chrome) with heavy use of uppercase micro-labels
+   at wide tracking.
    ============================================================================ */
 
 :root {
   /* ── Families ────────────────────────────────────────────────────────── */
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+  --font-ui: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
     Ubuntu, sans-serif;
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo,
     Consolas, monospace;
   --font-heading: "Montserrat", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    /* website/web-app display font — headlines, nav wordmarks, hero type. Additive: does
-       not replace --font-ui (app chrome) or --font-sans (Inter, PanelForge body). */
+    /* website/web-app display font — headlines, nav wordmarks, hero type. */
 
   /* ── Sizes (px — the real chrome scale) ──────────────────────────────── */
   --fs-micro: 10px;    /* uppercase data labels, badges */

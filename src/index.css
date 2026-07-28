@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./design-system/styles.css";
 
 /* Custom theme extensions */
 @theme {
@@ -95,8 +96,8 @@
 /* Base overrides */
 body {
   @apply bg-theme-bg text-white/80 h-screen overflow-hidden m-0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-    Ubuntu, sans-serif;
+  font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, sans-serif);
   background-color: var(--user-bg);
   font-size: calc(1rem * var(--user-font-scale));
 }

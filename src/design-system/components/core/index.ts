@@ -8,3 +8,6 @@ export { Divider, type DividerProps } from "./Divider";
 export { StatCard, type StatCardProps } from "./StatCard";
 export { PricingCard, type PricingCardProps } from "./PricingCard";
 export { Avatar, AvatarGroup, type AvatarProps, type AvatarGroupProps } from "./Avatar";
+export { Kbd, type KbdProps } from "./Kbd";
+export { LivePulseDot, LiveChip, type LivePulseDotProps, type LiveChipProps } from "./LivePulseDot";
+export { CopyButton, type CopyButtonProps } from "./CopyButton";

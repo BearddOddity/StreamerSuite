@@ -24,13 +24,14 @@
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 .bd-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 20px; border-radius: var(--bd-radius-lg);
+  padding: 10px 20px; border-radius: 8px;
   font-family: var(--font-ui); font-size: var(--fs-xs); font-weight: var(--fw-semibold);
   white-space: nowrap; cursor: pointer; border: 1px solid transparent;
   transition: all var(--dur-base) ease; line-height: 1;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
 }
 .bd-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.bd-btn-sm { padding: 6px 12px; font-size: var(--fs-mini); border-radius: var(--bd-radius-md); }
+.bd-btn-sm { padding: 6px 12px; font-size: var(--fs-mini); border-radius: 6px; }
 
 /* primary — elevated glass */
 .bd-btn-primary {
@@ -122,8 +123,9 @@
 /* ── Badge / Tag ─────────────────────────────────────────────────────────── */
 .bd-badge {
   display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
-  border-radius: var(--radius-pill); font-size: var(--fs-micro); font-weight: var(--fw-semibold);
+  border-radius: 6px; font-size: var(--fs-micro); font-weight: var(--fw-semibold);
   letter-spacing: var(--tracking-wide); white-space: nowrap; border: 1px solid transparent;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
 .bd-badge-ghost  { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.06); color: var(--text-muted); }
 .bd-badge-purple { background: color-mix(in srgb, var(--bd-accent) 10%, transparent);  border-color: color-mix(in srgb, var(--bd-accent) 20%, transparent);  color: var(--bd-accent-text); }
@@ -194,21 +196,37 @@
 .glass-option.selected { background: rgba(255,255,255,0.08); border-color: var(--glass-border); font-weight: var(--fw-semibold); }
 .glass-option-check { opacity: 0.8; }
 
-/* ── Range slider ────────────────────────────────────────────────────────── */
-.bd-range { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 9999px; background: rgba(255,255,255,0.08); outline: none; }
-.bd-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--bd-accent); cursor: pointer; border: 2px solid rgba(0,0,0,0.3); box-shadow: 0 0 8px color-mix(in srgb, var(--bd-accent) 30%, transparent); transition: box-shadow 0.2s ease; }
+/* ── Range slider — segmented meter, matches Progress Bar's visual language.
+   The real <input type=range> stays mounted (absolutely positioned, invisible)
+   for keyboard/pointer/screen-reader support; the segment blocks are the
+   visual, driven by the component's value state. ───────────────────────── */
+.bd-range-wrap { position: relative; }
+.bd-range-track { display: flex; align-items: center; gap: 3px; height: 16px; }
+.bd-range-seg { flex: 1; height: 60%; border-radius: 3px; background: rgba(255,255,255,0.06); transition: height var(--dur-base) ease, background var(--dur-base) ease, box-shadow var(--dur-base) ease; }
+.bd-range-seg.on { height: 100%; background: linear-gradient(180deg, var(--bd-cta-from), var(--bd-cta-to)); box-shadow: 0 0 8px color-mix(in srgb, var(--bd-accent) 40%, transparent); }
+.bd-range-seg.current { height: 100%; background: #fff; box-shadow: 0 0 10px 2px color-mix(in srgb, var(--bd-accent) 60%, transparent); }
+.bd-range-input {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+  opacity: 0; cursor: pointer; -webkit-appearance: none; appearance: none; background: transparent;
+}
+.bd-range-input:focus-visible ~ .bd-range-track .bd-range-seg.current { box-shadow: 0 0 0 2px var(--bd-black), 0 0 0 4px var(--bd-accent); }
+/* Legacy native-styled range (kept for any remaining bare usages) */
+.bd-range { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 3px; background: rgba(255,255,255,0.08); outline: none; }
+.bd-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 4px; background: var(--bd-accent); cursor: pointer; border: 2px solid rgba(0,0,0,0.3); box-shadow: 0 0 8px color-mix(in srgb, var(--bd-accent) 30%, transparent); transition: box-shadow 0.2s ease; margin-top: -5px; }
 .bd-range::-webkit-slider-thumb:hover { box-shadow: 0 0 14px color-mix(in srgb, var(--bd-accent) 50%, transparent); }
-.bd-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--bd-accent); cursor: pointer; border: 2px solid rgba(0,0,0,0.3); box-shadow: 0 0 8px color-mix(in srgb, var(--bd-accent) 30%, transparent); }
+.bd-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 4px; background: var(--bd-accent); cursor: pointer; border: 2px solid rgba(0,0,0,0.3); box-shadow: 0 0 8px color-mix(in srgb, var(--bd-accent) 30%, transparent); }
 
-/* ── Progress bar ────────────────────────────────────────────────────────── */
-.bd-progress-track { height: 6px; border-radius: 9999px; background: rgba(255,255,255,0.05); overflow: hidden; }
-.bd-progress-fill  { height: 100%; border-radius: inherit; background-image: linear-gradient(to right, var(--bd-cta-from), var(--bd-cta-to)); transition: width 0.7s ease; }
+/* ── Progress bar — segmented meter (VU-meter style discrete blocks) ────── */
+.bd-progress-track { display: flex; gap: 3px; height: 14px; }
+.bd-progress-seg { flex: 1; border-radius: 3px; background: rgba(255,255,255,0.06); transition: background var(--dur-base) ease, box-shadow var(--dur-base) ease; }
+.bd-progress-seg.on { background: linear-gradient(180deg, var(--bd-cta-from), var(--bd-cta-to)); box-shadow: 0 0 8px color-mix(in srgb, var(--bd-accent) 40%, transparent); }
 
 /* ── Chip ────────────────────────────────────────────────────────────────── */
 .bd-chip {
   display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px;
-  border-radius: var(--radius-pill); border: 1px solid var(--line-2);
-  background: rgba(255,255,255,0.03); color: var(--text-muted);
+  border-radius: 7px; border: 1px solid var(--line-2);
+  background: rgba(255,255,255,0.03); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  color: var(--text-muted);
   font-family: var(--font-ui); font-size: var(--fs-xs); font-weight: var(--fw-medium);
   cursor: pointer; transition: all var(--dur-fast) ease; line-height: 1.2;
 }
@@ -292,7 +310,7 @@ span.bd-chip { cursor: default; }
 
 /* ── Toast ───────────────────────────────────────────────────────────────── */
 .bd-toast {
-  padding: 12px 18px; border-radius: var(--bd-radius-lg); font-size: var(--fs-sm); font-weight: var(--fw-medium);
+  padding: 12px 18px; border-radius: 8px; font-size: var(--fs-sm); font-weight: var(--fw-medium);
   backdrop-filter: var(--blur-md); -webkit-backdrop-filter: var(--blur-md);
   box-shadow: 0 8px 24px rgba(0,0,0,0.3), var(--inset-highlight); border: 1px solid transparent;
   animation: bd-slide-in 0.3s ease;
@@ -326,7 +344,7 @@ span.bd-chip { cursor: default; }
 /* ── Avatar ──────────────────────────────────────────────────────────────── */
 .bd-avatar {
   display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
-  border-radius: 50%; overflow: hidden; background: color-mix(in srgb, var(--bd-accent) 25%, #1a1a22);
+  border-radius: 8px; overflow: hidden; background: color-mix(in srgb, var(--bd-accent) 25%, #1a1a22);
   color: #fff; font-weight: var(--fw-semibold); border: 1px solid var(--line-2); line-height: 1;
 }
 .bd-avatar img { display: block; width: 100%; height: 100%; }
@@ -389,7 +407,11 @@ span.bd-chip { cursor: default; }
 
 /* ── Empty state ─────────────────────────────────────────────────────────── */
 .bd-empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 48px 24px; gap: 6px; }
-.bd-empty-icon  { font-size: 32px; opacity: 0.6; margin-bottom: 6px; }
+.bd-empty-icon {
+  width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 18px;
+  border-radius: 10px; background: rgba(255,255,255,0.04); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--line-2); margin-bottom: 8px;
+}
 .bd-empty-title { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-strong); }
 .bd-empty-desc  { font-size: var(--fs-xs); color: var(--text-faint); max-width: 320px; }
 .bd-empty > :last-child:not(.bd-empty-desc) { margin-top: 10px; }
@@ -407,19 +429,21 @@ span.bd-chip { cursor: default; }
 .bd-check-row { display: flex; align-items: center; gap: 10px; font-size: var(--fs-xs); color: var(--text-body); }
 .bd-checkbox {
   width: 18px; height: 18px; flex-shrink: 0; border-radius: 5px; border: 1px solid var(--line-3);
-  background: rgba(255,255,255,0.03); display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.03); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
   cursor: pointer; transition: all var(--dur-fast) ease;
 }
 .bd-checkbox svg { opacity: 0; transition: opacity var(--dur-fast) ease; }
 .bd-checkbox[data-checked="true"] { background: var(--bd-accent); border-color: var(--bd-accent); }
 .bd-checkbox[data-checked="true"] svg { opacity: 1; }
 .bd-radio {
-  width: 18px; height: 18px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--line-3);
-  background: rgba(255,255,255,0.03); display: flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; flex-shrink: 0; border-radius: 5px; border: 1px solid var(--line-3);
+  background: rgba(255,255,255,0.03); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
   cursor: pointer; transition: all var(--dur-fast) ease;
 }
 .bd-radio[data-checked="true"] { border-color: var(--bd-accent); }
-.bd-radio-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bd-accent); opacity: 0; transform: scale(0.5); transition: all var(--dur-fast) ease; }
+.bd-radio-dot { width: 8px; height: 8px; border-radius: 2px; background: var(--bd-accent); opacity: 0; transform: scale(0.5); transition: all var(--dur-fast) ease; }
 .bd-radio[data-checked="true"] .bd-radio-dot { opacity: 1; transform: scale(1); }
 .bd-switch {
   width: 38px; height: 22px; flex-shrink: 0; border-radius: 9999px; background: rgba(255,255,255,0.08);
@@ -519,9 +543,101 @@ span.bd-chip { cursor: default; }
 .bd-tooltip-wrap { position: relative; display: inline-flex; }
 .bd-tooltip {
   position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%) translateY(4px);
-  background: var(--dropdown-bg); border: 1px solid var(--glass-border); color: var(--glass-text);
+  background: rgba(20,20,25,0.75); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border); color: var(--glass-text);
   font-size: var(--fs-mini); font-weight: var(--fw-medium); white-space: nowrap; padding: 6px 10px;
-  border-radius: var(--bd-radius-md); box-shadow: var(--shadow-2); pointer-events: none;
+  border-radius: 7px; box-shadow: var(--shadow-2); pointer-events: none;
   opacity: 0; transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease; z-index: 60;
 }
 .bd-tooltip-wrap:hover .bd-tooltip, .bd-tooltip-wrap:focus-within .bd-tooltip { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ── Kbd shortcut ────────────────────────────────────────────────────────── */
+.bd-kbd { display: inline-flex; align-items: center; gap: 3px; }
+.bd-kbd-key {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 6px;
+  border-radius: 6px; border: 1px solid var(--line-3); background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 1px 2px rgba(0,0,0,0.4);
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text-body);
+}
+
+/* ── Segmented control ──────────────────────────────────────────────────── */
+.bd-segmented {
+  display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 9px;
+  background: rgba(255,255,255,0.03); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2);
+}
+.bd-segmented button {
+  display: flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: none;
+  background: transparent; color: var(--text-faint); font-family: var(--font-ui); font-size: var(--fs-xs);
+  font-weight: var(--fw-medium); cursor: pointer; transition: all var(--dur-fast) ease;
+}
+.bd-segmented button.active { background: var(--bd-accent); color: #fff; box-shadow: 0 2px 8px color-mix(in srgb, var(--bd-accent) 40%, transparent); }
+
+/* ── Copy to clipboard ───────────────────────────────────────────────────── */
+.bd-copy-btn {
+  display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 8px;
+  border: 1px solid var(--line-2); background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  color: var(--text-muted); font-family: var(--font-ui); font-size: var(--fs-xs); font-weight: var(--fw-medium);
+  cursor: pointer; transition: all var(--dur-base) ease;
+}
+.bd-copy-btn:hover { background: rgba(255,255,255,0.07); color: var(--text-strong); }
+.bd-copy-btn.copied { border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.10); color: var(--bd-green); }
+.bd-copy-btn svg { flex-shrink: 0; }
+
+/* ── Stepper input ───────────────────────────────────────────────────────── */
+.bd-stepper {
+  display: inline-flex; align-items: stretch; border-radius: 8px; border: 1px solid var(--line-2);
+  background: rgba(255,255,255,0.03); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); overflow: hidden;
+}
+.bd-stepper button {
+  width: 32px; display: flex; align-items: center; justify-content: center; border: none;
+  background: transparent; color: var(--text-faint); cursor: pointer; font-size: 15px; font-weight: 600;
+}
+.bd-stepper button:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: var(--text-strong); }
+.bd-stepper button:disabled { opacity: 0.35; cursor: not-allowed; }
+.bd-stepper-val {
+  min-width: 44px; padding: 0 6px; display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 600; color: var(--text-strong);
+  border-left: 1px solid var(--line-1); border-right: 1px solid var(--line-1);
+}
+
+/* ── Command palette ─────────────────────────────────────────────────────── */
+.bd-cmdk-backdrop { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.55); display: flex; align-items: flex-start; justify-content: center; padding: 90px 24px; animation: bd-fade-in 0.15s ease; }
+.bd-cmdk {
+  width: 100%; max-width: 560px; border-radius: 8px; border: 1px solid var(--line-2);
+  background: var(--surface-card, var(--surface-glass)); backdrop-filter: var(--blur-xl); -webkit-backdrop-filter: var(--blur-xl);
+  box-shadow: var(--shadow-modal), var(--inset-highlight); overflow: hidden; animation: bd-modal-in 0.18s var(--ease-out-expo);
+}
+.bd-cmdk-input-row { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line-1); }
+.bd-cmdk-input-row svg { flex-shrink: 0; opacity: 0.5; }
+.bd-cmdk-input-row input { flex: 1; background: transparent; border: none; outline: none; color: var(--text-strong); font-family: var(--font-ui); font-size: var(--fs-base); }
+.bd-cmdk-input-row input::placeholder { color: var(--text-dim); }
+.bd-cmdk-group-label { padding: 10px 16px 4px; font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: var(--tracking-wider); color: var(--text-dim); font-weight: var(--fw-semibold); }
+.bd-cmdk-item { display: flex; align-items: center; gap: 12px; padding: 10px 16px; cursor: pointer; }
+.bd-cmdk-item:hover, .bd-cmdk-item.active { background: rgba(255,255,255,0.05); }
+.bd-cmdk-item-icon { width: 28px; height: 28px; flex-shrink: 0; border-radius: 7px; background: rgba(255,255,255,0.04); border: 1px solid var(--line-1); display: flex; align-items: center; justify-content: center; font-size: 13px; }
+.bd-cmdk-item-label { flex: 1; font-size: var(--fs-xs); color: var(--text-body); }
+.bd-cmdk-item-sub { font-size: var(--fs-mini); color: var(--text-dim); }
+
+/* ── Spinner / loader ────────────────────────────────────────────────────── */
+.bd-spinner-wrap {
+  width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 10px;
+  background: rgba(255,255,255,0.04); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--line-2);
+}
+.bd-spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.12); border-top-color: var(--bd-accent); animation: bd-spin 0.7s linear infinite; }
+@keyframes bd-spin { to { transform: rotate(360deg); } }
+.bd-spinner-inline { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; background: rgba(255,255,255,0.03); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--line-2); color: var(--text-muted); font-size: var(--fs-xs); }
+
+/* ── Live pulse dot ──────────────────────────────────────────────────────── */
+.bd-pulse-dot-wrap { position: relative; width: 8px; height: 8px; display: inline-flex; }
+.bd-pulse-dot-wrap .bd-dot { position: relative; z-index: 1; }
+.bd-pulse-dot-wrap::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; background: var(--bd-green); opacity: 0.55; animation: bd-pulse-ring 1.8s ease-out infinite; }
+@keyframes bd-pulse-ring { 0% { transform: scale(0.6); opacity: 0.55; } 100% { transform: scale(2.6); opacity: 0; } }
+.bd-live-chip {
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px 4px 9px; border-radius: 6px;
+  background: rgba(74,222,128,0.10); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(74,222,128,0.25); color: var(--bd-green); font-size: var(--fs-micro); font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-wide); text-transform: uppercase;
+}

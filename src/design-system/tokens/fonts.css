@@ -1,19 +1,54 @@
 /* ============================================================================
    FONTS — BearddOddity Design System
    ----------------------------------------------------------------------------
-   PanelForge ships Inter (UI) + JetBrains Mono (metadata/mono). The streamer
-   tools (StreamerSuite, StatusForge) deliberately use the native system stack.
-   We load Inter + JetBrains Mono from Google Fonts as the brand webfonts.
-
-   SUBSTITUTION NOTE: no self-hosted font binaries were present in the source
-   repos — Inter and JetBrains Mono are pulled from Google Fonts (the exact
-   families the source referenced). If you have licensed/self-hosted copies,
-   drop them in assets/fonts/ and replace this @import with @font-face rules.
+   PanelForge ships Inter (UI) + JetBrains Mono (metadata/mono). Montserrat is
+   the app-wide default (--font-ui) per design preference, self-hosted below
+   so it renders offline in the packaged desktop app instead of depending on
+   a live fonts.googleapis.com fetch. Inter/JetBrains Mono/Oxygen have no
+   self-hosted copies yet, so they still load from Google Fonts.
    ============================================================================ */
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Oxygen:wght@400;700&family=Montserrat:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Oxygen:wght@400;700&display=swap");
 
-/* Montserrat — added for website/web-app work (marketing headlines, nav wordmarks).
-   Kept alongside --font-ui/--font-sans rather than replacing them: use
-   --font-heading where a page wants a distinct display voice; app chrome
-   (StreamerSuite/StatusForge/PanelForge) keeps --font-ui/--font-sans as before. */
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-800.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url("/fonts/montserrat/montserrat-900.woff2") format("woff2");
+}
