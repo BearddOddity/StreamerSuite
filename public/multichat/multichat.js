@@ -1265,11 +1265,39 @@ async function translateMessage(m) {
     renderView();
   } catch (e) { showToast(`Translation failed: ${e}`); }
 }
+// Multi-streaming shout-out — reuses the compose bar's "send to every
+// connected platform" plumbing (sendToTarget/composeTargets), but builds
+// each platform's own channel link instead of assuming everyone's only on
+// Twitch. Works from a message on ANY platform: right-click a Kick chatter
+// and the shoutout still goes out with their twitch.tv/kick.com/etc links,
+// on the assumption (same one the old !so stub made) that a streamer keeps
+// the same handle across platforms.
+function shoutoutLink(platformId, handle) {
+  if (platformId === "twitch") return `twitch.tv/${handle}`;
+  if (platformId === "kick") return `kick.com/${handle}`;
+  if (platformId === "youtube") return `youtube.com/@${handle}`;
+  if (platformId === "joystick") return `joystick.tv/${handle}`;
+  return "";
+}
+async function shoutoutUser(m) {
+  if (!composeTargets.length) { showToast("Connect a platform (Settings → Connections & Keys) to send a shoutout"); return; }
+  const handle = (m.login || m.user || "").trim();
+  if (!handle) return;
+  const links = composeTargets.map(t => shoutoutLink(t.id, handle)).filter(Boolean);
+  const text = `Go check out ${handle} — they were awesome! ${links.join(" · ")}`;
+  try {
+    const results = await Promise.allSettled(composeTargets.map(t => sendToTarget(t.id, text)));
+    const failed = results.map((r, i) => ({ r, t: composeTargets[i] })).filter(x => x.r.status === "rejected");
+    if (failed.length) showToast(`Shoutout sent to ${composeTargets.length - failed.length}/${composeTargets.length} — failed: ${failed.map(f => shortTargetLabel(f.t.label)).join(", ")}`);
+    else showToast(`Shoutout sent for ${handle} across ${composeTargets.length} platform${composeTargets.length > 1 ? "s" : ""}`);
+  } catch (e) { showToast(`Shoutout failed: ${e}`); }
+}
 function msgMenuItems(m) {
   const items = [
     { label: m.pinned ? "Unpin message" : "Pin message", icon: "📌", onClick: () => togglePin(m.id) },
     { label: "Copy message", icon: "📋", onClick: () => { navigator.clipboard?.writeText(`${m.user}: ${m.text}`); showToast("Message copied"); } },
     { label: "Translate", icon: "🌐", onClick: () => translateMessage(m) },
+    { label: `Shout out ${m.user}`, icon: "📣", onClick: () => shoutoutUser(m) },
     { divider: true },
     { label: `Ignore ${m.user}`, icon: "🔇", onClick: () => ignoreUser(m.user) },
     { label: "Hide message", icon: "🗑️", danger: true, onClick: () => hideMessage(m.id) },
