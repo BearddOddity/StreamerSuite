@@ -101,6 +101,7 @@ const INSTAGRAM_RE = /instagram\.com\/([\w.]+)/i;
 const INSTAGRAM_RESERVED_PATHS = new Set(["p", "reel", "reels", "stories", "explore", "accounts", "direct", "tv"]);
 const BLUESKY_RE = /bsky\.app\/profile\/([\w.:-]+)/i;
 const STEAM_APP_RE = /store\.steampowered\.com\/app\/(\d+)/i;
+const LINKTREE_RE = /linktr\.ee\/([\w.-]+)/i;
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
 function extractGiphyId(text) {
   let m = /giphy\.com\/media\d?\/([a-zA-Z0-9]+)\//.exec(text);
@@ -432,16 +433,6 @@ function buildEmbedNode(m) {
     wrap.append(iframe);
     return wrap;
   }
-  if ((match = SPOTIFY_RE.exec(text))) {
-    const wrap = el("div", "cv-miniplayer-wrap cv-embed-spotify");
-    wrap.append(el("div", "cv-miniplayer-tag", "♫ Spotify"));
-    const iframe = el("iframe");
-    iframe.src = `https://open.spotify.com/embed/${match[1]}/${match[2]}`;
-    iframe.title = "Spotify embed";
-    iframe.allow = "encrypted-media";
-    wrap.append(iframe);
-    return wrap;
-  }
   const giphyId = extractGiphyId(text);
   if (giphyId) {
     const wrap = el("div", "cv-miniplayer-wrap cv-embed-giphy");
@@ -483,6 +474,7 @@ function buildEmbedNode(m) {
 // (or falls back to a plain "open it" chip so the link is always at least
 // clickable, even if the preview data never loads).
 const ytOembedCache = new Map();       // youtube video id -> oEmbed response | null
+const spotifyOembedCache = new Map();  // spotify url -> oEmbed response | null
 const discordInviteCache = new Map();  // invite code -> invite response | null
 const twitchChannelPreviewCache = new Map(); // login(lower) -> preview | null
 
@@ -521,6 +513,30 @@ function linkPreviewYoutube(videoId, url) {
     .then(r => r.ok ? r.json() : null)
     .then(d => { ytOembedCache.set(videoId, d); apply(d); })
     .catch(() => { ytOembedCache.set(videoId, null); apply(null); });
+  return wrap;
+}
+
+// Was a big playable iframe widget (Spotify's own embed player, ~150px+ of
+// tracklist/art) gated to mods/VIPs. Redesigned as the same compact
+// thumbnail+title card every other link type uses — everyone gets a clean
+// preview, nobody gets an autoplaying widget hijacking the feed.
+function linkPreviewSpotify(kind, id, url) {
+  const target = url || `https://open.spotify.com/${kind}/${id}`;
+  const tagText = { track: "♫ Spotify Track", album: "♫ Spotify Album", playlist: "♫ Spotify Playlist", episode: "♫ Spotify Episode", show: "♫ Spotify Podcast" }[kind] || "♫ Spotify";
+  const { wrap, body } = linkPreviewWrap("spotify", tagText, target);
+  const apply = data => fillLinkPreview(body, data, d => {
+    const img = el("img", "cv-linkpreview-thumb");
+    img.src = d.thumbnail_url; img.alt = d.title || "Spotify"; img.loading = "lazy";
+    const info = el("div", "cv-linkpreview-info");
+    info.append(el("div", "cv-linkpreview-title", d.title || "Open in Spotify"), el("div", "cv-linkpreview-sub", "Open in Spotify ↗"));
+    return [img, info];
+  }, "Open in Spotify ↗");
+  const cached = spotifyOembedCache.get(target);
+  if (cached !== undefined) { apply(cached); return wrap; }
+  fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(target)}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { spotifyOembedCache.set(target, d); apply(d); })
+    .catch(() => { spotifyOembedCache.set(target, null); apply(null); });
   return wrap;
 }
 
@@ -632,6 +648,10 @@ function linkPreviewThrone(handle, url) {
 function linkPreviewInstagram(handle, url) {
   return linkPreviewStaticChip("instagram", "📷 Instagram", `@${handle}`, "Open profile ↗", url, "IG");
 }
+// Linktree has no public unauthenticated API either — static chip.
+function linkPreviewLinktree(handle, url) {
+  return linkPreviewStaticChip("linktree", "🌳 Linktree", `@${handle}`, "Open links ↗", url, "LT");
+}
 
 // Bluesky's AT Protocol AppView is genuinely public/unauthenticated — real
 // avatar + display name, same fetch-then-fallback pattern as TikTok above.
@@ -714,6 +734,8 @@ function buildLinkPreviewNode(m) {
   const text = m.text;
   let match;
   if ((match = YT_RE.exec(text))) return linkPreviewYoutube(match[1], firstUrl(text));
+  if ((match = SPOTIFY_RE.exec(text))) return linkPreviewSpotify(match[1], match[2], firstUrl(text));
+  if ((match = LINKTREE_RE.exec(text))) return linkPreviewLinktree(match[1], firstUrl(text));
   if ((match = DISCORD_INVITE_RE.exec(text))) return linkPreviewDiscordInvite(match[1], firstUrl(text));
   if (PRIME_GAMING_RE.test(text)) return linkPreviewPrimeGaming(firstUrl(text));
   if ((match = YOUTUBE_CHANNEL_RE.exec(text))) return linkPreviewYoutubeChannel(match[1], firstUrl(text));
@@ -2814,7 +2836,7 @@ function buildSettingsDrawer() {
   body.append(switchRow("Narrow Message Bubbles", "narrowBubbles", "wrap earlier so long messages grow taller instead of wider"));
   body.append(switchRow("Exclude Commands", "excludeCommands", "hide messages starting with !"));
   body.append(switchRow("Show Pronouns", "showPronouns", "Twitch, via pronouns.alejo.community"));
-  body.append(switchRow("Link Embeds", "embedsEnabled", "Giphy, YouTube, Spotify, clips — mods/VIPs/host + allowlist"));
+  body.append(switchRow("Link Embeds", "embedsEnabled", "Giphy, YouTube, clips play inline for mods/VIPs/host + allowlist; link preview cards (Spotify, Twitch, Linktree, etc.) show for everyone"));
   body.append(switchRow("Custom Emotes", "customEmotes", "BTTV, FFZ, 7TV (Twitch); 7TV (Kick)"));
   if (!isOverlay) {
     body.append(switchRow("Read Chat Aloud (TTS)", "ttsEnabled"));
