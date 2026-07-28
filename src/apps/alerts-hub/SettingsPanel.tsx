@@ -1,8 +1,98 @@
+import { useRef, useState } from "react";
 import { PlatformIcon } from "@/components/common/PlatformIcon";
 import type { AlertsSettings, TwitchAccount } from "./types";
 import { Button, Card, Chip, StatusDot } from "../../design-system/components/core";
+import {
+  EVENT_ICON_DEFAULTS,
+  EVENT_ICON_LABELS,
+  EVENT_ICON_TYPES,
+  readEventIcons,
+  setEventIcon,
+  type EventIconType,
+} from "./eventIcons";
 
 type ConnStatus = "disconnected" | "connecting" | "live" | "error";
+
+// Custom icons for follow/resub/gift/cheer/tip/raid chips — Multi-Chat only
+// displays these (public/multichat/multichat.js's eventIconEl), management
+// lives here now. Self-contained: reads/writes localStorage directly via
+// eventIcons.ts rather than going through AlertsSettings/useAlertsSettings,
+// since this data was always Multi-Chat's own "bd-mc-settings" blob, not
+// part of this app's own settings shape.
+function EventIconsSection() {
+  const [icons, setIcons] = useState(() => readEventIcons());
+  const fileInputs = useRef<Partial<Record<EventIconType, HTMLInputElement | null>>>({});
+
+  const handleUpload = (type: EventIconType, file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUri = reader.result as string;
+      setEventIcon(type, dataUri);
+      setIcons((prev) => ({ ...prev, [type]: dataUri }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleClear = (type: EventIconType) => {
+    setEventIcon(type, null);
+    setIcons((prev) => {
+      const next = { ...prev };
+      delete next[type];
+      return next;
+    });
+  };
+
+  return (
+    <section className="mb-6">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[12px] font-semibold text-white/70">🖼️ Event Icons</span>
+      </div>
+      <p className="text-[10px] text-white/30 mb-2">
+        Custom images shown in Multi-Chat's feed for these events — leave unset for the default emoji.
+      </p>
+      <div className="space-y-1.5">
+        {EVENT_ICON_TYPES.map((type) => (
+          <div key={type} className="flex items-center justify-between bg-white/[0.03] rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {icons[type] ? (
+                <img src={icons[type]} alt="" className="w-5 h-5 object-contain shrink-0" />
+              ) : (
+                <span className="text-[14px] shrink-0">{EVENT_ICON_DEFAULTS[type]}</span>
+              )}
+              <div className="min-w-0">
+                <div className="text-[12px] text-white/70">{EVENT_ICON_LABELS[type]}</div>
+                <div className="text-[9px] text-white/25">{icons[type] ? "custom icon set" : "default emoji"}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <input
+                ref={(el) => {
+                  fileInputs.current[type] = el;
+                }}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleUpload(type, f);
+                  e.target.value = "";
+                }}
+              />
+              <Button variant="ghost" size="sm" onClick={() => fileInputs.current[type]?.click()}>
+                Upload…
+              </Button>
+              {icons[type] && (
+                <Button variant="ghost" size="sm" onClick={() => handleClear(type)}>
+                  Reset
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 /** Maps the feed's 4-state connection status onto StatusDot's 3 visual states —
  *  "error" reads as "warn" since the shared dot has no red variant. */
@@ -142,7 +232,7 @@ export function SettingsPanel({
           </section>
         )}
 
-        <section>
+        <section className="mb-6">
           <button
             onClick={() => onUpdate({ soundEnabled: !settings.soundEnabled })}
             className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.08]"
@@ -151,6 +241,8 @@ export function SettingsPanel({
             <span className="text-[12px]">{settings.soundEnabled ? "🔊 On" : "🔇 Off"}</span>
           </button>
         </section>
+
+        <EventIconsSection />
       </Card>
     </div>
   );

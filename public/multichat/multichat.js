@@ -72,12 +72,12 @@ const DEFAULT_SETTINGS = {
   glassBlur: 18, glassOpacity: 10, messageScale: 100, overlayAvatarDelay: 1200, avatarRenderDelay: 600, alertSoundUrl: "", narrowBubbles: false,
   bottomPad: 140, hideAfter: "0", ignoreList: "",
   // Per-event-type icon overrides — data: URI once uploaded, null/absent
-  // means "use the default emoji". Keys match renderEventChip's m.chip
-  // values, so a new chip type just needs an entry here + a default below.
+  // means "use the default emoji" (the fallback each eventIconEl call
+  // already passes its own emoji for). Keys match renderEventChip's m.chip
+  // values. Managed from Alerts & Events now (src/apps/alerts-hub/
+  // eventIcons.ts) — this file only ever reads this object, never writes it.
   eventIcons: {},
 };
-const EVENT_ICON_DEFAULTS = { follow: "💜", resub: "🌟", gift: "🎁", cheer: "💎", tip: "🪙", raid: "⚔️" };
-const EVENT_ICON_LABELS = { follow: "Follow", resub: "Sub / Resub", gift: "Gift Sub", cheer: "Cheer", tip: "Tip", raid: "Raid" };
 const THEME_PRESETS = {
   default:  { bgColor: "#050505", bgOpacity: 100, fontSize: 14, fontFamily: "" },
   midnight: { bgColor: "#0a0f1e", bgOpacity: 100, fontSize: 14, fontFamily: "" },
@@ -188,6 +188,18 @@ const store = {
 const settings = store.load("bd-mc-settings", DEFAULT_SETTINGS);
 const channels = store.load("bd-mc-channels", DEFAULT_CHANNELS);
 channels.enabled = { ...DEFAULT_CHANNELS.enabled, ...(channels.enabled || {}) };
+
+// Event icons are managed from Alerts & Events now (src/apps/alerts-hub/
+// eventIcons.ts), not here — this only ever displays them (eventIconEl).
+// Multi-Chat is always mounted in the same document as the rest of the app
+// (EmbeddedMultiChat.tsx), so a change made there while this is already
+// running needs this listener to pick it up live instead of waiting for a
+// reload — same "same-document, custom event" pattern the unified settings
+// context uses for its own cross-entry-point sync.
+window.addEventListener("bd-eventicons-changed", () => {
+  settings.eventIcons = store.load("bd-mc-settings", DEFAULT_SETTINGS).eventIcons;
+  renderView();
+});
 
 // Overlay mode (?overlay=1): this same page loaded in OBS/Meld as a Browser
 // Source instead of the Tauri window. It has no OS keyring / native-command
@@ -3132,38 +3144,7 @@ function buildSettingsDrawer() {
     body.append(asRow);
 
     body.append(sectionHead("🖼️", "Event Icons"));
-    for (const type of Object.keys(EVENT_ICON_DEFAULTS)) {
-      const row = el("div", "cv-settings-row");
-      const lab = el("div");
-      lab.append(el("div", "cv-settings-label", EVENT_ICON_LABELS[type]));
-      lab.append(el("div", "cv-settings-sub", settings.eventIcons[type] ? "custom icon set" : "default emoji"));
-      row.append(lab);
-      const wrap = el("div", "cv-color-wrap");
-      const preview = settings.eventIcons[type]
-        ? (() => { const img = el("img"); img.src = settings.eventIcons[type]; img.alt = ""; img.style.cssText = "width:20px;height:20px;object-fit:contain;flex-shrink:0;"; return img; })()
-        : el("span", "", EVENT_ICON_DEFAULTS[type]);
-      const file = el("input");
-      file.type = "file"; file.accept = "image/*"; file.style.display = "none";
-      file.onchange = () => {
-        const f = file.files[0];
-        if (!f) return;
-        const reader = new FileReader();
-        reader.onload = () => { settings.eventIcons[type] = reader.result; saveSet(); buildSettingsDrawer(); };
-        reader.readAsDataURL(f);
-      };
-      const pick = el("button", "cv-btn", "Upload…");
-      pick.type = "button";
-      pick.onclick = () => file.click();
-      wrap.append(preview, pick, file);
-      if (settings.eventIcons[type]) {
-        const clear = el("button", "cv-btn", "Reset");
-        clear.type = "button";
-        clear.onclick = () => { delete settings.eventIcons[type]; saveSet(); buildSettingsDrawer(); };
-        wrap.append(clear);
-      }
-      row.append(wrap);
-      body.append(row);
-    }
+    body.append(el("div", "cv-settings-sub", "Managed in Alerts & Events → Settings — shown here, not edited here."));
   }
 
   body.append(sectionHead("🎨", "Appearance"));
