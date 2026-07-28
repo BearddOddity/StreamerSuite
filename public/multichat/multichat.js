@@ -111,9 +111,18 @@ const KICK_CLIP_RE = /kick\.com\/[\w-]+\/clips\/([A-Za-z0-9-]+)/i;
 // than requiring /?# or end-of-string right after the handle) so this still
 // matches when the link isn't the last thing in the message — "check out
 // twitch.tv/name!" or the shout-out feature's own "twitch.tv/name — they
-// were awesome!" would otherwise never match at all.
-const TWITCH_CHANNEL_RE = /twitch\.tv\/([a-zA-Z0-9_]{3,25})(?=[^a-zA-Z0-9_]|$)/i;
+// were awesome!" would otherwise never match at all. Excludes go.twitch.tv
+// (its own link-shortener for account pages, e.g. go.twitch.tv/subs,
+// go.twitch.tv/turbo — never a channel) via the negative lookbehind, since
+// without it "go.twitch.tv/subs" reads as a channel literally named "subs".
+const TWITCH_CHANNEL_RE = /(?<!go\.)twitch\.tv\/([a-zA-Z0-9_]{3,25})(?=[^a-zA-Z0-9_]|$)/i;
 const TWITCH_RESERVED_PATHS = new Set(["directory", "videos", "settings", "subscriptions", "wallet", "jobs", "p", "downloads", "prime", "turbo", "friends", "inventory", "messages", "payments", "search", "store"]);
+// go.twitch.tv/subs/<channel> is Twitch's own subscribe-shortcut link (takes
+// a viewer straight to that channel's subscribe page) — a real, different
+// case from the bare go.twitch.tv/subs excluded above. Still worth a proper
+// channel preview for <channel>, so it's checked as its own pattern rather
+// than just falling through to plain linkified text.
+const TWITCH_SUBS_RE = /go\.twitch\.tv\/subs\/([a-zA-Z0-9_]{3,25})(?=[^a-zA-Z0-9_]|$)/i;
 // Kick channel link, not clip — checked after KICK_CLIP_RE so a clip URL
 // (kick.com/<channel>/clips/<id>) is never mistaken for a channel link.
 // Same trailing-lookahead fix as TWITCH_CHANNEL_RE above.
@@ -450,6 +459,15 @@ function twitchClipThumb(slug) {
   return tauriInvoke("twitch_resolve_clip", { slug }).then(c => { twitchClipCache.set(slug, c); return c; }).catch(() => null);
 }
 function firstUrl(text) { const m = /https?:\/\/\S+/.exec(text); return m ? m[0] : null; }
+// Removes one literal substring (a link a preview card already covers) from
+// a message's plain-text render, collapsing whatever double-space it leaves
+// behind. Case-sensitive on purpose — `needle` always comes from a regex
+// match against this exact `str`, so it's guaranteed to be an exact substring.
+function hideUrlSubstring(str, needle) {
+  const idx = str.indexOf(needle);
+  if (idx === -1) return str;
+  return (str.slice(0, idx) + str.slice(idx + needle.length)).replace(/\s{2,}/g, " ").trim();
+}
 function clipChip(label, url) {
   const chip = el("a", "cv-embed-clip-chip", `▶ ${label} ↗`);
   chip.href = url;
@@ -844,36 +862,53 @@ function linkPreviewTikTok(handle, url) {
   return wrap;
 }
 
+// Returns { node, matched } — matched is the literal substring in m.text
+// that triggered the preview (match[0], not the normalized/reconstructed
+// URL the preview card links to, which often isn't textually present in
+// the message at all — e.g. a bare "kick.com/name" with no https:// or a
+// shout-out's reconstructed link). appendMsgTo uses `matched` to hide that
+// exact substring from the plain-text render, so a link never shows twice
+// (once as raw clickable text, again as a full preview card right below).
 function buildLinkPreviewNode(m) {
   if (!settings.embedsEnabled) return null;
   const text = m.text;
   let match;
-  if ((match = YT_RE.exec(text))) return linkPreviewYoutube(match[1], firstUrl(text));
-  if ((match = SPOTIFY_RE.exec(text))) return linkPreviewSpotify(match[1], match[2], firstUrl(text));
-  if ((match = LINKTREE_RE.exec(text))) return linkPreviewLinktree(match[1], firstUrl(text));
-  if ((match = DISCORD_INVITE_RE.exec(text))) return linkPreviewDiscordInvite(match[1], firstUrl(text));
-  if (PRIME_GAMING_RE.test(text)) return linkPreviewPrimeGaming(firstUrl(text));
-  if ((match = YOUTUBE_CHANNEL_RE.exec(text))) return linkPreviewYoutubeChannel(match[1], firstUrl(text));
-  if ((match = TIKTOK_RE.exec(text))) return linkPreviewTikTok(match[1], firstUrl(text));
+  // Prefers hiding the fuller "https://…" URL when the message actually has
+  // one and it contains the bare regex match — otherwise hiding just the
+  // bare match (e.g. "kick.com/name") would leave a dangling "https://"
+  // fragment behind in the visible text.
+  const hit = (node, matchedText) => {
+    if (!node) return null;
+    const full = firstUrl(text);
+    return { node, matched: full && full.includes(matchedText) ? full : matchedText };
+  };
+  if ((match = YT_RE.exec(text))) return hit(linkPreviewYoutube(match[1], firstUrl(text)), match[0]);
+  if ((match = SPOTIFY_RE.exec(text))) return hit(linkPreviewSpotify(match[1], match[2], firstUrl(text)), match[0]);
+  if ((match = LINKTREE_RE.exec(text))) return hit(linkPreviewLinktree(match[1], firstUrl(text)), match[0]);
+  if ((match = DISCORD_INVITE_RE.exec(text))) return hit(linkPreviewDiscordInvite(match[1], firstUrl(text)), match[0]);
+  if ((match = PRIME_GAMING_RE.exec(text))) return hit(linkPreviewPrimeGaming(firstUrl(text)), match[0]);
+  if ((match = YOUTUBE_CHANNEL_RE.exec(text))) return hit(linkPreviewYoutubeChannel(match[1], firstUrl(text)), match[0]);
+  if ((match = TIKTOK_RE.exec(text))) return hit(linkPreviewTikTok(match[1], firstUrl(text)), match[0]);
   if ((match = X_RE.exec(text)) && !X_RESERVED_PATHS.has(match[1].toLowerCase())) {
-    return linkPreviewX(match[1], firstUrl(text));
+    return hit(linkPreviewX(match[1], firstUrl(text)), match[0]);
   }
-  if ((match = KOFI_RE.exec(text))) return linkPreviewKofi(match[1], firstUrl(text));
-  if (FOURTHWALL_RE.test(text)) return linkPreviewFourthwall(firstUrl(text));
-  if ((match = STREAMLABS_TIP_RE.exec(text))) return linkPreviewStreamlabsTip(match[1], firstUrl(text));
-  if ((match = STREAMELEMENTS_TIP_RE.exec(text))) return linkPreviewStreamElementsTip(match[1], firstUrl(text));
-  if ((match = PATREON_RE.exec(text))) return linkPreviewPatreon(match[1], firstUrl(text));
-  if ((match = THRONE_RE.exec(text))) return linkPreviewThrone(match[1], firstUrl(text));
+  if ((match = KOFI_RE.exec(text))) return hit(linkPreviewKofi(match[1], firstUrl(text)), match[0]);
+  if ((match = FOURTHWALL_RE.exec(text))) return hit(linkPreviewFourthwall(firstUrl(text)), match[0]);
+  if ((match = STREAMLABS_TIP_RE.exec(text))) return hit(linkPreviewStreamlabsTip(match[1], firstUrl(text)), match[0]);
+  if ((match = STREAMELEMENTS_TIP_RE.exec(text))) return hit(linkPreviewStreamElementsTip(match[1], firstUrl(text)), match[0]);
+  if ((match = PATREON_RE.exec(text))) return hit(linkPreviewPatreon(match[1], firstUrl(text)), match[0]);
+  if ((match = THRONE_RE.exec(text))) return hit(linkPreviewThrone(match[1], firstUrl(text)), match[0]);
   if ((match = INSTAGRAM_RE.exec(text)) && !INSTAGRAM_RESERVED_PATHS.has(match[1].toLowerCase())) {
-    return linkPreviewInstagram(match[1], firstUrl(text));
+    return hit(linkPreviewInstagram(match[1], firstUrl(text)), match[0]);
   }
-  if ((match = BLUESKY_RE.exec(text))) return linkPreviewBluesky(match[1], firstUrl(text));
-  if ((match = STEAM_APP_RE.exec(text))) return linkPreviewSteam(match[1], firstUrl(text));
+  if ((match = BLUESKY_RE.exec(text))) return hit(linkPreviewBluesky(match[1], firstUrl(text)), match[0]);
+  if ((match = STEAM_APP_RE.exec(text))) return hit(linkPreviewSteam(match[1], firstUrl(text)), match[0]);
+  if ((match = TWITCH_SUBS_RE.exec(text))) return hit(linkPreviewTwitchChannel(match[1], firstUrl(text)), match[0]);
   if (!TWITCH_CLIP_RE.test(text) && (match = TWITCH_CHANNEL_RE.exec(text)) && !TWITCH_RESERVED_PATHS.has(match[1].toLowerCase())) {
-    return linkPreviewTwitchChannel(match[1], firstUrl(text));
+    return hit(linkPreviewTwitchChannel(match[1], firstUrl(text)), match[0]);
   }
   if (!KICK_CLIP_RE.test(text) && (match = KICK_CHANNEL_RE.exec(text)) && !KICK_RESERVED_PATHS.has(match[1].toLowerCase())) {
-    return linkPreviewKickChannel(match[1], firstUrl(text));
+    return hit(linkPreviewKickChannel(match[1], firstUrl(text)), match[0]);
   }
   return null;
 }
@@ -1673,6 +1708,20 @@ function msgNode(m, small, isCont) {
     if (settings.showTimestamps) head.append(el("span", "cv-msg-time", fmtTime(m.ts)));
     body.append(head);
   }
+  // Rich embeds (Giphy/YouTube/Spotify/clips iframe or gif) for mods/VIPs/
+  // host + allowlist; everyone else still gets a lightweight thumbnail+title
+  // preview card for YouTube/Twitch/Kick/etc. links via buildLinkPreviewNode.
+  // Computed before the text below so, when a link preview card fires, the
+  // raw URL substring it's for can be hidden from the plain-text render —
+  // otherwise the same link shows twice: once as bare clickable text, again
+  // a moment later as a full preview card. Rich embeds (the older mod/VIP
+  // iframe system) aren't included in this hiding pass — separate, older
+  // code path, left as-is for now.
+  const rawEmbedNode = !m.system && !m.event ? buildEmbedNode(m) : null;
+  const linkPreview = !rawEmbedNode && !m.system && !m.event ? buildLinkPreviewNode(m) : null;
+  const embedNode = rawEmbedNode || linkPreview?.node || null;
+  const hideText = linkPreview?.matched || null;
+
   const text = el("div", "cv-msg-text");
   if (small) text.style.fontSize = "13px";
   if (m.emoteParts) {
@@ -1684,7 +1733,7 @@ function msgNode(m, small, isCont) {
     for (let i = 0; i < parts.length; ) {
       const p = parts[i];
       if (p.type !== "emote") {
-        if (p.text) appendLinkifiedText(text, p.text);
+        if (p.text) appendLinkifiedText(text, hideText ? hideUrlSubstring(p.text, hideText) : p.text);
         i++;
         continue;
       }
@@ -1705,7 +1754,7 @@ function msgNode(m, small, isCont) {
       i += count;
     }
   } else {
-    appendLinkifiedText(text, m.text);
+    appendLinkifiedText(text, hideText ? hideUrlSubstring(m.text, hideText) : m.text);
   }
   body.append(text);
   if (m.translatedText) {
@@ -1713,10 +1762,6 @@ function msgNode(m, small, isCont) {
     tr.append(el("span", "cv-translation-label", "🌐 "), document.createTextNode(m.translatedText));
     body.append(tr);
   }
-  // Rich embeds (Giphy/YouTube/Spotify/clips iframe or gif) for mods/VIPs/
-  // host + allowlist; everyone else still gets a lightweight thumbnail+title
-  // preview card for YouTube/Twitch/Discord links via buildLinkPreviewNode.
-  const embedNode = !m.system && !m.event ? (buildEmbedNode(m) || buildLinkPreviewNode(m)) : null;
   if (embedNode) body.append(embedNode);
   row.append(body);
 
