@@ -1455,6 +1455,67 @@ pub(crate) async fn twitch_resolve_channel_preview(login: String) -> Result<Valu
     Err("Twitch channel lookup failed even after refreshing the token — reconnect your account".into())
 }
 
+/// YouTube's oEmbed only covers video/playlist URLs, not channel pages, and
+/// the official Data API needs a per-user API key this app doesn't ask for
+/// anywhere else. Channel pages do publish an `og:image` meta tag set to the
+/// channel's avatar though, so this fetches the public page HTML server-side
+/// (no CORS issue, unlike a browser-side fetch) and pulls that tag out —
+/// same "no login, no API key" bar every other public-endpoint lookup in
+/// this file sits at. Returns None (never an error) on anything that isn't
+/// a clean 200 + og:image match, so the frontend just falls back to the
+/// brand-icon chip rather than surfacing a scrape failure as an error toast.
+#[tauri::command]
+pub(crate) async fn youtube_resolve_channel_avatar(handle: String) -> Result<Option<String>, String> {
+    let handle = handle.trim_start_matches('@');
+    if handle.is_empty() {
+        return Ok(None);
+    }
+    let url = format!("https://www.youtube.com/@{}", urlencoding(handle));
+    let client = reqwest::Client::builder()
+        .user_agent(BROWSER_UA)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = match client.get(&url).header("Accept-Language", "en-US,en;q=0.9").send().await {
+        Ok(r) if r.status().is_success() => r,
+        _ => return Ok(None),
+    };
+    let html = match resp.text().await {
+        Ok(h) => h,
+        Err(_) => return Ok(None),
+    };
+    Ok(extract_og_image(&html))
+}
+
+// Scans for the first <meta ...> tag whose attributes include og:image, then
+// pulls that same tag's content="..." value — order-independent (checked
+// against real YouTube markup, but doesn't assume property always precedes
+// content) since it looks within one tag's own bounds rather than assuming
+// a fixed attribute order.
+fn extract_og_image(html: &str) -> Option<String> {
+    let mut pos = 0;
+    while let Some(rel_start) = html[pos..].find("<meta") {
+        let tag_start = pos + rel_start;
+        let tag_end = tag_start + html[tag_start..].find('>')?;
+        let tag = &html[tag_start..tag_end];
+        if tag.contains("og:image") {
+            if let Some(content) = meta_tag_attr(tag, "content") {
+                if !content.is_empty() {
+                    return Some(content);
+                }
+            }
+        }
+        pos = tag_end + 1;
+    }
+    None
+}
+
+fn meta_tag_attr(tag: &str, name: &str) -> Option<String> {
+    let key = format!("{}=\"", name);
+    let start = tag.find(&key)? + key.len();
+    let end = start + tag[start..].find('"')?;
+    Some(tag[start..end].to_string())
+}
+
 /// Batch-resolve real Kick profile pictures via the official public API
 /// (requires Kick OAuth — bypasses the Cloudflare-protected unofficial
 /// kick.com/api/v2/channels endpoint entirely). Returns user_id -> profile_picture.
