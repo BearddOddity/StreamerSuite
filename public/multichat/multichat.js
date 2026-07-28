@@ -45,7 +45,13 @@ const DEFAULT_SETTINGS = {
   fontSize: 14, fontFamily: "", bgColor: "#050505", bgOpacity: 100, bgImage: "", bgBlur: 0,
   glassBlur: 18, glassOpacity: 10, messageScale: 100, overlayAvatarDelay: 1200, avatarRenderDelay: 600, alertSoundUrl: "", narrowBubbles: false,
   bottomPad: 140, hideAfter: "0", ignoreList: "",
+  // Per-event-type icon overrides — data: URI once uploaded, null/absent
+  // means "use the default emoji". Keys match renderEventChip's m.chip
+  // values, so a new chip type just needs an entry here + a default below.
+  eventIcons: {},
 };
+const EVENT_ICON_DEFAULTS = { follow: "💜", resub: "🌟", gift: "🎁", cheer: "💎", tip: "🪙", raid: "⚔️" };
+const EVENT_ICON_LABELS = { follow: "Follow", resub: "Sub / Resub", gift: "Gift Sub", cheer: "Cheer", tip: "Tip", raid: "Raid" };
 const THEME_PRESETS = {
   default:  { bgColor: "#050505", bgOpacity: 100, fontSize: 14, fontFamily: "" },
   midnight: { bgColor: "#0a0f1e", bgOpacity: 100, fontSize: 14, fontFamily: "" },
@@ -974,6 +980,57 @@ function twitchBadgeUrl(login, badgeKey) {
   return map ? map[badgeKey] || null : null;
 }
 
+// Some avatar sources bake a solid black or white square behind the actual
+// picture (default/placeholder art from certain platforms). Detect that on
+// load and flood-fill it to transparent so only the real image shows.
+function stripAvatarBoxBackground(img) {
+  const run = () => {
+    try {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      if (!w || !h) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      const data = ctx.getImageData(0, 0, w, h);
+      const px = data.data;
+      const at = (x, y) => {
+        const i = (y * w + x) * 4;
+        return [px[i], px[i + 1], px[i + 2]];
+      };
+      const isNearBlack = ([r, g, b]) => r < 24 && g < 24 && b < 24;
+      const isNearWhite = ([r, g, b]) => r > 232 && g > 232 && b > 232;
+      const corners = [at(0, 0), at(w - 1, 0), at(0, h - 1), at(w - 1, h - 1)];
+      let matches;
+      if (corners.every(isNearBlack)) matches = isNearBlack;
+      else if (corners.every(isNearWhite)) matches = isNearWhite;
+      else return; // corners aren't a uniform black/white box — leave untouched
+      // Flood-fill from the border inward so we only clear the connected
+      // background box, not similarly-colored pixels inside the artwork itself.
+      const visited = new Uint8Array(w * h);
+      const stack = [];
+      for (let x = 0; x < w; x++) { stack.push([x, 0]); stack.push([x, h - 1]); }
+      for (let y = 0; y < h; y++) { stack.push([0, y]); stack.push([w - 1, y]); }
+      while (stack.length) {
+        const [x, y] = stack.pop();
+        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+        const idx = y * w + x;
+        if (visited[idx]) continue;
+        visited[idx] = 1;
+        if (!matches(at(x, y))) continue;
+        const i = idx * 4;
+        px[i + 3] = 0;
+        stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+      }
+      ctx.putImageData(data, 0, 0);
+      img.src = canvas.toDataURL("image/png");
+    } catch (_e) {
+      // Cross-origin image without CORS headers taints the canvas — leave as-is.
+    }
+  };
+  if (img.complete && img.naturalWidth) run();
+  else img.addEventListener("load", run, { once: true });
+}
 function avatarSrc(m) {
   if (m.avatar) return m.avatar; // Joystick — real, from payload
   if (m.platform === "twitch" && m.login && !oauthAccounts.twitch) return "https://unavatar.io/twitch/" + encodeURIComponent(m.login) + "?fallback=false";
@@ -999,18 +1056,22 @@ function avatarNode(m) {
   const initial = () => el("div", "cv-avatar", (m.user[0] || "?").toUpperCase());
   const swapToImg = (placeholder, src) => {
     const img = el("img", "cv-avatar");
+    img.crossOrigin = "anonymous";
     img.src = src; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
     img.onerror = () => brokenAvatars.add(src);
+    stripAvatarBoxBackground(img);
     placeholder.replaceWith(img); // safe no-op if placeholder was already trimmed from the feed
   };
   const src = avatarSrc(m);
   if (src && !brokenAvatars.has(src)) {
     const img = el("img", "cv-avatar");
+    img.crossOrigin = "anonymous";
     img.src = src;
     img.alt = "";
     img.loading = "lazy";
     img.referrerPolicy = "no-referrer";
     img.onerror = () => { brokenAvatars.add(src); img.replaceWith(initial()); };
+    stripAvatarBoxBackground(img);
     return img;
   }
   const node = initial();
@@ -1153,6 +1214,19 @@ function msgMenuItems(m) {
 const feedMeta = new Map(); // container -> { lastKey }
 
 /* ── Chat feed inline chips ────────────────────────────────────────────── */
+// Renders an event-icon slot (follow/resub/gift/cheer/tip/raid) as either
+// the user's uploaded image (Settings -> Event Icons) or the default emoji.
+function eventIconEl(type, fallbackEmoji) {
+  const custom = settings.eventIcons && settings.eventIcons[type];
+  const cls = "cf-" + type + "-ico";
+  if (custom) {
+    const img = el("img", cls);
+    img.src = custom; img.alt = "";
+    return img;
+  }
+  return el("span", cls, fallbackEmoji);
+}
+
 // Event-type chips (replace the generic gradient banner for kinds we can
 // actually detect from real platform data): raid, resub/sub, gift subs,
 // announcement. Anything else still falls back to the old banner.
@@ -1160,7 +1234,7 @@ function renderEventChip(m) {
   if (m.chip === "raid") {
     const c = el("div", "cf-raid");
     c.dataset.platform = m.platform;
-    c.append(el("span", "cf-raid-ico", "⚔️"));
+    c.append(eventIconEl("raid", "⚔️"));
     const t = el("span", "cf-raid-text");
     t.append(el("b", "", m.user), document.createTextNode(" raided with"));
     c.append(t, el("span", "cf-raid-count", String(m.chipCount || "?")));
@@ -1169,7 +1243,7 @@ function renderEventChip(m) {
   if (m.chip === "resub") {
     const c = el("div", "cf-resub");
     c.dataset.platform = m.platform;
-    c.append(el("span", "cf-resub-ico", "🌟"));
+    c.append(eventIconEl("resub", "🌟"));
     const t = el("span", "cf-resub-text");
     t.append(el("b", "", m.user), document.createTextNode(" resubscribed"));
     c.append(t);
@@ -1179,10 +1253,19 @@ function renderEventChip(m) {
   if (m.chip === "gift") {
     const c = el("div", "cf-gift");
     c.dataset.platform = m.platform;
-    c.append(el("span", "cf-gift-ico", "🎁"));
+    c.append(eventIconEl("gift", "🎁"));
     const t = el("span", "cf-gift-text");
     t.append(el("b", "", m.user), document.createTextNode(" gifted subs"));
     c.append(t, el("span", "cf-gift-count", "x" + String(m.chipCount || "1")));
+    return c;
+  }
+  if (m.chip === "follow") {
+    const c = el("div", "cf-follow");
+    c.dataset.platform = m.platform;
+    c.append(eventIconEl("follow", "💜"));
+    const t = el("span", "cf-follow-text");
+    t.append(el("b", "", m.user), document.createTextNode(" followed"));
+    c.append(t, el("span", "cf-follow-tag", "New"));
     return c;
   }
   if (m.chip === "announce") {
@@ -1196,7 +1279,9 @@ function renderEventChip(m) {
     c.dataset.platform = m.platform;
     const t = el("span", "tt-chip-text");
     t.append(el("b", "", m.user));
-    c.append(t, el("span", "tt-chip-amt", "🪙 " + m.chipAmount + (m.chipReward ? " · " + m.chipReward : "")));
+    const amt = el("span", "tt-chip-amt");
+    amt.append(eventIconEl("tip", "🪙"), document.createTextNode(" " + m.chipAmount + (m.chipReward ? " · " + m.chipReward : "")));
+    c.append(t, amt);
     return c;
   }
   return null;
@@ -1207,7 +1292,7 @@ function renderEventChip(m) {
 function renderPrefixChip(m) {
   if (m.chip === "cheer") {
     const c = el("div", "cf-cheer");
-    c.append(el("span", "cf-cheer-ico", "💎"));
+    c.append(eventIconEl("cheer", "💎"));
     const t = el("span", "cf-cheer-text");
     t.append(el("b", "", m.user), document.createTextNode(" cheered"));
     c.append(t, el("span", "cf-cheer-amt", String(m.chipCount || "0") + " bits"));
@@ -1983,7 +2068,7 @@ function handleChaturbateEvent(ev) {
       pinned: false, event: true,
     });
   } else if (method === "follow") {
-    addMessage({ platform: "chaturbate", user: u.username || "unknown", text: "followed", role: null, pinned: false, event: true });
+    addMessage({ platform: "chaturbate", user: u.username || "unknown", text: "followed", chip: "follow", role: null, pinned: false, event: true });
   } else if (method === "fanclubJoin") {
     addMessage({ platform: "chaturbate", user: u.username || "unknown", text: "joined the fan club", role: null, pinned: false, event: true });
   }
@@ -2717,6 +2802,40 @@ function buildSettingsDrawer() {
     }
     asRow.append(asWrap);
     body.append(asRow);
+
+    body.append(sectionHead("🖼️", "Event Icons"));
+    for (const type of Object.keys(EVENT_ICON_DEFAULTS)) {
+      const row = el("div", "cv-settings-row");
+      const lab = el("div");
+      lab.append(el("div", "cv-settings-label", EVENT_ICON_LABELS[type]));
+      lab.append(el("div", "cv-settings-sub", settings.eventIcons[type] ? "custom icon set" : "default emoji"));
+      row.append(lab);
+      const wrap = el("div", "cv-color-wrap");
+      const preview = settings.eventIcons[type]
+        ? (() => { const img = el("img"); img.src = settings.eventIcons[type]; img.alt = ""; img.style.cssText = "width:20px;height:20px;object-fit:contain;flex-shrink:0;"; return img; })()
+        : el("span", "", EVENT_ICON_DEFAULTS[type]);
+      const file = el("input");
+      file.type = "file"; file.accept = "image/*"; file.style.display = "none";
+      file.onchange = () => {
+        const f = file.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = () => { settings.eventIcons[type] = reader.result; saveSet(); buildSettingsDrawer(); };
+        reader.readAsDataURL(f);
+      };
+      const pick = el("button", "cv-btn", "Upload…");
+      pick.type = "button";
+      pick.onclick = () => file.click();
+      wrap.append(preview, pick, file);
+      if (settings.eventIcons[type]) {
+        const clear = el("button", "cv-btn", "Reset");
+        clear.type = "button";
+        clear.onclick = () => { delete settings.eventIcons[type]; saveSet(); buildSettingsDrawer(); };
+        wrap.append(clear);
+      }
+      row.append(wrap);
+      body.append(row);
+    }
   }
 
   body.append(sectionHead("🎨", "Appearance"));

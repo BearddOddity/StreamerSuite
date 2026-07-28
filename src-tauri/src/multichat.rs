@@ -1290,7 +1290,16 @@ pub(crate) async fn twitch_resolve_avatars(user_ids: Vec<String>) -> Result<Valu
                 user.get("id").and_then(|v| v.as_str()),
                 user.get("profile_image_url").and_then(|v| v.as_str()),
             ) {
-                out.insert(id.to_string(), Value::String(url.to_string()));
+                // Twitch serves accounts that never set a custom picture one of
+                // its own generic default images (the old per-account "critter"
+                // icons, distinct from real uploads which live under
+                // jtv_user_pictures) — that URL is a real, loading image, so it
+                // never triggers the frontend's broken-image fallback. Skip it
+                // here so those users fall through to our own clean
+                // colored-initial avatar instead of Twitch's bundled default art.
+                if !url.contains("user-default-pictures") {
+                    out.insert(id.to_string(), Value::String(url.to_string()));
+                }
             }
         }
     }
