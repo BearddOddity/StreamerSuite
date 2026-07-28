@@ -105,6 +105,49 @@ pub(crate) async fn resolve_kick_avatar(username: String) -> Result<Option<Strin
         .map(|s| s.to_string()))
 }
 
+/// Resolve a plain Kick channel link (not a clip) to a preview: live-stream
+/// thumbnail + title if currently live, otherwise the channel's avatar +
+/// display name — same response shape as twitch_resolve_channel_preview, so
+/// the frontend can render it with the exact same card. Reuses the same
+/// no-OAuth-needed unofficial channel-lookup endpoint as resolve_kick_avatar
+/// above (its response already carries both the user profile and current
+/// livestream info in one payload), so this needs no connected Kick account
+/// at all — it works for shout-out links and any other kick.com/<channel>
+/// link a chatter posts, exactly like Twitch channel links already do.
+#[tauri::command]
+pub(crate) async fn kick_resolve_channel_preview(slug: String) -> Result<Value, String> {
+    let chan = fetch_kick_channel(&slug).await?;
+    let display_name = chan
+        .pointer("/user/username")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&slug)
+        .to_string();
+    let avatar = chan
+        .pointer("/user/profile_pic")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if let Some(live) = chan.get("livestream").filter(|v| !v.is_null()) {
+        let thumb = live
+            .pointer("/thumbnail/url")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&avatar);
+        return Ok(serde_json::json!({
+            "title": live.get("session_title").and_then(|v| v.as_str()).unwrap_or(""),
+            "thumbnail_url": thumb,
+            "display_name": display_name,
+            "is_live": true,
+        }));
+    }
+    Ok(serde_json::json!({
+        "title": "Offline",
+        "thumbnail_url": avatar,
+        "display_name": display_name,
+        "is_live": false,
+    }))
+}
+
 /// Resolve a Kick channel slug to the broadcaster's numeric user id, for
 /// looking up 7TV emote sets. Prefers the official OAuth-authenticated API
 /// (unaffected by the Cloudflare block on the unofficial endpoint); falls

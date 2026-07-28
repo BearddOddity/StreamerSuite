@@ -107,13 +107,24 @@ const TWITCH_CLIP_RE = /(?:clips\.twitch\.tv\/(?:embed\?clip=)?|twitch\.tv\/\w+\
 const KICK_CLIP_RE = /kick\.com\/[\w-]+\/clips\/([A-Za-z0-9-]+)/i;
 // Channel link, not clip — checked after TWITCH_CLIP_RE so a clip URL
 // (twitch.tv/<channel>/clip/<slug>) is never mistaken for a channel link.
-// Excludes twitch.tv's own non-channel top-level paths.
-const TWITCH_CHANNEL_RE = /twitch\.tv\/([a-zA-Z0-9_]{3,25})(?:[/?#]|$)/i;
+// Excludes twitch.tv's own non-channel top-level paths. Lookahead (rather
+// than requiring /?# or end-of-string right after the handle) so this still
+// matches when the link isn't the last thing in the message — "check out
+// twitch.tv/name!" or the shout-out feature's own "twitch.tv/name — they
+// were awesome!" would otherwise never match at all.
+const TWITCH_CHANNEL_RE = /twitch\.tv\/([a-zA-Z0-9_]{3,25})(?=[^a-zA-Z0-9_]|$)/i;
 const TWITCH_RESERVED_PATHS = new Set(["directory", "videos", "settings", "subscriptions", "wallet", "jobs", "p", "downloads", "prime", "turbo", "friends", "inventory", "messages", "payments", "search", "store"]);
+// Kick channel link, not clip — checked after KICK_CLIP_RE so a clip URL
+// (kick.com/<channel>/clips/<id>) is never mistaken for a channel link.
+// Same trailing-lookahead fix as TWITCH_CHANNEL_RE above.
+const KICK_CHANNEL_RE = /kick\.com\/([a-zA-Z0-9_]{2,25})(?=[^a-zA-Z0-9_]|$)/i;
+const KICK_RESERVED_PATHS = new Set(["category", "categories", "browse", "search", "settings", "subscription", "wallet", "api", "help", "signup", "login"]);
 const DISCORD_INVITE_RE = /discord(?:\.gg|(?:app)?\.com\/invite)\/([a-zA-Z0-9-]+)/i;
 const PRIME_GAMING_RE = /gaming\.amazon\.com\/\S*/i;
 // X's own non-profile top-level paths (twitter.com still redirects there).
-const X_RE = /(?:x\.com|twitter\.com)\/(\w{1,15})(?:[/?#]|$)/i;
+// Same trailing-lookahead fix as TWITCH_CHANNEL_RE/KICK_CHANNEL_RE above —
+// matches even when the handle isn't the last thing in the message.
+const X_RE = /(?:x\.com|twitter\.com)\/(\w{1,15})(?=[^\w]|$)/i;
 const X_RESERVED_PATHS = new Set(["home", "explore", "notifications", "messages", "i", "intent", "search", "settings", "compose", "login", "signup", "share", "hashtag"]);
 const YOUTUBE_CHANNEL_RE = /youtube\.com\/@([\w.-]+)/i;
 const TIKTOK_RE = /tiktok\.com\/@([\w.-]+)/i;
@@ -503,6 +514,7 @@ const ytOembedCache = new Map();       // youtube video id -> oEmbed response | 
 const spotifyOembedCache = new Map();  // spotify url -> oEmbed response | null
 const discordInviteCache = new Map();  // invite code -> invite response | null
 const twitchChannelPreviewCache = new Map(); // login(lower) -> preview | null
+const kickChannelPreviewCache = new Map(); // slug(lower) -> preview | null
 const youtubeChannelAvatarCache = new Map(); // handle(lower) -> avatar url | null
 
 function linkPreviewWrap(kind, tagText, url) {
@@ -631,6 +643,34 @@ function linkPreviewTwitchChannel(login, url) {
   tauriInvoke("twitch_resolve_channel_preview", { login })
     .then(d => { twitchChannelPreviewCache.set(key, d); apply(d); })
     .catch(() => { twitchChannelPreviewCache.set(key, null); apply(null); });
+  return wrap;
+}
+
+// Kick's live-status/avatar preview, same shape/rendering as Twitch's above
+// (kick_resolve_channel_preview returns the identical
+// {title,thumbnail_url,display_name,is_live} shape) — but this one needs no
+// connected Kick account at all, since it's built on the same no-OAuth
+// unofficial channel-lookup endpoint resolve_kick_avatar already uses.
+function linkPreviewKickChannel(slug, url) {
+  const target = url || `https://kick.com/${slug}`;
+  if (!tauriInvoke) return null;
+  const { wrap, body } = linkPreviewWrap("kick", "🟢 Kick", target);
+  const apply = data => fillLinkPreview(body, data, d => {
+    const img = el("img", "cv-linkpreview-thumb");
+    img.src = d.thumbnail_url; img.alt = d.title || d.display_name; img.loading = "lazy";
+    const info = el("div", "cv-linkpreview-info");
+    info.append(
+      el("div", "cv-linkpreview-title", d.title || d.display_name),
+      el("div", "cv-linkpreview-sub", d.is_live ? `🔴 Live · ${d.display_name}` : `${d.display_name} · Offline`)
+    );
+    return [img, info];
+  }, "Open channel ↗");
+  const key = slug.toLowerCase();
+  const cached = kickChannelPreviewCache.get(key);
+  if (cached !== undefined) { apply(cached); return wrap; }
+  tauriInvoke("kick_resolve_channel_preview", { slug })
+    .then(d => { kickChannelPreviewCache.set(key, d); apply(d); })
+    .catch(() => { kickChannelPreviewCache.set(key, null); apply(null); });
   return wrap;
 }
 
@@ -831,6 +871,9 @@ function buildLinkPreviewNode(m) {
   if ((match = STEAM_APP_RE.exec(text))) return linkPreviewSteam(match[1], firstUrl(text));
   if (!TWITCH_CLIP_RE.test(text) && (match = TWITCH_CHANNEL_RE.exec(text)) && !TWITCH_RESERVED_PATHS.has(match[1].toLowerCase())) {
     return linkPreviewTwitchChannel(match[1], firstUrl(text));
+  }
+  if (!KICK_CLIP_RE.test(text) && (match = KICK_CHANNEL_RE.exec(text)) && !KICK_RESERVED_PATHS.has(match[1].toLowerCase())) {
+    return linkPreviewKickChannel(match[1], firstUrl(text));
   }
   return null;
 }
