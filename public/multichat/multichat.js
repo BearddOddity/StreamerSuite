@@ -1533,8 +1533,47 @@ function msgNode(m, small, isCont) {
   return row;
 }
 
+// Event chips whose displayed count is meaningful to sum across consecutive
+// duplicates from the same user (e.g. Twitch sends one mass-gift system
+// message plus one individual subgift message per recipient — those collapse
+// into a single "gifted subs xN" line instead of a wall of "x1" rows).
+const EVENT_COMBO_COUNT_SELECTOR = { gift: ".cf-gift-count", raid: ".cf-raid-count" };
 function appendMsgTo(container, m, small) {
   const meta = feedMeta.get(container) || { lastKey: null };
+
+  // Event-combo streak: consecutive events of the same combo-able chip type
+  // from the same user collapse into one chip with a running summed count,
+  // same visual language (bump/hot/blazing) as the chat-message combo below.
+  if (m.event && EVENT_COMBO_COUNT_SELECTOR[m.chip]) {
+    const countSel = EVENT_COMBO_COUNT_SELECTOR[m.chip];
+    const comboKey = m.platform + "|" + m.chip + "|" + m.user;
+    if (meta.eventComboKey === comboKey && meta.eventComboEl) {
+      meta.eventComboCount += Number(m.chipCount) || 1;
+      const countEl = meta.eventComboEl.querySelector(countSel);
+      if (countEl) countEl.textContent = "x" + meta.eventComboCount;
+      applyComboHeat(meta.eventComboEl, meta.eventComboCount);
+      feedMeta.set(container, meta);
+      const pinned = isPinnedToBottom(container);
+      if (pinned) container.scrollTop = container.scrollHeight;
+      return;
+    }
+    const chip = settings.visualAlerts ? renderEventChip(m) : null;
+    if (chip) {
+      const pinned = isPinnedToBottom(container);
+      container.append(chip);
+      while (container.children.length > MAX_MESSAGES) container.firstChild.remove();
+      meta.eventComboKey = comboKey;
+      meta.eventComboCount = Number(m.chipCount) || 1;
+      meta.eventComboEl = chip;
+      meta.comboKey = null; meta.comboEl = null; meta.lastComboKey = null; meta.lastKey = null;
+      feedMeta.set(container, meta);
+      if (pinned) container.scrollTop = container.scrollHeight;
+      else $("jumpBtn").dataset.show = "true";
+      return;
+    }
+  }
+  meta.eventComboKey = null;
+  meta.eventComboEl = null;
 
   // Message-combo streak: the 2nd+ consecutive identical-content repeat
   // collapses into one incrementing chip instead of piling up near-duplicate
