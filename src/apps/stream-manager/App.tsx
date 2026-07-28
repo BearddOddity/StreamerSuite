@@ -8,6 +8,7 @@ import { useChecklist } from "./useChecklist";
 import { openJoystickDashboard, JOYSTICK_DASHBOARD_URL } from "./joystickDashboard";
 import "../../design-system/styles.css";
 import { Badge, Button, Card, SectionHead } from "../../design-system/components/core";
+import { Checkbox } from "../../design-system/components/forms";
 
 /** Shown in place of the category input whenever StatusForge's own
  * game-detection push is switched on (Settings → General → Platform Push)
@@ -232,22 +233,22 @@ function ChecklistPanel() {
       </div>
       <div className="space-y-1.5">
         {items.map((item) => (
-          <div key={item.id} className="flex items-center gap-2 group">
-            <button
-              onClick={() => toggle(item.id)}
-              className={`w-4 h-4 rounded border flex items-center justify-center text-[9px] shrink-0 transition-all ${
-                item.checked ? "bg-green-500/30 border-green-500/50 text-green-300" : "border-white/20 text-transparent"
-              }`}
-            >
-              ✓
-            </button>
-            <span className={`text-[12px] flex-1 ${item.checked ? "text-white/30 line-through" : "text-white/70"}`}>{item.label}</span>
-            {item.custom && (
-              <button onClick={() => removeItem(item.id)} className="text-[10px] text-white/20 opacity-0 group-hover:opacity-100 hover:text-red-400">
-                ✕
-              </button>
-            )}
-          </div>
+          <Checkbox
+            key={item.id}
+            checked={item.checked}
+            onChange={() => toggle(item.id)}
+            className="group"
+            label={
+              <span className="flex items-center gap-2 flex-1">
+                <span className={`text-[12px] flex-1 ${item.checked ? "text-white/30 line-through" : "text-white/70"}`}>{item.label}</span>
+                {item.custom && (
+                  <button onClick={() => removeItem(item.id)} className="text-[10px] text-white/20 opacity-0 group-hover:opacity-100 hover:text-red-400">
+                    ✕
+                  </button>
+                )}
+              </span>
+            }
+          />
         ))}
       </div>
       <div className="flex gap-2 mt-3">
