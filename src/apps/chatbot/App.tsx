@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import "../../design-system/styles.css";
 import { Badge, Button, Card, Chip, SectionHead, StatusDot } from "../../design-system/components/core";
+import { EmptyState } from "../../design-system/components/feedback";
 import { fetchConfig } from "@statusforge/hooks/useTauriApi";
 import type { AppConfig } from "@statusforge/types";
 import { useChatbot } from "./useChatbot";
@@ -242,7 +243,18 @@ export default function ChatbotApp() {
 
         <div className="flex flex-col gap-3">
           {commands.length === 0 ? (
-            <div className="text-center py-12 text-white/20 text-sm">No commands yet</div>
+            <Card padding={0}>
+              <EmptyState
+                icon="🤖"
+                title="No commands yet"
+                description="Add a command to get started — triggers, responses, cooldowns, and per-platform targeting all live here."
+                action={
+                  <Button variant="cta" size="sm" onClick={addCommand}>
+                    + New Command
+                  </Button>
+                }
+              />
+            </Card>
           ) : (
             commands.map((cmd) => (
               <CommandEditor
