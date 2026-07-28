@@ -995,7 +995,7 @@ export default function ApiKeysTab() {
           <span className="text-sm">🗝️</span>
           API Keys
           {keyCount > 0 && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/[0.06] text-white/50">
+            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-white/[0.06] text-white/50">
               {keyCount}
             </span>
           )}
@@ -1011,7 +1011,7 @@ export default function ApiKeysTab() {
           <span className="text-sm">♾️</span>
           Routing
           {routeCount > 0 && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/[0.06] text-white/50">
+            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-white/[0.06] text-white/50">
               {routeCount}
             </span>
           )}
