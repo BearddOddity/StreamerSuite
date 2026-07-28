@@ -1,6 +1,7 @@
 import { useState } from "react";
 import "../../design-system/styles.css";
 import { Badge, Button, Card, Chip, SectionHead } from "../../design-system/components/core";
+import { EmptyState } from "../../design-system/components/feedback";
 
 interface Note {
   id: string;
@@ -76,7 +77,9 @@ export default function NotesCommandsApp() {
             {/* Notes list */}
             <div className="space-y-2">
               {notes.length === 0 ? (
-                <div className="text-center py-8 text-white/20 text-sm">No notes yet</div>
+                <Card padding={0}>
+                  <EmptyState icon="📝" title="No notes yet" description="Add a stream note above to keep track of things during your broadcast." />
+                </Card>
               ) : (
                 notes.map((note) => (
                   <Card key={note.id} padding={12} className="flex items-start gap-3 group">
