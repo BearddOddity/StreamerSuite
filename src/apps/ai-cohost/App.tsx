@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import "../../design-system/styles.css";
 import { Badge, Button, Card, Chip, SectionHead, StatusDot } from "../../design-system/components/core";
+import { Spinner } from "../../design-system/components/feedback";
 import { fetchConfig } from "@statusforge/hooks/useTauriApi";
 import type { AppConfig } from "@statusforge/types";
 import { useCoHost } from "./useCoHost";
@@ -184,7 +185,14 @@ export default function CoHostApp() {
               className="input-glass flex-1 text-[12px]"
             />
             <Button variant="primary" onClick={runTry} disabled={tryBusy || !tryMessage.trim()}>
-              {tryBusy ? "Thinking…" : "Send"}
+              {tryBusy ? (
+                <span className="flex items-center gap-2">
+                  <Spinner size={12} />
+                  Thinking…
+                </span>
+              ) : (
+                "Send"
+              )}
             </Button>
           </div>
           {tryReply && (
