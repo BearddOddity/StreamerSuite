@@ -3,7 +3,7 @@ import { useSceneSwitcherConnection } from "./useSceneSwitcherConnection";
 import { useSceneSwitcherSettings } from "./useSceneSwitcherSettings";
 import { SettingsPanel } from "./SettingsPanel";
 import "../../design-system/styles.css";
-import { Button, Card, SectionHead } from "../../design-system/components/core";
+import { Button, Card, LivePulseDot, SectionHead } from "../../design-system/components/core";
 
 const SCENE_COLORS = [
   "border-amber-500/25 bg-amber-500/10",
@@ -77,7 +77,7 @@ export default function SceneSwitcherApp() {
                   scene.current ? `${SCENE_COLORS[i % SCENE_COLORS.length]} border-2 shadow-lg` : "bd-card hover:-translate-y-0.5"
                 }`}
               >
-                {scene.current && <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-green-400 status-dot-pulse" />}
+                {scene.current && <LivePulseDot className="absolute top-2 right-2" />}
                 <span className="text-[13px] font-semibold text-white/80 block">{scene.name}</span>
                 <span className="text-[10px] text-white/25 mt-1 block">
                   {scene.current ? "Active" : scene.staged ? "Staged" : "Click to switch"}
@@ -96,7 +96,7 @@ export default function SceneSwitcherApp() {
                 <button
                   key={track.id}
                   onClick={() => toggleMute(track.id)}
-                  className={`px-3 py-2 rounded-xl text-[11px] font-medium border transition-all ${
+                  className={`px-3 py-2 rounded-lg text-[11px] font-medium border transition-all ${
                     track.muted ? "border-red-500/25 bg-red-500/10 text-red-300" : "btn-ghost"
                   }`}
                 >
@@ -114,7 +114,7 @@ export default function SceneSwitcherApp() {
             <div className="flex gap-2">
               <button
                 onClick={toggleStream}
-                className={`flex-1 py-2 rounded-xl text-[11px] font-semibold transition-all border ${
+                className={`flex-1 py-2 rounded-lg text-[11px] font-semibold transition-all border ${
                   isStreaming ? "border-red-500/25 bg-red-500/10 text-red-300" : "border-green-500/25 bg-green-500/10 text-green-300"
                 }`}
               >
@@ -122,7 +122,7 @@ export default function SceneSwitcherApp() {
               </button>
               <button
                 onClick={toggleRecord}
-                className={`flex-1 py-2 rounded-xl text-[11px] font-semibold transition-all border ${
+                className={`flex-1 py-2 rounded-lg text-[11px] font-semibold transition-all border ${
                   isRecording ? "border-red-500/25 bg-red-500/10 text-red-300" : "btn-ghost"
                 }`}
               >
