@@ -503,6 +503,7 @@ const ytOembedCache = new Map();       // youtube video id -> oEmbed response | 
 const spotifyOembedCache = new Map();  // spotify url -> oEmbed response | null
 const discordInviteCache = new Map();  // invite code -> invite response | null
 const twitchChannelPreviewCache = new Map(); // login(lower) -> preview | null
+const youtubeChannelAvatarCache = new Map(); // handle(lower) -> avatar url | null
 
 function linkPreviewWrap(kind, tagText, url) {
   const wrap = el("div", `cv-linkpreview cv-linkpreview-${kind}`);
@@ -660,10 +661,43 @@ function linkPreviewPrimeGaming(url) {
 function linkPreviewX(handle, url) {
   return linkPreviewStaticChip("x", "𝕏 X", `@${handle}`, "Open profile ↗", url, "𝕏", X_ICON_SVG);
 }
-// YouTube's oEmbed only covers video/playlist URLs, not channel pages —
-// static chip for the same reason X is.
+// YouTube's oEmbed only covers video/playlist URLs, not channel pages, so
+// there's no thumbnail-tier API to call here. But we can still show the
+// creator's actual avatar instead of just the brand icon: the Rust side
+// scrapes the public channel page's og:image meta tag (desktop app only —
+// no CORS issue there, unlike a browser-side fetch). Falls back to the
+// static brand-icon chip when that's unavailable (overlay/browser-source
+// view with no Tauri bridge, or the scrape came up empty).
 function linkPreviewYoutubeChannel(handle, url) {
-  return linkPreviewStaticChip("youtube", "▶ YouTube", `@${handle}`, "Open channel ↗", url, "▶", YOUTUBE_SVG);
+  const target = url || `https://youtube.com/@${handle}`;
+  if (!tauriInvoke) return linkPreviewStaticChip("youtube", "▶ YouTube", `@${handle}`, "Open channel ↗", target, "▶", YOUTUBE_SVG);
+  const { wrap, body } = linkPreviewWrap("youtube", "▶ YouTube", target);
+  const apply = avatarUrl => {
+    body.innerHTML = "";
+    let icon;
+    if (avatarUrl) {
+      icon = el("img", "cv-linkpreview-thumb cv-linkpreview-thumb-round");
+      icon.src = avatarUrl; icon.alt = `@${handle}`; icon.loading = "lazy";
+      icon.onerror = () => { icon.replaceWith(brandIconEl()); };
+    } else {
+      icon = brandIconEl();
+    }
+    const info = el("div", "cv-linkpreview-info");
+    info.append(el("div", "cv-linkpreview-title", `@${handle}`), el("div", "cv-linkpreview-sub", "Open channel ↗"));
+    body.append(icon, info);
+  };
+  function brandIconEl() {
+    const d = el("div", "cv-linkpreview-thumb cv-linkpreview-thumb-round cv-linkpreview-fallback cv-linkpreview-brandicon");
+    d.innerHTML = YOUTUBE_SVG;
+    return d;
+  }
+  const key = handle.toLowerCase();
+  const cached = youtubeChannelAvatarCache.get(key);
+  if (cached !== undefined) { apply(cached); return wrap; }
+  tauriInvoke("youtube_resolve_channel_avatar", { handle })
+    .then(avatarUrl => { youtubeChannelAvatarCache.set(key, avatarUrl || null); apply(avatarUrl || null); })
+    .catch(() => { youtubeChannelAvatarCache.set(key, null); apply(null); });
+  return wrap;
 }
 // Ko-fi, Fourthwall, Streamlabs/StreamElements tip pages, Patreon, Throne,
 // and Instagram all have no public unauthenticated API to pull a real
@@ -1265,26 +1299,35 @@ async function translateMessage(m) {
     renderView();
   } catch (e) { showToast(`Translation failed: ${e}`); }
 }
-// Multi-streaming shout-out — reuses the compose bar's "send to every
-// connected platform" plumbing (sendToTarget/composeTargets), but builds
-// each platform's own channel link instead of assuming everyone's only on
-// Twitch. Works from a message on ANY platform: right-click a Kick chatter
-// and the shoutout still goes out with their twitch.tv/kick.com/etc links,
-// on the assumption (same one the old !so stub made) that a streamer keeps
-// the same handle across platforms.
+// Multi-streaming shout-out — detects which platform the right-clicked
+// message actually came from and relays a shoutout for THAT platform's
+// handle/link only (no guessing at whether the same person even has a
+// Twitch/Kick/YouTube/etc. account — we only know the one we saw them
+// chat on). "Multi-streaming" is about where it's relayed TO: it still
+// goes out over every platform you're currently sending through (the same
+// composeTargets/sendToTarget plumbing the compose bar's "Send to all"
+// uses), so your whole audience hears it even though only one platform's
+// link is in the message. Works the same way regardless of which platform
+// the message was detected on — right-click any chatter, anywhere.
 function shoutoutLink(platformId, handle) {
   if (platformId === "twitch") return `twitch.tv/${handle}`;
   if (platformId === "kick") return `kick.com/${handle}`;
   if (platformId === "youtube") return `youtube.com/@${handle}`;
   if (platformId === "joystick") return `joystick.tv/${handle}`;
+  if (platformId === "chaturbate") return `chaturbate.com/${handle}`;
   return "";
 }
 async function shoutoutUser(m) {
   if (!composeTargets.length) { showToast("Connect a platform (Settings → Connections & Keys) to send a shoutout"); return; }
   const handle = (m.login || m.user || "").trim();
   if (!handle) return;
-  const links = composeTargets.map(t => shoutoutLink(t.id, handle)).filter(Boolean);
-  const text = `Go check out ${handle} — they were awesome! ${links.join(" · ")}`;
+  const platformLabel = PLATFORM_MAP[m.platform]?.label || m.platform;
+  const link = shoutoutLink(m.platform, handle);
+  // The link (e.g. kick.com/handle) already carries the handle in its path —
+  // no need to also spell the plain handle out separately in the message.
+  const text = link
+    ? `Go check out ${link} — they were awesome!`
+    : `Go check out ${handle} on ${platformLabel} — they were awesome!`;
   try {
     const results = await Promise.allSettled(composeTargets.map(t => sendToTarget(t.id, text)));
     const failed = results.map((r, i) => ({ r, t: composeTargets[i] })).filter(x => x.r.status === "rejected");
