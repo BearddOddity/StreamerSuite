@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "../../design-system/styles.css";
 import { Button, Chip } from "../../design-system/components/core";
+import { ProgressBar } from "../../design-system/components/feedback";
 
 type TimerMode = "stopwatch" | "countdown";
 
@@ -57,10 +58,6 @@ export default function StreamTimerApp() {
     setCountdownRunning(true);
   };
 
-  const stopwatchProgress = countdownRunning || countdownRemaining > 0
-    ? ((countdownMinutes * 60 - countdownRemaining) / (countdownMinutes * 60)) * 100
-    : 0;
-
   return (
     <div className="h-full flex flex-col items-center justify-center p-8">
       <div className="w-full max-w-lg">
@@ -86,10 +83,9 @@ export default function StreamTimerApp() {
             {/* Stopwatch controls */}
             <div className="flex items-center justify-center gap-3">
               {running ? (
-                <button onClick={() => setRunning(false)}
-                  className="px-6 py-3 rounded-xl text-sm font-semibold transition-all bg-red-500/15 text-red-400 border border-red-500/25 hover:bg-red-500/25">
+                <Button variant="danger" onClick={() => setRunning(false)}>
                   ⏸ Pause
-                </button>
+                </Button>
               ) : (
                 <Button variant="cta" onClick={() => setRunning(true)}>
                   ▶ Start
@@ -138,11 +134,8 @@ export default function StreamTimerApp() {
 
             {/* Progress bar */}
             {countdownRunning || countdownRemaining > 0 ? (
-              <div className="w-full progress-track mb-6">
-                <div
-                  className={`progress-fill ${countdownRemaining <= 300 ? "bg-amber-400" : "bg-[var(--accent-system)]"}`}
-                  style={{ width: `${100 - stopwatchProgress}%` }}
-                />
+              <div className="mb-6">
+                <ProgressBar value={countdownRemaining} max={countdownMinutes * 60} />
               </div>
             ) : null}
 
@@ -168,7 +161,7 @@ export default function StreamTimerApp() {
                 </Button>
               ) : (
                 <button onClick={() => setCountdownRunning(false)}
-                  className="px-6 py-3 rounded-xl text-sm font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/25 hover:bg-amber-500/25 transition-all">
+                  className="px-6 py-3 rounded-lg text-sm font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/25 hover:bg-amber-500/25 transition-all">
                   ⏸ Pause
                 </button>
               )}
