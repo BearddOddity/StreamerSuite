@@ -123,6 +123,11 @@ const TWITCH_RESERVED_PATHS = new Set(["directory", "videos", "settings", "subsc
 // channel preview for <channel>, so it's checked as its own pattern rather
 // than just falling through to plain linkified text.
 const TWITCH_SUBS_RE = /go\.twitch\.tv\/subs\/([a-zA-Z0-9_]{3,25})(?=[^a-zA-Z0-9_]|$)/i;
+// The bare go.twitch.tv/subs (no /<channel> after it) — Twitch's generic
+// "manage your subscriptions" page, not tied to any one channel. No handle
+// to build a real channel preview from, but it's still a real, recognized
+// Twitch link worth a static chip rather than going fully inert.
+const TWITCH_SUBS_BASE_RE = /go\.twitch\.tv\/subs(?:[?#]|$)/i;
 // Kick channel link, not clip — checked after KICK_CLIP_RE so a clip URL
 // (kick.com/<channel>/clips/<id>) is never mistaken for a channel link.
 // Same trailing-lookahead fix as TWITCH_CHANNEL_RE above.
@@ -713,6 +718,15 @@ function linkPreviewStaticChip(kind, tag, title, sub, url, fallbackLetter, iconS
 }
 function linkPreviewPrimeGaming(url) {
   return linkPreviewStaticChip("prime", "🎮 Prime Gaming", "Prime Gaming", "Open link ↗", url, "P", PRIME_GAMING_SVG);
+}
+// The bare go.twitch.tv/subs link — no channel handle to build a real
+// channel preview from (unlike go.twitch.tv/subs/<channel>, which gets the
+// full live/offline card via linkPreviewTwitchChannel instead). Reuses
+// PRIME_GAMING_SVG's markup since that's already just the Twitch glitch
+// mark recolored to Twitch's own purple, not a Prime-Gaming-specific asset.
+function linkPreviewTwitchSubs(url) {
+  const target = url || "https://go.twitch.tv/subs";
+  return linkPreviewStaticChip("twitch", "🎥 Twitch", "Manage Subscriptions", "Open subs page ↗", target, "T", PRIME_GAMING_SVG);
 }
 // X has had no public, unauthenticated profile-info API since 2023 — static
 // chip only, same reasoning as Prime Gaming above.
