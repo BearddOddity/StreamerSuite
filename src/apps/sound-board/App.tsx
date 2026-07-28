@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useSoundBoard } from "./useSoundBoard";
 import type { SoundPad } from "./types";
 import "../../design-system/styles.css";
-import { Button, Card, Chip, SectionHead } from "../../design-system/components/core";
+import { Button, Card, Chip, Kbd, SectionHead } from "../../design-system/components/core";
+import { RangeSlider } from "../../design-system/components/forms";
 
 export default function SoundBoardApp() {
   const { pads, masterVolume, setMasterVolume, activePad, brokenPads, addPad, removePad, renamePad, setPadHotkey, play, stopAll } =
@@ -35,14 +36,7 @@ export default function SoundBoardApp() {
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-white/25">🔊</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={masterVolume}
-                    onChange={(e) => setMasterVolume(Number(e.target.value))}
-                    className="w-20 h-1 accent-[var(--accent-system)] bg-white/[0.06] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--accent-system)]"
-                  />
+                  <RangeSlider value={masterVolume} onChange={setMasterVolume} showValue={false} className="w-20" />
                   <span className="text-[10px] text-white/30 font-mono w-7">{masterVolume}%</span>
                 </div>
                 <Button variant="ghost" size="sm" onClick={stopAll}>
@@ -78,7 +72,7 @@ export default function SoundBoardApp() {
                     capturingHotkeyFor === pad.id ? "bg-purple-500/40 text-white" : "text-white/20"
                   } ${editing ? "cursor-pointer hover:text-white/60" : ""}`}
                 >
-                  {capturingHotkeyFor === pad.id ? "…" : pad.hotkey || "—"}
+                  {capturingHotkeyFor === pad.id ? "…" : pad.hotkey ? <Kbd keys={[pad.hotkey]} /> : "—"}
                 </span>
                 <span className="text-3xl block mb-2">{brokenPads.has(pad.id) ? "⚠️" : "🎵"}</span>
                 {editing ? (
@@ -97,7 +91,7 @@ export default function SoundBoardApp() {
               {editing && (
                 <button
                   onClick={() => removePad(pad.id)}
-                  className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-red-500/80 text-white text-[10px] flex items-center justify-center hover:bg-red-500"
+                  className="absolute -top-2 -left-2 w-5 h-5 rounded-md bg-red-500/80 text-white text-[10px] flex items-center justify-center hover:bg-red-500"
                 >
                   ✕
                 </button>
