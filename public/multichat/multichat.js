@@ -980,9 +980,12 @@ function twitchBadgeUrl(login, badgeKey) {
   return map ? map[badgeKey] || null : null;
 }
 
-// Some avatar sources bake a solid black or white square behind the actual
-// picture (default/placeholder art from certain platforms). Detect that on
-// load and flood-fill it to transparent so only the real image shows.
+// Some avatar sources bake a solid-color box behind the actual picture
+// (default/placeholder art, or a shaped-border frame sitting on a flat
+// fill). Detect that on load and flood-fill it to transparent so only the
+// framed subject shows. The background can be ANY uniform color — not just
+// black/white — the border shape is what we key off, not the hue.
+const BG_COLOR_TOLERANCE = 18; // per-channel distance allowed to still count as "the same background color"
 function stripAvatarBoxBackground(img) {
   const run = () => {
     try {
@@ -998,15 +1001,17 @@ function stripAvatarBoxBackground(img) {
         const i = (y * w + x) * 4;
         return [px[i], px[i + 1], px[i + 2]];
       };
-      const isNearBlack = ([r, g, b]) => r < 24 && g < 24 && b < 24;
-      const isNearWhite = ([r, g, b]) => r > 232 && g > 232 && b > 232;
+      const closeTo = (a, b) =>
+        Math.abs(a[0] - b[0]) <= BG_COLOR_TOLERANCE &&
+        Math.abs(a[1] - b[1]) <= BG_COLOR_TOLERANCE &&
+        Math.abs(a[2] - b[2]) <= BG_COLOR_TOLERANCE;
       const corners = [at(0, 0), at(w - 1, 0), at(0, h - 1), at(w - 1, h - 1)];
-      let matches;
-      if (corners.every(isNearBlack)) matches = isNearBlack;
-      else if (corners.every(isNearWhite)) matches = isNearWhite;
-      else return; // corners aren't a uniform black/white box — leave untouched
+      const bg = corners[0];
+      if (!corners.every((c) => closeTo(c, bg))) return; // corners disagree — no uniform box, leave untouched
+      const matches = (c) => closeTo(c, bg);
       // Flood-fill from the border inward so we only clear the connected
-      // background box, not similarly-colored pixels inside the artwork itself.
+      // background box, not similarly-colored pixels inside the artwork itself
+      // (a shaped border/frame around the subject stops the fill at its edge).
       const visited = new Uint8Array(w * h);
       const stack = [];
       for (let x = 0; x < w; x++) { stack.push([x, 0]); stack.push([x, h - 1]); }
@@ -1054,24 +1059,31 @@ function resolveAvatarUrl(m) {
 }
 function avatarNode(m) {
   const initial = () => el("div", "cv-avatar", (m.user[0] || "?").toUpperCase());
+  // Try loading with crossOrigin so the canvas pass in stripAvatarBoxBackground
+  // can actually read pixels (needed for real, non-data-URI URLs like Kick's
+  // CDN). If the CDN doesn't answer CORS requests, the crossOrigin load itself
+  // fails — fall back to a plain, unprocessed load rather than losing the
+  // avatar entirely.
+  const loadWithFallback = (img, src, onFail) => {
+    img.crossOrigin = "anonymous";
+    img.onerror = () => {
+      img.onerror = onFail;
+      img.removeAttribute("crossorigin");
+      img.src = src; // retry without CORS — image still displays, just skips box-stripping
+    };
+    img.src = src;
+    img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
+    stripAvatarBoxBackground(img);
+  };
   const swapToImg = (placeholder, src) => {
     const img = el("img", "cv-avatar");
-    img.crossOrigin = "anonymous";
-    img.src = src; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
-    img.onerror = () => brokenAvatars.add(src);
-    stripAvatarBoxBackground(img);
+    loadWithFallback(img, src, () => brokenAvatars.add(src));
     placeholder.replaceWith(img); // safe no-op if placeholder was already trimmed from the feed
   };
   const src = avatarSrc(m);
   if (src && !brokenAvatars.has(src)) {
     const img = el("img", "cv-avatar");
-    img.crossOrigin = "anonymous";
-    img.src = src;
-    img.alt = "";
-    img.loading = "lazy";
-    img.referrerPolicy = "no-referrer";
-    img.onerror = () => { brokenAvatars.add(src); img.replaceWith(initial()); };
-    stripAvatarBoxBackground(img);
+    loadWithFallback(img, src, () => { brokenAvatars.add(src); img.replaceWith(initial()); });
     return img;
   }
   const node = initial();
