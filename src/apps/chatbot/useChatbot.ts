@@ -48,22 +48,12 @@ const defaultCommands: ChatCommand[] = [
     enabled: true,
     useCount: 0,
   },
-  {
-    id: "so",
-    trigger: "!so",
-    aliases: ["!shoutout"],
-    matchMode: "start",
-    caseSensitive: false,
-    response: "Go check out {arg1} — they were awesome! twitch.tv/{arg1}",
-    // Twitch has its own native /shoutout; this custom command is the
-    // Kick/Joystick equivalent since neither platform has one built in.
-    platforms: { twitch: false, kick: true, joystick: true, streamerbot: false },
-    permission: "moderator",
-    cooldownGlobal: 0,
-    cooldownPerUser: 0,
-    enabled: true,
-    useCount: 0,
-  },
+  // No !so/!shoutout stub here — Multi-Chat (public/multichat/multichat.js,
+  // handleShoutoutCommand/sendShoutout) already owns those triggers with a
+  // real, working implementation across every connected platform. Adding a
+  // same-named command here — even inert today, since nothing in this app
+  // executes yet — would collide the moment this preview (or AI Co-Host's
+  // "chatbotCommands" tool access) starts actually running commands.
 ];
 
 export function useChatbot() {
