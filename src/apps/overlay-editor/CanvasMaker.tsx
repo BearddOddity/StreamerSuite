@@ -15,10 +15,13 @@ import {
   DEFAULT_PRIMITIVE_PARAMS,
   ALERT_KINDS,
   DEFAULT_ALERT_TRIGGER,
+  VALUE_CONDITION_OPERATORS,
+  DEFAULT_VALUE_CONDITION,
   type CanvasElementT,
   type TemplateParams,
   type PrimitiveParams,
   type AlertTrigger,
+  type ValueCondition,
 } from "../overlay-library/types";
 import { useLiveSources } from "../overlay-library/useLiveSources";
 import TemplateFieldsEditor from "./TemplateFieldsEditor";
@@ -1034,6 +1037,17 @@ export default function CanvasMaker({
     );
   };
 
+  const setSelectedValueCondition = (patch: Partial<ValueCondition>) => {
+    recordBeforeChange(elements);
+    setElements((prev) =>
+      prev.map((e) =>
+        e.id === selectedId
+          ? { ...e, valueCondition: { ...(e.valueCondition ?? DEFAULT_VALUE_CONDITION), ...patch } }
+          : e
+      )
+    );
+  };
+
   /** Generates a whole layout from a text description via Hugging Face
    * (same real-call pattern as AI Co-Host, not a mockup) and replaces the
    * canvas with it — undoable like any other change, so a bad result is
@@ -1786,6 +1800,70 @@ export default function CanvasMaker({
                         className="w-full input-glass text-[11px]"
                       />
                     </div>
+                  )}
+                </div>
+                <div className="space-y-2 pb-3 mb-1 border-b border-white/[0.06]">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-white/40 uppercase tracking-wide block">Show When</label>
+                    <button
+                      onClick={() => setSelectedValueCondition({ enabled: !(selected.valueCondition?.enabled ?? false) })}
+                      className={`px-2 py-0.5 rounded-md text-[10px] border ${
+                        selected.valueCondition?.enabled
+                          ? "bg-purple-500/15 border-purple-500/40 text-white"
+                          : "bg-white/[0.03] border-white/[0.06] text-white/50 hover:border-white/20"
+                      }`}
+                    >
+                      {selected.valueCondition?.enabled ? "On" : "Off"}
+                    </button>
+                  </div>
+                  {selected.valueCondition?.enabled ? (
+                    <>
+                      <p className="text-[9px] text-white/25">
+                        Hidden unless a live value meets this condition right now — re-checked every update, no
+                        timer. E.g. "Followers ≥ 100" stays visible for as long as that's true.
+                      </p>
+                      <select
+                        value={selected.valueCondition.source}
+                        onChange={(e) => setSelectedValueCondition({ source: e.target.value })}
+                        className="w-full input-glass text-[11px]"
+                      >
+                        {liveSources
+                          .filter((s) => s.value)
+                          .map((s) => (
+                            <option key={s.value} value={s.value}>
+                              {s.label}
+                            </option>
+                          ))}
+                      </select>
+                      <div className="grid grid-cols-[auto_1fr] gap-2 items-end">
+                        <div className="flex gap-1">
+                          {VALUE_CONDITION_OPERATORS.map((op) => (
+                            <button
+                              key={op.id}
+                              onClick={() => setSelectedValueCondition({ operator: op.id as ValueCondition["operator"] })}
+                              className={`w-8 h-8 rounded-md text-[12px] border ${
+                                selected.valueCondition?.operator === op.id
+                                  ? "bg-purple-500/15 border-purple-500/40 text-white"
+                                  : "bg-white/[0.03] border-white/[0.06] text-white/50 hover:border-white/20"
+                              }`}
+                            >
+                              {op.label}
+                            </button>
+                          ))}
+                        </div>
+                        <NumberField
+                          label="Threshold"
+                          value={selected.valueCondition.threshold}
+                          min={-1000000}
+                          max={1000000}
+                          onChange={(v) => setSelectedValueCondition({ threshold: v })}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-[9px] text-white/25">
+                      Off — this element renders normally, always visible.
+                    </p>
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-2">

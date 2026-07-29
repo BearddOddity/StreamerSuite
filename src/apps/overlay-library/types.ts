@@ -285,6 +285,34 @@ export const ALERT_KINDS: { id: string; label: string }[] = [
   { id: "tip", label: "Tip" },
 ];
 
+export const VALUE_CONDITION_OPERATORS: { id: string; label: string }[] = [
+  { id: ">", label: ">" },
+  { id: ">=", label: "≥" },
+  { id: "<", label: "<" },
+  { id: "<=", label: "≤" },
+  { id: "==", label: "=" },
+  { id: "!=", label: "≠" },
+];
+
+/** Ties an element's visibility to a live data value crossing a threshold
+ * — e.g. "show once followers >= 100" — rather than to a one-off event the
+ * way AlertTrigger is. Level-based, not momentary: the element is visible
+ * for exactly as long as the condition holds, no duration/auto-hide. */
+export interface ValueCondition {
+  enabled: boolean;
+  /** A live source key (see KNOWN_LIVE_SOURCES) or any custom key a tool publishes. */
+  source: string;
+  operator: ">" | ">=" | "<" | "<=" | "==" | "!=";
+  threshold: number;
+}
+
+export const DEFAULT_VALUE_CONDITION: ValueCondition = {
+  enabled: false,
+  source: "viewers",
+  operator: ">=",
+  threshold: 0,
+};
+
 export interface AlertTrigger {
   enabled: boolean;
   /** Empty = matches every alert kind. */
@@ -431,6 +459,11 @@ export interface CanvasElementT {
    * fighting it. "none"/absent = static. */
   loopAnimation?: "none" | "pulse" | "bounce" | "spin" | "glow";
   loopSpeedSeconds?: number;
+  /** Level-based conditional visibility — visible for exactly as long as a
+   * live value satisfies the condition (e.g. "viewers >= 50"), re-evaluated
+   * every time /data-ws pushes an update. Distinct from alertTrigger, which
+   * is momentary and event-driven rather than tied to a standing value. */
+  valueCondition?: ValueCondition;
   /** Used when kind is "template" (or absent). Always present (even on a
    * primitive element, where it's an unused default) so any code path that
    * assumes every element has full params never has to null-check it. */

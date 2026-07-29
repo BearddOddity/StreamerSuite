@@ -356,6 +356,11 @@ pub(crate) struct CanvasElement {
     loop_animation: String,
     #[serde(default = "default_loop_speed")]
     loop_speed_seconds: f32,
+    /// When present and `enabled`, this element is only visible while a
+    /// live data value satisfies `ValueCondition` — level-based, checked
+    /// on every `/data-ws` update rather than tied to a one-off event.
+    #[serde(default)]
+    value_condition: Option<ValueCondition>,
     /// Used when `kind` is "template" (or absent) — unused-but-present for
     /// primitive elements too, so a mixed canvas round-trips through any
     /// code path that still assumes every element has a full `params`.
@@ -592,6 +597,33 @@ fn default_alert_animation() -> String {
 
 const VALID_ALERT_KINDS: &[&str] = &["follow", "sub", "raid", "cheer", "tip"];
 
+/// Ties a Canvas element's visibility to a live data value crossing a
+/// threshold (e.g. "viewers >= 50") instead of a one-off event the way
+/// AlertTrigger is — level-based, not momentary: visible for exactly as
+/// long as the condition holds, re-evaluated on every `/data-ws` update,
+/// no duration/auto-hide of its own.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ValueCondition {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default = "default_value_condition_source")]
+    source: String,
+    #[serde(default = "default_value_condition_operator")]
+    operator: String,
+    #[serde(default)]
+    threshold: f64,
+}
+
+fn default_value_condition_source() -> String {
+    "viewers".into()
+}
+fn default_value_condition_operator() -> String {
+    ">=".into()
+}
+
+const VALID_VALUE_OPERATORS: &[&str] = &[">", ">=", "<", "<=", "==", "!="];
+
 fn default_loop_animation() -> String {
     "none".into()
 }
@@ -801,13 +833,20 @@ const DATA_BIND_SCRIPT: &str = r#"<script>
       el.textContent = fmt(key, data[key]);
     });
     // Goal Bar's fill — width is a percentage of the value against a fixed
-    // goal baked in at save time, not something the server computes.
+    // goal baked in at save time, not something the server computes. Once
+    // the live value actually reaches the goal, both the fill bar and its
+    // card switch into a "goal-complete" look (see the goal-bar CSS below)
+    // instead of just silently sitting at a maxed-out 100% width.
     document.querySelectorAll("[data-bind-width]").forEach(function(el) {
       var key = el.getAttribute("data-bind-width");
       var goal = Number(el.getAttribute("data-goal")) || 0;
       var value = Number(data[key]) || 0;
       var pct = goal > 0 ? Math.max(0, Math.min(100, (value / goal) * 100)) : 0;
       el.style.width = pct + "%";
+      var reached = goal > 0 && value >= goal;
+      el.classList.toggle("goal-complete", reached);
+      var card = el.closest('#card');
+      if (card) card.classList.toggle("goal-complete", reached);
     });
   }
   function connect() {
@@ -1260,7 +1299,9 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                      .goal-sep {{ opacity: 0.5; font-weight: 500; }}\n\
                      .goal-total {{ opacity: 0.7; }}\n\
                      .goal-track {{ height: 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }}\n\
-                     .goal-fill {{ height: 100%; width: 0%; border-radius: 999px; background: {accent}; transition: width 0.6s ease; }}\n\
+                     .goal-fill {{ height: 100%; width: 0%; border-radius: 999px; background: {accent}; transition: width 0.6s ease, background 0.6s ease; }}\n\
+                     .goal-fill.goal-complete {{ background: linear-gradient(90deg, #22c55e, #4ade80); }}\n\
+                     #card.goal-complete {{ border-color: #22c55e; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 24px rgba(34, 197, 94, 0.5); transition: border-color 0.6s ease, box-shadow 0.6s ease; }}\n\
                      {keyframes}"
                 ),
             )
@@ -1683,6 +1724,10 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
     // the other.
     let mut needs_entrance_keyframes = false;
     let mut has_loop_animation = false;
+    // Same convention again — only opens its own /data-ws connection (and
+    // emits the armed/active CSS) when at least one element actually has a
+    // value_condition.
+    let mut has_value_condition = false;
     for (i, el) in ordered.into_iter().enumerate() {
         let wants_group: Option<(String, f32)> = match &el.group_id {
             Some(gid) if el.group_opacity < 0.999 => Some((gid.clone(), el.group_opacity.clamp(0.0, 1.0))),
@@ -1735,6 +1780,25 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
             }
             _ => (String::new(), String::new()),
         };
+        // Same idea as alert_attrs/alert_class above, but level-based
+        // (visible for as long as the condition holds) instead of momentary
+        // — a separate marker attribute/class pair so the two features
+        // never collide even if both happen to be set on one element.
+        let (value_attrs, value_class) = match &el.value_condition {
+            Some(vc) if vc.enabled => {
+                has_value_condition = true;
+                let source = escape_html(vc.source.trim());
+                let operator = VALID_VALUE_OPERATORS.iter().find(|&&o| o == vc.operator).copied().unwrap_or(">=");
+                let threshold = vc.threshold;
+                (
+                    format!(r#" data-value-armed="1" data-value-source="{source}" data-value-op="{operator}" data-value-threshold="{threshold}""#),
+                    " value-armed".to_string(),
+                )
+            }
+            _ => (String::new(), String::new()),
+        };
+        let alert_attrs = format!("{alert_attrs}{value_attrs}");
+        let alert_class = format!("{alert_class}{value_class}");
         // A loop-animated element gets one extra inner wrapper around its
         // content (iframe or fragment) rather than being animated directly
         // — see LOOP_ANIMATION_STYLE's doc comment for why. Elements with
@@ -1801,6 +1865,8 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
     let alert_script = if has_alert_trigger { ALERT_TRIGGER_SCRIPT } else { "" };
     let entrance_style = if needs_entrance_keyframes { ENTRANCE_KEYFRAMES_STYLE } else { "" };
     let loop_style = if has_loop_animation { LOOP_ANIMATION_STYLE } else { "" };
+    let value_style = if has_value_condition { VALUE_CONDITION_STYLE } else { "" };
+    let value_script = if has_value_condition { VALUE_CONDITION_SCRIPT } else { "" };
     Ok(format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -1814,6 +1880,7 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
   {entrance_style}
   {loop_style}
   {alert_style}
+  {value_style}
 </style>
 </head>
 <body>
@@ -1822,12 +1889,74 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
 {TOKEN_FROM_PATH_JS}
 {assigns}
 {alert_script}
+{value_script}
 </script>
 </body>
 </html>
 "#
     ))
 }
+
+/// Only emitted when at least one element has an enabled value_condition.
+/// Armed elements start fully hidden — same `opacity:0; visibility:hidden`
+/// convention as ALERT_TRIGGER_STYLE, but `transition` instead of
+/// `animation`: this is a level (visible exactly while the condition
+/// holds), not a one-shot entrance, so a plain crossfade is the right
+/// primitive, and it leaves `.el`'s `animation` property free for
+/// alert-trigger or nothing at all.
+const VALUE_CONDITION_STYLE: &str = r#"
+  .el[data-value-armed] { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.3s ease; }
+  .el[data-value-armed].value-active { opacity: 1; visibility: visible; pointer-events: auto; }
+"#;
+
+/// Opens its own `/data-ws` connection — the same feed DATA_BIND_SCRIPT
+/// already uses for bound text fields, just consumed here at the shared
+/// canvas-document level instead of inside a per-template iframe, since
+/// value_condition is a whole-element visibility toggle rather than
+/// something render_template's own markup needs to know about. Re-evaluates
+/// every armed element on every update (no debounce needed — the same
+/// `watch` channel DATA_BIND_SCRIPT already relies on coalesces to "latest
+/// value", not a firehose). No token (the Canvas Maker's own live preview)
+/// shows every conditional element rather than leaving them all invisible,
+/// same reasoning as ALERT_TRIGGER_SCRIPT.
+const VALUE_CONDITION_SCRIPT: &str = r#"
+(function() {
+  var armed = Array.prototype.slice.call(document.querySelectorAll("[data-value-armed]"));
+  if (armed.length === 0) return;
+  function passes(value, op, threshold) {
+    switch (op) {
+      case ">": return value > threshold;
+      case ">=": return value >= threshold;
+      case "<": return value < threshold;
+      case "<=": return value <= threshold;
+      case "==": return value === threshold;
+      case "!=": return value !== threshold;
+      default: return false;
+    }
+  }
+  function apply(data) {
+    armed.forEach(function(el) {
+      var source = el.getAttribute("data-value-source");
+      var op = el.getAttribute("data-value-op");
+      var threshold = parseFloat(el.getAttribute("data-value-threshold")) || 0;
+      var value = Number(data[source]) || 0;
+      el.classList.toggle("value-active", passes(value, op, threshold));
+    });
+  }
+  function connect() {
+    var token = getOverlayToken();
+    if (!token) {
+      armed.forEach(function(el) { el.classList.add("value-active"); });
+      return;
+    }
+    var ws = new WebSocket("ws://127.0.0.1:53735/data-ws?token=" + encodeURIComponent(token));
+    ws.onmessage = function(ev) { try { apply(JSON.parse(ev.data)); } catch (e) {} };
+    ws.onclose = function() { setTimeout(connect, 3000); };
+    ws.onerror = function() { ws.close(); };
+  }
+  connect();
+})();
+"#;
 
 /// Only emitted when at least one element has an enabled alert_trigger.
 /// Armed elements start fully hidden (`visibility:hidden` too, not just
@@ -2011,6 +2140,7 @@ fn build_canvas_from_specs(specs: Vec<AiElementSpec>) -> Vec<CanvasElement> {
             alert_trigger: None,
             loop_animation: default_loop_animation(),
             loop_speed_seconds: default_loop_speed(),
+            value_condition: None,
             primitive: None,
             params: TemplateParams {
                 template: spec.template,
@@ -2494,6 +2624,7 @@ mod tests {
             alert_trigger: None,
             loop_animation: default_loop_animation(),
             loop_speed_seconds: default_loop_speed(),
+            value_condition: None,
             primitive: None,
             params: params(template),
         }
@@ -2866,6 +2997,37 @@ mod tests {
         assert!(html.contains(r#"data-alert-kinds="follow""#), "unrecognized kind should be dropped, not passed through");
         assert!(html.contains(r#"data-alert-duration="120""#), "duration should clamp to the 120s ceiling");
         assert!(html.contains("alert-anim-pop"), "unrecognized animation style should fall back to pop");
+    }
+
+    #[test]
+    fn canvas_element_with_no_value_condition_renders_no_value_markup_or_script() {
+        let el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("data-value-armed"));
+        assert!(!html.contains("value-active"));
+    }
+
+    #[test]
+    fn canvas_element_with_enabled_value_condition_gets_armed_attributes_and_shared_script() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.value_condition = Some(ValueCondition { enabled: true, source: "followers".into(), operator: ">=".into(), threshold: 100.0 });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains(r#"data-value-armed="1""#));
+        assert!(html.contains(r#"data-value-source="followers""#));
+        assert!(html.contains(r#"data-value-op=">=""#));
+        assert!(html.contains(r#"data-value-threshold="100""#));
+        assert!(html.contains("value-active"));
+        assert!(html.contains("/data-ws"));
+    }
+
+    #[test]
+    fn canvas_value_condition_unknown_operator_falls_back_and_source_is_html_escaped() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.value_condition = Some(ValueCondition { enabled: true, source: "\"><script>".into(), operator: "not-an-op".into(), threshold: 5.0 });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains(r#"data-value-op=">=""#), "unrecognized operator should fall back to >=");
+        assert!(!html.contains(r#"data-value-source=""><script>"#), "raw unescaped source must not appear");
+        assert!(html.contains("&quot;&gt;&lt;script&gt;"), "source should be HTML-escaped before interpolation");
     }
 
     #[test]
@@ -3273,6 +3435,17 @@ mod tests {
         assert!(html.contains(r#"data-goal="1000""#));
         assert!(html.contains(r#"data-bind="followers""#));
         assert!(html.contains(">1000</span>"), "should show the goal total as a whole number");
+    }
+
+    #[test]
+    fn goal_bar_renders_goal_complete_css_and_js_toggle() {
+        let mut p = params("goal-bar");
+        p.goal = Some(1000.0);
+        p.subtitle = BoundField { text: String::new(), source: "followers".to_string() };
+        let html = render_template(&p).unwrap();
+        assert!(html.contains(".goal-fill.goal-complete"));
+        assert!(html.contains("#card.goal-complete"));
+        assert!(html.contains(r#"classList.toggle("goal-complete", reached)"#));
     }
 
     #[test]
