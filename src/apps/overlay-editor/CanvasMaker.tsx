@@ -1780,6 +1780,54 @@ export default function CanvasMaker({
                           </div>
                         </div>
                       </div>
+                      <div>
+                        <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1 block">
+                          Sound (optional)
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="file"
+                            accept="audio/*"
+                            className="hidden"
+                            id="alert-trigger-sound-upload"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = () => setSelectedAlertTrigger({ soundDataUri: String(reader.result) });
+                              reader.readAsDataURL(file);
+                              e.target.value = "";
+                            }}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => document.getElementById("alert-trigger-sound-upload")?.click()}
+                          >
+                            {selected.alertTrigger?.soundDataUri ? "Replace…" : "Upload…"}
+                          </Button>
+                          {selected.alertTrigger?.soundDataUri && (
+                            <Button variant="ghost" size="sm" onClick={() => setSelectedAlertTrigger({ soundDataUri: null })}>
+                              Clear
+                            </Button>
+                          )}
+                        </div>
+                        {selected.alertTrigger?.soundDataUri && (
+                          <div className="mt-1.5">
+                            <label className="text-[9px] text-white/30 uppercase tracking-wide mb-1 block">
+                              Volume ({Math.round((selected.alertTrigger.soundVolume ?? 0.7) * 100)}%)
+                            </label>
+                            <RangeSlider
+                              min={0}
+                              max={1}
+                              step={0.05}
+                              value={selected.alertTrigger.soundVolume ?? 0.7}
+                              onChange={(v) => setSelectedAlertTrigger({ soundVolume: v })}
+                              showValue={false}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </>
                   ) : (
                     <p className="text-[9px] text-white/25">

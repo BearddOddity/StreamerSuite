@@ -329,6 +329,11 @@ export interface AlertTrigger {
   kinds: string[];
   durationSeconds: number;
   animationStyle: "pop" | "slide" | "fade";
+  /** Optional sound-on-event — plays once, right as the element shows,
+   * alongside its entrance animation. null = silent (visual-only trigger,
+   * the original behavior before this field existed). */
+  soundDataUri: string | null;
+  soundVolume: number;
 }
 
 export const DEFAULT_ALERT_TRIGGER: AlertTrigger = {
@@ -336,6 +341,8 @@ export const DEFAULT_ALERT_TRIGGER: AlertTrigger = {
   kinds: [],
   durationSeconds: 5,
   animationStyle: "pop",
+  soundDataUri: null,
+  soundVolume: 0.7,
 };
 
 export interface PrimitiveParams {

@@ -617,6 +617,12 @@ pub(crate) struct AlertTrigger {
     duration_seconds: f32,
     #[serde(default = "default_alert_animation")]
     animation_style: String,
+    /// Optional sound-on-event — plays once, right as the element shows.
+    /// None = silent (visual-only trigger, the original behavior).
+    #[serde(default)]
+    sound_data_uri: Option<String>,
+    #[serde(default = "default_sound_volume")]
+    sound_volume: f32,
 }
 
 fn default_alert_duration() -> f32 {
@@ -624,6 +630,16 @@ fn default_alert_duration() -> f32 {
 }
 fn default_alert_animation() -> String {
     "pop".into()
+}
+fn default_sound_volume() -> f32 {
+    0.7
+}
+
+/// Only a `data:audio/...` URI is accepted — same "reject anything that
+/// isn't an embedded data URI" convention as safe_logo/safe_font, so this
+/// can never become an arbitrary-URL fetch.
+fn safe_sound(input: &Option<String>) -> Option<String> {
+    input.as_ref().filter(|s| s.starts_with("data:audio/")).cloned()
 }
 
 const VALID_ALERT_KINDS: &[&str] = &["follow", "sub", "raid", "cheer", "tip"];
@@ -1838,8 +1854,19 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
                     "fade" => "fade",
                     _ => "pop",
                 };
+                // Same "data: URI or nothing" convention as safe_logo/
+                // safe_font — a base64 data URI is quote/HTML-attribute
+                // safe by construction (its alphabet is only A-Za-z0-9+/=),
+                // so no escaping is needed to interpolate it directly.
+                let sound_attrs = match safe_sound(&t.sound_data_uri) {
+                    Some(src) => {
+                        let volume = t.sound_volume.clamp(0.0, 1.0);
+                        format!(r#" data-alert-sound="{src}" data-alert-volume="{volume}""#)
+                    }
+                    None => String::new(),
+                };
                 (
-                    format!(r#" data-alert-armed="1" data-alert-kinds="{kinds_attr}" data-alert-duration="{duration}""#),
+                    format!(r#" data-alert-armed="1" data-alert-kinds="{kinds_attr}" data-alert-duration="{duration}"{sound_attrs}"#),
                     format!(" alert-anim-{anim}"),
                 )
             }
@@ -2105,12 +2132,23 @@ const ALERT_TRIGGER_SCRIPT: &str = r#"
     if (!raw) return true;
     return raw.split(",").indexOf(kind) !== -1;
   }
-  function show(el) {
+  function show(el, silent) {
     var duration = Math.max(1, parseFloat(el.getAttribute("data-alert-duration")) || 5) * 1000;
     clearTimeout(el._alertShowTimer);
     clearTimeout(el._alertHideTimer);
     el.classList.remove("alert-leaving");
     el.classList.add("alert-active");
+    // Muted in preview mode (see the !token branch below) — a real overlay
+    // plays it every time; auto-replaying it on every debounced preview
+    // refresh while someone is still designing would just be noise.
+    var soundSrc = el.getAttribute("data-alert-sound");
+    if (soundSrc && !silent) {
+      try {
+        var audio = new Audio(soundSrc);
+        audio.volume = Math.max(0, Math.min(1, parseFloat(el.getAttribute("data-alert-volume")) || 0.7));
+        audio.play().catch(function() {});
+      } catch (e) {}
+    }
     el._alertShowTimer = setTimeout(function() {
       el.classList.remove("alert-active");
       el.classList.add("alert-leaving");
@@ -2118,11 +2156,11 @@ const ALERT_TRIGGER_SCRIPT: &str = r#"
     }, duration);
   }
   function handle(event) {
-    armed.forEach(function(el) { if (matches(el, event.kind)) show(el); });
+    armed.forEach(function(el) { if (matches(el, event.kind)) show(el, false); });
   }
   var token = getOverlayToken();
   if (!token) {
-    armed.forEach(show);
+    armed.forEach(function(el) { show(el, true); });
     return;
   }
   function connect() {
@@ -3074,7 +3112,7 @@ mod tests {
     #[test]
     fn canvas_element_with_disabled_alert_trigger_renders_no_alert_markup() {
         let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
-        el.alert_trigger = Some(AlertTrigger { enabled: false, kinds: vec!["follow".into()], duration_seconds: 5.0, animation_style: "pop".into() });
+        el.alert_trigger = Some(AlertTrigger { enabled: false, kinds: vec!["follow".into()], duration_seconds: 5.0, animation_style: "pop".into(), ..Default::default() });
         let html = render_canvas(&[el]).unwrap();
         assert!(!html.contains("data-alert-armed"));
     }
@@ -3087,6 +3125,7 @@ mod tests {
             kinds: vec!["follow".into(), "sub".into()],
             duration_seconds: 8.0,
             animation_style: "slide".into(),
+            ..Default::default()
         });
         let html = render_canvas(&[el]).unwrap();
         assert!(html.contains(r#"data-alert-armed="1""#));
@@ -3105,11 +3144,48 @@ mod tests {
             kinds: vec!["follow".into(), "not-a-real-kind".into()],
             duration_seconds: 999.0,
             animation_style: "not-a-real-style".into(),
+            ..Default::default()
         });
         let html = render_canvas(&[el]).unwrap();
         assert!(html.contains(r#"data-alert-kinds="follow""#), "unrecognized kind should be dropped, not passed through");
         assert!(html.contains(r#"data-alert-duration="120""#), "duration should clamp to the 120s ceiling");
         assert!(html.contains("alert-anim-pop"), "unrecognized animation style should fall back to pop");
+    }
+
+    #[test]
+    fn canvas_alert_trigger_sound_emits_data_uri_and_clamped_volume() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.alert_trigger = Some(AlertTrigger {
+            enabled: true,
+            sound_data_uri: Some("data:audio/mpeg;base64,AAAA".into()),
+            sound_volume: 2.5,
+            ..Default::default()
+        });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains(r#"data-alert-sound="data:audio/mpeg;base64,AAAA""#));
+        assert!(html.contains(r#"data-alert-volume="1""#), "volume should clamp to the 1.0 ceiling");
+        assert!(html.contains("new Audio(soundSrc)"));
+    }
+
+    #[test]
+    fn canvas_alert_trigger_rejects_non_data_uri_sound() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.alert_trigger = Some(AlertTrigger {
+            enabled: true,
+            sound_data_uri: Some("https://evil.example/x.mp3".into()),
+            ..Default::default()
+        });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("data-alert-sound=\""));
+        assert!(!html.contains("evil.example"));
+    }
+
+    #[test]
+    fn canvas_alert_trigger_without_sound_emits_no_sound_attrs() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.alert_trigger = Some(AlertTrigger { enabled: true, ..Default::default() });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("data-alert-sound=\""));
     }
 
     #[test]
