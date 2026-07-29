@@ -285,6 +285,16 @@ export const ALERT_KINDS: { id: string; label: string }[] = [
   { id: "tip", label: "Tip" },
 ];
 
+export const CLIP_SHAPES: { id: string; label: string }[] = [
+  { id: "none", label: "None" },
+  { id: "circle", label: "Circle" },
+  { id: "ellipse", label: "Ellipse" },
+  { id: "rounded", label: "Rounded" },
+  { id: "diamond", label: "Diamond" },
+  { id: "hexagon", label: "Hexagon" },
+  { id: "octagon", label: "Octagon" },
+];
+
 export const VALUE_CONDITION_OPERATORS: { id: string; label: string }[] = [
   { id: ">", label: ">" },
   { id: ">=", label: "≥" },
@@ -476,6 +486,14 @@ export interface CanvasElementT {
    * every time /data-ws pushes an update. Distinct from alertTrigger, which
    * is momentary and event-driven rather than tied to a standing value. */
   valueCondition?: ValueCondition;
+  /** Clips this element (any kind — template iframe or primitive) to a
+   * shape via CSS clip-path, applied directly on the element's own
+   * positioned wrapper since clip-path doesn't collide with anything else
+   * that wrapper carries (transform, animation, opacity are all separate
+   * properties). "none"/absent = full rectangular box, unclipped. */
+  clipShape?: "none" | "circle" | "ellipse" | "rounded" | "diamond" | "hexagon" | "octagon";
+  /** "rounded" only — corner radius as a percent of the box (0-50). */
+  clipRoundedRadius?: number;
   /** Used when kind is "template" (or absent). Always present (even on a
    * primitive element, where it's an unused default) so any code path that
    * assumes every element has full params never has to null-check it. */

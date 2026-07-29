@@ -361,6 +361,15 @@ pub(crate) struct CanvasElement {
     /// on every `/data-ws` update rather than tied to a one-off event.
     #[serde(default)]
     value_condition: Option<ValueCondition>,
+    /// "none" (the default)/"circle"/"ellipse"/"rounded"/"diamond"/
+    /// "hexagon"/"octagon" — applied as a CSS clip-path directly on this
+    /// element's own positioned wrapper (safe to do inline, unlike
+    /// transform/animation/opacity, since clip-path doesn't collide with
+    /// anything else that wrapper carries).
+    #[serde(default = "default_clip_shape")]
+    clip_shape: String,
+    #[serde(default = "default_clip_rounded_radius")]
+    clip_rounded_radius: f32,
     /// Used when `kind` is "template" (or absent) — unused-but-present for
     /// primitive elements too, so a mixed canvas round-trips through any
     /// code path that still assumes every element has a full `params`.
@@ -645,6 +654,31 @@ fn default_value_condition_operator() -> String {
 }
 
 const VALID_VALUE_OPERATORS: &[&str] = &[">", ">=", "<", "<=", "==", "!="];
+
+fn default_clip_shape() -> String {
+    "none".into()
+}
+fn default_clip_rounded_radius() -> f32 {
+    20.0
+}
+
+/// Empty string (no `clip-path` at all) for "none"/anything unrecognized —
+/// same "reject silently, fall back to the safe default" convention as
+/// safe_blend_mode/safe_loop_animation.
+fn clip_path_css(shape: &str, rounded_radius: f32) -> String {
+    match shape {
+        "circle" => "clip-path: circle(50% at 50% 50%);".to_string(),
+        "ellipse" => "clip-path: ellipse(50% 50% at 50% 50%);".to_string(),
+        "rounded" => {
+            let radius = rounded_radius.clamp(0.0, 50.0);
+            format!("clip-path: inset(0% round {radius}%);")
+        }
+        "diamond" => "clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);".to_string(),
+        "hexagon" => "clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);".to_string(),
+        "octagon" => "clip-path: polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%);".to_string(),
+        _ => String::new(),
+    }
+}
 
 fn default_loop_animation() -> String {
     "none".into()
@@ -1840,6 +1874,7 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
             has_loop_animation = true;
         }
         let loop_speed = el.loop_speed_seconds.clamp(0.2, 20.0);
+        let clip_css = clip_path_css(&el.clip_shape, el.clip_rounded_radius);
         if kind == "template" {
             // Templates keep their own fully isolated iframe — real risk of
             // one widget's scoped CSS (`.title`/`#card`/etc.) colliding with
@@ -1848,10 +1883,10 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
             let frame_id = format!("el-{i}");
             match loop_kind {
                 Some(lk) => body_html.push_str(&format!(
-                    r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}><div class="ss-loop-{lk}" style="width:100%; height:100%; --loop-speed:{loop_speed}s;"><iframe id="{frame_id}" style="width:100%; height:100%; border:0; background:transparent;"></iframe></div></div>"#
+                    r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform} {clip_css}"{alert_attrs}><div class="ss-loop-{lk}" style="width:100%; height:100%; --loop-speed:{loop_speed}s;"><iframe id="{frame_id}" style="width:100%; height:100%; border:0; background:transparent;"></iframe></div></div>"#
                 )),
                 None => body_html.push_str(&format!(
-                    r#"<iframe id="{frame_id}" class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}></iframe>"#
+                    r#"<iframe id="{frame_id}" class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform} {clip_css}"{alert_attrs}></iframe>"#
                 )),
             }
             // JSON-encoding the whole rendered document is what makes
@@ -1880,10 +1915,10 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
             }
             match loop_kind {
                 Some(lk) => body_html.push_str(&format!(
-                    r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}><div class="ss-loop-{lk}" style="width:100%; height:100%; --loop-speed:{loop_speed}s;">{fragment}</div></div>"#
+                    r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform} {clip_css}"{alert_attrs}><div class="ss-loop-{lk}" style="width:100%; height:100%; --loop-speed:{loop_speed}s;">{fragment}</div></div>"#
                 )),
                 None => body_html.push_str(&format!(
-                    r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}>{fragment}</div>"#
+                    r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform} {clip_css}"{alert_attrs}>{fragment}</div>"#
                 )),
             }
         }
@@ -2172,6 +2207,8 @@ fn build_canvas_from_specs(specs: Vec<AiElementSpec>) -> Vec<CanvasElement> {
             loop_animation: default_loop_animation(),
             loop_speed_seconds: default_loop_speed(),
             value_condition: None,
+            clip_shape: default_clip_shape(),
+            clip_rounded_radius: default_clip_rounded_radius(),
             primitive: None,
             params: TemplateParams {
                 template: spec.template,
@@ -2656,6 +2693,8 @@ mod tests {
             loop_animation: default_loop_animation(),
             loop_speed_seconds: default_loop_speed(),
             value_condition: None,
+            clip_shape: default_clip_shape(),
+            clip_rounded_radius: default_clip_rounded_radius(),
             primitive: None,
             params: params(template),
         }
@@ -3102,6 +3141,43 @@ mod tests {
         assert!(html.contains(r#"data-value-op=">=""#), "unrecognized operator should fall back to >=");
         assert!(!html.contains(r#"data-value-source=""><script>"#), "raw unescaped source must not appear");
         assert!(html.contains("&quot;&gt;&lt;script&gt;"), "source should be HTML-escaped before interpolation");
+    }
+
+    #[test]
+    fn canvas_element_with_no_clip_shape_gets_no_clip_path() {
+        let el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("clip-path"));
+    }
+
+    #[test]
+    fn canvas_clip_shape_circle_and_hexagon_emit_expected_clip_path() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.clip_shape = "circle".into();
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains("clip-path: circle(50% at 50% 50%);"));
+
+        let mut el2 = canvas_element("b", "lower-third", 5.0, 10.0, 0);
+        el2.clip_shape = "hexagon".into();
+        let html2 = render_canvas(&[el2]).unwrap();
+        assert!(html2.contains("clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);"));
+    }
+
+    #[test]
+    fn canvas_clip_shape_rounded_uses_clamped_radius() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.clip_shape = "rounded".into();
+        el.clip_rounded_radius = 999.0;
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains("clip-path: inset(0% round 50%);"));
+    }
+
+    #[test]
+    fn canvas_unknown_clip_shape_is_rejected_not_passed_through() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.clip_shape = "not-a-real-shape".into();
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("clip-path"));
     }
 
     #[test]

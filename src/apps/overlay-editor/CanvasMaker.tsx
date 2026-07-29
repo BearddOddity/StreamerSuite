@@ -17,6 +17,7 @@ import {
   DEFAULT_ALERT_TRIGGER,
   VALUE_CONDITION_OPERATORS,
   DEFAULT_VALUE_CONDITION,
+  CLIP_SHAPES,
   type CanvasElementT,
   type TemplateParams,
   type PrimitiveParams,
@@ -1021,7 +1022,19 @@ export default function CanvasMaker({
 
   const setSelectedPlacement = (
     patch: Partial<
-      Pick<CanvasElementT, "xPct" | "yPct" | "widthPct" | "heightPct" | "zIndex" | "rotation" | "loopAnimation" | "loopSpeedSeconds">
+      Pick<
+        CanvasElementT,
+        | "xPct"
+        | "yPct"
+        | "widthPct"
+        | "heightPct"
+        | "zIndex"
+        | "rotation"
+        | "loopAnimation"
+        | "loopSpeedSeconds"
+        | "clipShape"
+        | "clipRoundedRadius"
+      >
     >
   ) => {
     recordBeforeChange(elements);
@@ -1864,6 +1877,33 @@ export default function CanvasMaker({
                     <p className="text-[9px] text-white/25">
                       Off — this element renders normally, always visible.
                     </p>
+                  )}
+                </div>
+                <div className="space-y-2 pb-3 mb-1 border-b border-white/[0.06]">
+                  <label className="text-[10px] text-white/40 uppercase tracking-wide block">Clip Shape</label>
+                  <div className="flex flex-wrap gap-1">
+                    {CLIP_SHAPES.map((shape) => (
+                      <button
+                        key={shape.id}
+                        onClick={() => setSelectedPlacement({ clipShape: shape.id as CanvasElementT["clipShape"] })}
+                        className={`px-2 py-1 rounded-md text-[10px] border ${
+                          (selected.clipShape ?? "none") === shape.id
+                            ? "bg-purple-500/15 border-purple-500/40 text-white"
+                            : "bg-white/[0.03] border-white/[0.06] text-white/50 hover:border-white/20"
+                        }`}
+                      >
+                        {shape.label}
+                      </button>
+                    ))}
+                  </div>
+                  {selected.clipShape === "rounded" && (
+                    <NumberField
+                      label="Corner Radius (%)"
+                      value={selected.clipRoundedRadius ?? 20}
+                      min={0}
+                      max={50}
+                      onChange={(v) => setSelectedPlacement({ clipRoundedRadius: v })}
+                    />
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
