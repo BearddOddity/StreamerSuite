@@ -478,7 +478,7 @@ export default function TemplateFieldsEditor({
             <div className="flex items-center gap-2">
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,.svg"
                 onChange={(e) => pickLogo(e.target.files?.[0])}
                 className="text-[11px] text-white/50"
               />

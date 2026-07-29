@@ -304,10 +304,13 @@ export default function PrimitiveFieldsEditor({
         <>
           <div>
             <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">Image</label>
+            <p className="text-[9px] text-white/25 mb-1.5">
+              PNG/JPG or SVG — vector logos stay crisp at any size and any canvas resolution.
+            </p>
             <div className="flex items-center gap-2">
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,.svg"
                 className="hidden"
                 id="primitive-image-upload"
                 onChange={(e) => {

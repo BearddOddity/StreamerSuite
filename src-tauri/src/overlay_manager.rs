@@ -2676,6 +2676,21 @@ mod tests {
     }
 
     #[test]
+    fn render_primitive_image_accepts_svg_vector_data_uri() {
+        // Vector assets (a logo exported as SVG) go through the exact same
+        // path as any raster upload — safe_logo only checks the
+        // "data:image/" prefix, not a specific format allowlist — and
+        // render as a plain <img>, which browsers execute in "image
+        // context" (no embedded <script>/external-resource execution),
+        // so this is safe without any SVG-specific sanitization.
+        let svg = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg==";
+        let p = PrimitiveParams { image_data_uri: Some(svg.into()), ..Default::default() };
+        let (html, _) = render_primitive("image", &p);
+        assert!(html.contains(svg));
+        assert!(html.contains("<img"));
+    }
+
+    #[test]
     fn render_primitive_image_emits_clamped_object_position() {
         let p = PrimitiveParams {
             image_data_uri: Some("data:image/png;base64,AAAA".into()),
@@ -3238,6 +3253,14 @@ mod tests {
         p.logo_data_uri = Some("data:image/png;base64,AAAA".to_string());
         let html = render_template(&p).unwrap();
         assert!(html.contains(r#"src="data:image/png;base64,AAAA""#));
+    }
+
+    #[test]
+    fn accepts_svg_vector_data_uri_logo() {
+        let mut p = params("corner-badge");
+        p.logo_data_uri = Some("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=".to_string());
+        let html = render_template(&p).unwrap();
+        assert!(html.contains(r#"src="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=""#));
     }
 
     #[test]
