@@ -41,7 +41,9 @@ $Port = [int]$Manifest.port
 if (-not $Port) { $Port = 8420 }
 
 $Global:LiveData = @{}
-$Global:AlertQueue = New-Object System.Collections.ArrayList
+# overlayId -> ArrayList of queued alerts, NOT one shared queue -- see
+# Push-Alert below.
+$Global:AlertQueues = @{}
 $Global:TwitchStatus = "disconnected"
 $Global:TwitchError = ""
 $Global:KickStatus = "disconnected"
@@ -102,6 +104,22 @@ function Get-RegisteredManifests {
         if ($m -and $m.overlayId) { $out[$m.overlayId] = @{ dir = $d; manifest = $m } }
     }
     return $out
+}
+
+function Push-Alert($Platform, $Alert) {
+    # Queues $Alert (came from $Platform) onto every currently-registered
+    # overlay whose OWN manifest.json lists that platform -- never a single
+    # shared queue, so e.g. a YouTube Super Chat never reaches an overlay
+    # that only declared Twitch.
+    foreach ($pair in (Get-RegisteredManifests).GetEnumerator()) {
+        if ($pair.Value.manifest.platforms -contains $Platform) {
+            $overlayId = $pair.Key
+            if (-not $Global:AlertQueues.ContainsKey($overlayId)) {
+                $Global:AlertQueues[$overlayId] = New-Object System.Collections.ArrayList
+            }
+            $Global:AlertQueues[$overlayId].Add($Alert) | Out-Null
+        }
+    }
 }
 
 function Test-AnyPlatform($Platform) {
@@ -339,18 +357,17 @@ function Apply-PollState {
             }
             if ($s.newFollow -and $s.newFollow.id) {
                 if ($Global:LastFollowerId -and $Global:LastFollowerId -ne $s.newFollow.id) {
-                    $Global:AlertQueue.Add(@{ kind = "follow"; user = $s.newFollow.name; message = "just followed!" }) | Out-Null
+                    Push-Alert "twitch" @{ kind = "follow"; user = $s.newFollow.name; message = "just followed!" }
                 }
                 $Global:LastFollowerId = $s.newFollow.id
             }
             # This state file gets re-read on every incoming HTTP request (not
             # on a timer), but the background job only refreshes it every 30s
             # -- without this cycle check, the same youtubeAlerts batch would
-            # get appended to $Global:AlertQueue once per request instead of
-            # once per actual poll.
+            # get pushed once per request instead of once per actual poll.
             if ($s.youtubeAlerts -and $s.cycle -ne $Global:LastYoutubeCycle) {
                 foreach ($a in $s.youtubeAlerts) {
-                    $Global:AlertQueue.Add(@{ kind = $a.kind; user = $a.user; message = $a.message }) | Out-Null
+                    Push-Alert "youtube" @{ kind = $a.kind; user = $a.user; message = $a.message }
                 }
                 $Global:LastYoutubeCycle = $s.cycle
             }
@@ -366,7 +383,7 @@ function Apply-PollState {
             $stamp = (Get-Item $cbStatePath).LastWriteTimeUtc.Ticks
             if ($s.alerts -and $stamp -ne $Global:LastChaturbateStamp) {
                 foreach ($a in $s.alerts) {
-                    $Global:AlertQueue.Add(@{ kind = $a.kind; user = $a.user; message = $a.message }) | Out-Null
+                    Push-Alert "chaturbate" @{ kind = $a.kind; user = $a.user; message = $a.message }
                 }
                 $Global:LastChaturbateStamp = $stamp
             }
@@ -590,9 +607,10 @@ try {
                 Send-JsonResponse $response $Global:LiveData
                 break
             }
-            { $request.HttpMethod -eq "GET" -and $request.Url.AbsolutePath -eq "/poll-alerts" } {
-                $events = @($Global:AlertQueue)
-                $Global:AlertQueue.Clear()
+            { $request.HttpMethod -eq "GET" -and $request.Url.AbsolutePath.StartsWith("/poll-alerts/") } {
+                $overlayId = $request.Url.AbsolutePath.Substring("/poll-alerts/".Length).Split("/")[0]
+                $events = if ($Global:AlertQueues.ContainsKey($overlayId)) { @($Global:AlertQueues[$overlayId]) } else { @() }
+                if ($Global:AlertQueues.ContainsKey($overlayId)) { $Global:AlertQueues[$overlayId].Clear() }
                 Send-JsonResponse $response $events
                 break
             }
@@ -653,7 +671,10 @@ try {
                 break
             }
             { $request.HttpMethod -eq "POST" -and $request.Url.AbsolutePath -eq "/test-alert" } {
-                $Global:AlertQueue.Add(@{ kind = "follow"; user = "TestViewer"; message = "just followed! (test)" }) | Out-Null
+                # Fired from the Twitch card specifically, so it only
+                # reaches overlays that actually declare "twitch" -- same
+                # scoping rule as every real alert.
+                Push-Alert "twitch" @{ kind = "follow"; user = "TestViewer"; message = "just followed! (test)" }
                 Send-JsonResponse $response @{ ok = $true }
                 break
             }
