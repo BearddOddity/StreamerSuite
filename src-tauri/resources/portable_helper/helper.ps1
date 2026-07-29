@@ -3,8 +3,9 @@
 # Runs entirely on PowerShell + .NET, both already part of Windows -- no
 # separate install needed. Serves this folder's overlay.html (and any other
 # overlay folder that registers with it -- see "Shared helper" below), hosts
-# a local setup page to connect your own Twitch/Kick accounts, and polls
-# those platforms on your behalf so bound fields/alerts stay live.
+# a local setup page to connect your own Twitch/Kick/YouTube/Chaturbate
+# accounts, and polls those platforms on your behalf so bound fields/alerts
+# stay live.
 #
 # Shared helper: if you've been given more than one StreamerSuite overlay,
 # you only ever need ONE of these running at a time. When a second (or
@@ -45,7 +46,13 @@ $Global:TwitchStatus = "disconnected"
 $Global:TwitchError = ""
 $Global:KickStatus = "disconnected"
 $Global:KickError = ""
+$Global:YoutubeStatus = "disconnected"
+$Global:YoutubeError = ""
+$Global:ChaturbateStatus = "disconnected"
+$Global:ChaturbateError = ""
 $Global:LastFollowerId = $null
+$Global:LastYoutubeCycle = $null
+$Global:LastChaturbateStamp = $null
 # Absolute paths of every overlay folder currently being served -- always
 # includes $Here (this folder), plus any other folder that registered with
 # this process.
@@ -144,11 +151,15 @@ function Start-PollLoop {
     # runspace without easy access to the live $Global:RegisteredDirs list.
     Start-Job -ScriptBlock {
         param($CredentialsPath, $StatePath)
+        $youtubeChatPageToken = $null
+        $cycle = 0
         while ($true) {
+            $cycle += 1
             $state = @{
                 twitchStatus = "disconnected"; twitchError = ""
                 kickStatus = "disconnected"; kickError = ""
-                liveData = @{}; newFollow = $null
+                youtubeStatus = "disconnected"; youtubeError = ""
+                liveData = @{}; newFollow = $null; youtubeAlerts = @(); cycle = $cycle
             }
             $creds = @{}
             if (Test-Path $CredentialsPath) {
@@ -210,31 +221,157 @@ function Start-PollLoop {
                 }
             }
 
+            $youtubeApiKey = $creds["youtubeApiKey"]
+            $youtubeChannelId = $creds["youtubeChannelId"]
+            if ($youtubeApiKey -and $youtubeChannelId) {
+                try {
+                    $state.youtubeStatus = "connecting"
+                    $search = Invoke-RestMethod -Uri "https://www.googleapis.com/youtube/v3/search?part=id&channelId=$youtubeChannelId&eventType=live&type=video&key=$youtubeApiKey" -Method Get -TimeoutSec 10
+                    if ($search.items.Count -gt 0) {
+                        $videoId = $search.items[0].id.videoId
+                        $videos = Invoke-RestMethod -Uri "https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=$videoId&key=$youtubeApiKey" -Method Get -TimeoutSec 10
+                        $details = $videos.items[0].liveStreamingDetails
+                        $state.liveData["youtube_viewers"] = if ($details.concurrentViewers) { [int]$details.concurrentViewers } else { 0 }
+                        $state.liveData["youtube_live"] = $true
+
+                        if ($details.activeLiveChatId) {
+                            $chatUrl = "https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=$($details.activeLiveChatId)&part=snippet,authorDetails&key=$youtubeApiKey"
+                            if ($youtubeChatPageToken) { $chatUrl += "&pageToken=$youtubeChatPageToken" }
+                            $chat = Invoke-RestMethod -Uri $chatUrl -Method Get -TimeoutSec 10
+                            $youtubeChatPageToken = $chat.nextPageToken
+                            $state.youtubeAlerts = @()
+                            foreach ($item in $chat.items) {
+                                $author = $item.authorDetails.displayName
+                                if (-not $author) { $author = "Someone" }
+                                if ($item.snippet.type -eq "superChatEvent") {
+                                    $amount = $item.snippet.superChatDetails.amountDisplayString
+                                    $state.youtubeAlerts += @{ kind = "cheer"; user = $author; message = "sent a Super Chat ($amount)!" }
+                                } elseif ($item.snippet.type -eq "newSponsorEvent") {
+                                    $state.youtubeAlerts += @{ kind = "sub"; user = $author; message = "just became a member!" }
+                                }
+                            }
+                        }
+                    } else {
+                        $state.liveData["youtube_viewers"] = 0
+                        $state.liveData["youtube_live"] = $false
+                    }
+                    $state.youtubeStatus = "connected"
+                } catch {
+                    $state.youtubeStatus = "error"
+                    $state.youtubeError = $_.Exception.Message
+                }
+            }
+
             ($state | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
             Start-Sleep -Seconds 30
         }
     } -ArgumentList $CredentialsPath, (Join-Path $Here ".poll-state.json") | Out-Null
 }
 
+function Start-ChaturbateLoop {
+    # Its own job since Chaturbate's Events API is a long-poll (the request
+    # itself blocks server-side for up to ~25s) -- running it in the same
+    # loop as Start-PollLoop would delay Twitch/Kick/YouTube's fixed 30s
+    # cadence by that much every cycle.
+    Start-Job -ScriptBlock {
+        param($CredentialsPath, $StatePath)
+        $nextUrl = $null
+        while ($true) {
+            $state = @{ chaturbateStatus = "disconnected"; chaturbateError = ""; alerts = @() }
+            $creds = @{}
+            if (Test-Path $CredentialsPath) {
+                try {
+                    $obj = Get-Content $CredentialsPath -Raw | ConvertFrom-Json
+                    $obj.PSObject.Properties | ForEach-Object { $creds[$_.Name] = $_.Value }
+                } catch { }
+            }
+            $username = $creds["chaturbateUsername"]
+            $token = $creds["chaturbateToken"]
+            if (-not ($username -and $token)) {
+                ($state | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+                Start-Sleep -Seconds 30
+                continue
+            }
+            try {
+                $state.chaturbateStatus = "connecting"
+                if (-not $nextUrl) {
+                    $nextUrl = "https://eventsapi.chaturbate.com/events/$([uri]::EscapeDataString($username))/$([uri]::EscapeDataString($token))/?timeout=25"
+                }
+                $payload = Invoke-RestMethod -Uri $nextUrl -Method Get -TimeoutSec 30
+                $nextUrl = $payload.nextUrl
+                $state.chaturbateStatus = "connected"
+                foreach ($event in $payload.events) {
+                    if ($event.method -eq "tip") {
+                        $user = $event.object.user.username
+                        if (-not $user) { $user = "Someone" }
+                        $state.alerts += @{ kind = "tip"; user = $user; message = "tipped $($event.object.tip.tokens) tokens!" }
+                    } elseif ($event.method -eq "follow") {
+                        $user = $event.object.user.username
+                        if (-not $user) { $user = "Someone" }
+                        $state.alerts += @{ kind = "follow"; user = $user; message = "just followed!" }
+                    }
+                }
+                ($state | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+            } catch {
+                $state.chaturbateStatus = "error"
+                $state.chaturbateError = $_.Exception.Message
+                $nextUrl = $null
+                ($state | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+                Start-Sleep -Seconds 30
+            }
+        }
+    } -ArgumentList $CredentialsPath, (Join-Path $Here ".chaturbate-state.json") | Out-Null
+}
+
 function Apply-PollState {
     $statePath = Join-Path $Here ".poll-state.json"
-    if (-not (Test-Path $statePath)) { return }
-    try {
-        $s = Get-Content $statePath -Raw | ConvertFrom-Json
-        $Global:TwitchStatus = $s.twitchStatus
-        $Global:TwitchError = $s.twitchError
-        $Global:KickStatus = $s.kickStatus
-        $Global:KickError = $s.kickError
-        if ($s.liveData) {
-            $s.liveData.PSObject.Properties | ForEach-Object { $Global:LiveData[$_.Name] = $_.Value }
-        }
-        if ($s.newFollow -and $s.newFollow.id) {
-            if ($Global:LastFollowerId -and $Global:LastFollowerId -ne $s.newFollow.id) {
-                $Global:AlertQueue.Add(@{ kind = "follow"; user = $s.newFollow.name; message = "just followed!" }) | Out-Null
+    if (Test-Path $statePath) {
+        try {
+            $s = Get-Content $statePath -Raw | ConvertFrom-Json
+            $Global:TwitchStatus = $s.twitchStatus
+            $Global:TwitchError = $s.twitchError
+            $Global:KickStatus = $s.kickStatus
+            $Global:KickError = $s.kickError
+            $Global:YoutubeStatus = $s.youtubeStatus
+            $Global:YoutubeError = $s.youtubeError
+            if ($s.liveData) {
+                $s.liveData.PSObject.Properties | ForEach-Object { $Global:LiveData[$_.Name] = $_.Value }
             }
-            $Global:LastFollowerId = $s.newFollow.id
-        }
-    } catch { }
+            if ($s.newFollow -and $s.newFollow.id) {
+                if ($Global:LastFollowerId -and $Global:LastFollowerId -ne $s.newFollow.id) {
+                    $Global:AlertQueue.Add(@{ kind = "follow"; user = $s.newFollow.name; message = "just followed!" }) | Out-Null
+                }
+                $Global:LastFollowerId = $s.newFollow.id
+            }
+            # This state file gets re-read on every incoming HTTP request (not
+            # on a timer), but the background job only refreshes it every 30s
+            # -- without this cycle check, the same youtubeAlerts batch would
+            # get appended to $Global:AlertQueue once per request instead of
+            # once per actual poll.
+            if ($s.youtubeAlerts -and $s.cycle -ne $Global:LastYoutubeCycle) {
+                foreach ($a in $s.youtubeAlerts) {
+                    $Global:AlertQueue.Add(@{ kind = $a.kind; user = $a.user; message = $a.message }) | Out-Null
+                }
+                $Global:LastYoutubeCycle = $s.cycle
+            }
+        } catch { }
+    }
+
+    $cbStatePath = Join-Path $Here ".chaturbate-state.json"
+    if (Test-Path $cbStatePath) {
+        try {
+            $s = Get-Content $cbStatePath -Raw | ConvertFrom-Json
+            $Global:ChaturbateStatus = $s.chaturbateStatus
+            $Global:ChaturbateError = $s.chaturbateError
+            $stamp = (Get-Item $cbStatePath).LastWriteTimeUtc.Ticks
+            if ($s.alerts -and $stamp -ne $Global:LastChaturbateStamp) {
+                foreach ($a in $s.alerts) {
+                    $Global:AlertQueue.Add(@{ kind = $a.kind; user = $a.user; message = $a.message }) | Out-Null
+                }
+                $Global:LastChaturbateStamp = $stamp
+            }
+        } catch { }
+    }
 }
 
 function Get-OverlayListHtml {
@@ -254,6 +391,10 @@ function Get-SetupPageHtml {
     $twitchToken = if ($creds["twitchToken"]) { $creds["twitchToken"] } else { "" }
     $kickSlug = if ($creds["kickSlug"]) { $creds["kickSlug"] } else { "" }
     $kickToken = if ($creds["kickToken"]) { $creds["kickToken"] } else { "" }
+    $youtubeChannelId = if ($creds["youtubeChannelId"]) { $creds["youtubeChannelId"] } else { "" }
+    $youtubeApiKey = if ($creds["youtubeApiKey"]) { $creds["youtubeApiKey"] } else { "" }
+    $chaturbateUsername = if ($creds["chaturbateUsername"]) { $creds["chaturbateUsername"] } else { "" }
+    $chaturbateToken = if ($creds["chaturbateToken"]) { $creds["chaturbateToken"] } else { "" }
     $overlayListHtml = Get-OverlayListHtml
     return @"
 <!DOCTYPE html>
@@ -316,6 +457,29 @@ function Get-SetupPageHtml {
   </div>
 
   <div class="card">
+    <h3>YouTube <span id="youtube-status" class="status disconnected">checking...</span></h3>
+    <p class="muted">Paste your own YouTube Data API v3 key (free from Google Cloud Console -- no OAuth
+      app needed) and your channel ID. Only works while you have an active live broadcast; gives
+      viewer count plus Super Chat / new membership alerts. Regular chat isn't surfaced.</p>
+    <label>Channel ID</label>
+    <input type="text" id="youtubeChannelId" value="$youtubeChannelId">
+    <label>API Key</label>
+    <input type="password" id="youtubeApiKey" value="$youtubeApiKey">
+    <button onclick="saveCredentials()">Save &amp; Connect</button>
+  </div>
+
+  <div class="card">
+    <h3>Chaturbate <span id="chaturbate-status" class="status disconnected">checking...</span></h3>
+    <p class="muted">Paste your own username and Events API token (generate one at
+      chaturbate.com/statsapi/authtoken/). Gives real tip and follow alerts.</p>
+    <label>Username</label>
+    <input type="text" id="chaturbateUsername" value="$chaturbateUsername">
+    <label>Events API Token</label>
+    <input type="password" id="chaturbateToken" value="$chaturbateToken">
+    <button onclick="saveCredentials()">Save &amp; Connect</button>
+  </div>
+
+  <div class="card">
     <h3>Advanced</h3>
     <label>Port (requires restarting the helper to change)</label>
     <input type="number" id="port" value="$Port" disabled>
@@ -331,20 +495,27 @@ function saveCredentials() {
       twitchToken: document.getElementById("twitchToken").value,
       kickSlug: document.getElementById("kickSlug").value,
       kickToken: document.getElementById("kickToken").value,
+      youtubeChannelId: document.getElementById("youtubeChannelId").value,
+      youtubeApiKey: document.getElementById("youtubeApiKey").value,
+      chaturbateUsername: document.getElementById("chaturbateUsername").value,
+      chaturbateToken: document.getElementById("chaturbateToken").value,
     }),
   }).then(refreshStatus);
 }
 function sendTestAlert() {
   fetch("/test-alert", { method: "POST" });
 }
+function setStatus(id, value) {
+  var el = document.getElementById(id);
+  el.textContent = value;
+  el.className = "status " + value;
+}
 function refreshStatus() {
   fetch("/status").then(function(r) { return r.json(); }).then(function(s) {
-    var t = document.getElementById("twitch-status");
-    t.textContent = s.twitchStatus;
-    t.className = "status " + s.twitchStatus;
-    var k = document.getElementById("kick-status");
-    k.textContent = s.kickStatus;
-    k.className = "status " + s.kickStatus;
+    setStatus("twitch-status", s.twitchStatus);
+    setStatus("kick-status", s.kickStatus);
+    setStatus("youtube-status", s.youtubeStatus);
+    setStatus("chaturbate-status", s.chaturbateStatus);
   }).catch(function() {});
 }
 refreshStatus();
@@ -395,6 +566,7 @@ if (Test-Path $RegisteredDirsPath) {
 Persist-RegisteredDirs
 
 Start-PollLoop
+Start-ChaturbateLoop
 
 $Listener = New-Object System.Net.HttpListener
 $Listener.Prefixes.Add("http://127.0.0.1:$Port/")
@@ -428,6 +600,8 @@ try {
                 Send-JsonResponse $response @{
                     twitchStatus = $Global:TwitchStatus; twitchError = $Global:TwitchError
                     kickStatus = $Global:KickStatus; kickError = $Global:KickError
+                    youtubeStatus = $Global:YoutubeStatus; youtubeError = $Global:YoutubeError
+                    chaturbateStatus = $Global:ChaturbateStatus; chaturbateError = $Global:ChaturbateError
                 }
                 break
             }
@@ -470,6 +644,10 @@ try {
                 if ($body.twitchToken) { $creds["twitchToken"] = $body.twitchToken }
                 if ($body.kickSlug) { $creds["kickSlug"] = $body.kickSlug }
                 if ($body.kickToken) { $creds["kickToken"] = $body.kickToken }
+                if ($body.youtubeChannelId) { $creds["youtubeChannelId"] = $body.youtubeChannelId }
+                if ($body.youtubeApiKey) { $creds["youtubeApiKey"] = $body.youtubeApiKey }
+                if ($body.chaturbateUsername) { $creds["chaturbateUsername"] = $body.chaturbateUsername }
+                if ($body.chaturbateToken) { $creds["chaturbateToken"] = $body.chaturbateToken }
                 Save-Credentials $creds
                 Send-JsonResponse $response @{ ok = $true }
                 break

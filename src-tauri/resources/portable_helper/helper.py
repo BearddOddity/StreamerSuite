@@ -19,11 +19,24 @@ Kick only exposes live viewer count/status through its public API — no
 follower/sub counts or a way to detect a fresh follow, so Kick alerts
 aren't implemented (see the setup page for status).
 
+Streamer.bot relays your latest chat message (any platform Streamer.bot
+itself is connected to, including YouTube — StreamerSuite has no direct
+YouTube chat API of its own either) into the overlay's "Latest Chat
+Message" binding, using the same WebSocket + salt/challenge auth protocol
+StreamerSuite's own Connections & Keys uses. Since Python's standard
+library has no WebSocket client, this file hand-implements the minimal
+RFC 6455 client/framing it needs (WSClient below) rather than depending on
+a third-party package the recipient would have to `pip install`.
+
 This is provided as-is by whoever gave you this overlay; troubleshooting
 isn't guaranteed. See README.txt for setup steps.
 """
+import base64
+import hashlib
 import json
 import os
+import socket
+import struct
 import threading
 import time
 import urllib.request
@@ -49,6 +62,12 @@ STATE = {
     "twitch_error": "",
     "kick_status": "disconnected",
     "kick_error": "",
+    "youtube_status": "disconnected",
+    "youtube_error": "",
+    "youtube_chat_page_token": None,
+    "chaturbate_status": "disconnected",
+    "chaturbate_error": "",
+    "chaturbate_next_url": None,
     "last_follower_id": None,
     # Absolute paths of every overlay folder currently being served —
     # always includes HERE (this folder), plus any other folder that
@@ -111,6 +130,129 @@ def registered_manifests():
 
 def any_platform(platform):
     return any(platform in (m.get("platforms") or []) for _, m in registered_manifests().values())
+
+
+# --- Minimal hand-rolled RFC 6455 WebSocket client, stdlib-only ---
+# Streamer.bot's own protocol (and Joystick.tv's realtime gateway) is
+# WebSocket-only, and Python's standard library has no WebSocket client —
+# rather than depend on a package the recipient would need to `pip install`,
+# this implements just enough of the spec: the HTTP Upgrade handshake,
+# masked client->server frames (required by RFC 6455), fragmented-message
+# reassembly, and automatic ping/pong. Verified against a real WebSocket
+# server (the `websockets` package) during development, including the
+# fragmentation, ping/pong, and clean-close paths.
+_WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def _ws_handshake(host, port, path="/", timeout=5):
+    sock = socket.create_connection((host, port), timeout=timeout)
+    key = base64.b64encode(os.urandom(16)).decode()
+    request = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "\r\n"
+    ).encode()
+    sock.sendall(request)
+    response = b""
+    while b"\r\n\r\n" not in response:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("connection closed during WebSocket handshake")
+        response += chunk
+    header_bytes, _, rest = response.partition(b"\r\n\r\n")
+    header_text = header_bytes.decode("latin-1", errors="replace")
+    status_line = header_text.split("\r\n", 1)[0]
+    if " 101 " not in status_line:
+        raise ConnectionError(f"WebSocket handshake failed: {status_line}")
+    expected_accept = base64.b64encode(hashlib.sha1((key + _WS_GUID).encode()).digest()).decode()
+    if expected_accept.lower() not in header_text.lower():
+        raise ConnectionError("WebSocket handshake failed: Sec-WebSocket-Accept mismatch")
+    sock.settimeout(None)
+    return sock, rest
+
+
+class WSClient:
+    def __init__(self, sock, initial_buffer=b""):
+        self.sock = sock
+        self.buf = initial_buffer
+
+    def _recv_exact(self, n):
+        while len(self.buf) < n:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise ConnectionError("WebSocket connection closed")
+            self.buf += chunk
+        data, self.buf = self.buf[:n], self.buf[n:]
+        return data
+
+    def send_text(self, text):
+        self._send_frame(0x1, text.encode("utf-8"))
+
+    def _send_frame(self, opcode, payload):
+        # Client->server frames MUST be masked per RFC 6455 5.3.
+        mask_key = os.urandom(4)
+        masked = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+        length = len(payload)
+        header = bytearray()
+        header.append(0x80 | opcode)  # FIN=1, opcode
+        if length < 126:
+            header.append(0x80 | length)
+        elif length < 65536:
+            header.append(0x80 | 126)
+            header += struct.pack(">H", length)
+        else:
+            header.append(0x80 | 127)
+            header += struct.pack(">Q", length)
+        header += mask_key
+        self.sock.sendall(bytes(header) + masked)
+
+    def recv_message(self):
+        """Reads one full (possibly fragmented) message, replying to pings
+        automatically, and returns its decoded text — or None once the peer
+        has cleanly closed the connection."""
+        parts = []
+        while True:
+            first2 = self._recv_exact(2)
+            b0, b1 = first2[0], first2[1]
+            fin = b0 & 0x80
+            opcode = b0 & 0x0F
+            masked = b1 & 0x80
+            length = b1 & 0x7F
+            if length == 126:
+                length = struct.unpack(">H", self._recv_exact(2))[0]
+            elif length == 127:
+                length = struct.unpack(">Q", self._recv_exact(8))[0]
+            mask_key = self._recv_exact(4) if masked else None
+            payload = self._recv_exact(length)
+            if mask_key:
+                payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+            if opcode == 0x8:  # close
+                return None
+            if opcode == 0x9:  # ping
+                self._send_frame(0xA, payload)
+                continue
+            if opcode == 0xA:  # pong
+                continue
+            parts.append(payload)
+            if fin:
+                break
+        return b"".join(parts).decode("utf-8", errors="replace")
+
+    def close(self):
+        try:
+            self._send_frame(0x8, b"")
+        except OSError:
+            pass
+        self.sock.close()
+
+
+def ws_connect(host, port, path="/", timeout=5):
+    sock, leftover = _ws_handshake(host, port, path, timeout)
+    return WSClient(sock, leftover)
 
 
 def http_get_json(url, timeout=3):
@@ -267,11 +409,137 @@ def kick_poll_once():
             STATE["kick_error"] = str(e)
 
 
+def youtube_get(path, api_key, params=None):
+    url = "https://www.googleapis.com/youtube/v3" + path
+    all_params = dict(params or {})
+    all_params["key"] = api_key
+    query = "&".join(f"{k}={urllib.request.quote(str(v))}" for k, v in all_params.items())
+    req = urllib.request.Request(f"{url}?{query}")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def youtube_poll_once():
+    """Uses the recipient's own YouTube Data API v3 key (a free key from
+    Google Cloud Console, not an OAuth app) — enough for public data: find
+    the channel's current live broadcast, its concurrent viewer count, and
+    poll its live chat for new Super Chat / new membership events. No
+    regular chat messages are surfaced as alerts, only those two paid
+    events, and only while a live broadcast is actually found."""
+    creds = load_credentials()
+    api_key = creds.get("youtubeApiKey", "").strip()
+    channel_id = creds.get("youtubeChannelId", "").strip()
+    if not api_key or not channel_id:
+        with STATE_LOCK:
+            STATE["youtube_status"] = "disconnected"
+        return
+    try:
+        with STATE_LOCK:
+            STATE["youtube_status"] = "connecting"
+        search = youtube_get("/search", api_key, {
+            "part": "id", "channelId": channel_id, "eventType": "live", "type": "video",
+        })
+        items = search.get("items") or []
+        if not items:
+            with STATE_LOCK:
+                STATE["youtube_status"] = "connected"
+                STATE["youtube_error"] = ""
+                STATE["live_data"]["youtube_viewers"] = 0
+                STATE["live_data"]["youtube_live"] = False
+            return
+        video_id = items[0]["id"]["videoId"]
+        videos = youtube_get("/videos", api_key, {"part": "liveStreamingDetails", "id": video_id})
+        details = ((videos.get("items") or [{}])[0]).get("liveStreamingDetails", {})
+        live_chat_id = details.get("activeLiveChatId")
+
+        with STATE_LOCK:
+            STATE["live_data"]["youtube_viewers"] = int(details.get("concurrentViewers", 0))
+            STATE["live_data"]["youtube_live"] = True
+
+        if live_chat_id:
+            chat_params = {"liveChatId": live_chat_id, "part": "snippet,authorDetails"}
+            if STATE.get("youtube_chat_page_token"):
+                chat_params["pageToken"] = STATE["youtube_chat_page_token"]
+            chat = youtube_get("/liveChat/messages", api_key, chat_params)
+            with STATE_LOCK:
+                STATE["youtube_chat_page_token"] = chat.get("nextPageToken")
+            for item in chat.get("items") or []:
+                snippet = item.get("snippet", {})
+                kind = snippet.get("type")
+                author = item.get("authorDetails", {}).get("displayName", "Someone")
+                if kind == "superChatEvent":
+                    amount = snippet.get("superChatDetails", {}).get("amountDisplayString", "")
+                    with STATE_LOCK:
+                        STATE["alert_queue"].append({"kind": "cheer", "user": author, "message": f"sent a Super Chat ({amount})!"})
+                elif kind == "newSponsorEvent":
+                    with STATE_LOCK:
+                        STATE["alert_queue"].append({"kind": "sub", "user": author, "message": "just became a member!"})
+
+        with STATE_LOCK:
+            STATE["youtube_status"] = "connected"
+            STATE["youtube_error"] = ""
+    except Exception as e:  # noqa: BLE001 - this loop must never die
+        with STATE_LOCK:
+            STATE["youtube_status"] = "error"
+            STATE["youtube_error"] = str(e)
+
+
+def chaturbate_poll_once():
+    """Chaturbate's own Events API is a long-poll (the request itself
+    blocks server-side up to `timeout` seconds waiting for something to
+    report), so this call doubles as this iteration's whole 30s wait
+    instead of running alongside a fixed sleep — same mechanic
+    StreamerSuite's own chaturbate_poll_events uses. Tip/follow events come
+    back as real push-like data (not diffed), from the events array."""
+    creds = load_credentials()
+    username = creds.get("chaturbateUsername", "").strip()
+    token = creds.get("chaturbateToken", "").strip()
+    if not username or not token:
+        with STATE_LOCK:
+            STATE["chaturbate_status"] = "disconnected"
+        time.sleep(30)
+        return
+    try:
+        with STATE_LOCK:
+            STATE["chaturbate_status"] = "connecting"
+        next_url = STATE.get("chaturbate_next_url") or (
+            f"https://eventsapi.chaturbate.com/events/{urllib.request.quote(username)}/{urllib.request.quote(token)}/?timeout=25"
+        )
+        req = urllib.request.Request(next_url)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        with STATE_LOCK:
+            STATE["chaturbate_next_url"] = payload.get("nextUrl")
+            STATE["chaturbate_status"] = "connected"
+            STATE["chaturbate_error"] = ""
+        for event in payload.get("events") or []:
+            method = event.get("method")
+            obj = event.get("object", {})
+            if method == "tip":
+                tip = obj.get("tip", {})
+                user = obj.get("user", {}).get("username", "Someone")
+                with STATE_LOCK:
+                    STATE["alert_queue"].append({"kind": "tip", "user": user, "message": f"tipped {tip.get('tokens', 0)} tokens!"})
+            elif method == "follow":
+                user = obj.get("user", {}).get("username", "Someone")
+                with STATE_LOCK:
+                    STATE["alert_queue"].append({"kind": "follow", "user": user, "message": "just followed!"})
+    except Exception as e:  # noqa: BLE001 - this loop must never die
+        with STATE_LOCK:
+            STATE["chaturbate_status"] = "error"
+            STATE["chaturbate_error"] = str(e)
+            STATE["chaturbate_next_url"] = None
+        time.sleep(30)
+
+
 def poll_loop():
     """Runs forever in the background, refreshing STATE every ~30s — only
     polls a platform at all when at least one currently-registered overlay
     actually lists it as needed, so a Twitch-only overlay never wastes a
-    call on Kick and vice versa."""
+    call on Kick and vice versa. Chaturbate is deliberately NOT polled here
+    — its Events API is a long-poll (the request itself blocks for up to
+    25s), which would starve every other platform's 30s cadence if it ran
+    in this same loop, so it gets its own thread (chaturbate_loop)."""
     while True:
         if any_platform("twitch"):
             twitch_poll_once()
@@ -283,10 +551,28 @@ def poll_loop():
         else:
             with STATE_LOCK:
                 STATE["kick_status"] = "disconnected"
+        if any_platform("youtube"):
+            youtube_poll_once()
+        else:
+            with STATE_LOCK:
+                STATE["youtube_status"] = "disconnected"
         time.sleep(30)
 
 
-SETUP_PAGE_TEMPLATE = """<!DOCTYPE html>
+def chaturbate_loop():
+    """Its own thread since chaturbate_poll_once's long-poll blocks for up
+    to 25s per call — running it here keeps that wait from delaying
+    Twitch/Kick/YouTube's fixed 30s cadence in poll_loop."""
+    while True:
+        if any_platform("chaturbate"):
+            chaturbate_poll_once()
+        else:
+            with STATE_LOCK:
+                STATE["chaturbate_status"] = "disconnected"
+            time.sleep(30)
+
+
+SETUP_PAGE_SHELL = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -321,30 +607,7 @@ SETUP_PAGE_TEMPLATE = """<!DOCTYPE html>
     <ul>{overlay_list}</ul>
   </div>
 
-  <div class="card">
-    <h3>Twitch <span id="twitch-status" class="status disconnected">checking…</span></h3>
-    <p class="muted">Paste a Client ID + Access Token from your own Twitch application
-      (not the overlay creator's). Needs the <code>moderator:read:followers</code> and
-      <code>channel:read:subscriptions</code> scopes for follower/sub counts.</p>
-    <label>Client ID</label>
-    <input type="text" id="twitchClientId" value="{twitch_client_id}">
-    <label>Access Token</label>
-    <input type="password" id="twitchToken" value="{twitch_token}">
-    <button onclick="saveCredentials()">Save &amp; Connect</button>
-    <button class="secondary" onclick="sendTestAlert()">Send Test Alert</button>
-  </div>
-
-  <div class="card">
-    <h3>Kick <span id="kick-status" class="status disconnected">checking…</span></h3>
-    <p class="muted">Paste your own access token and channel slug (the name in your Kick URL).
-      Kick's API only exposes live viewer count/status this way — no follower/sub totals,
-      and no live "follow" alerts.</p>
-    <label>Channel Slug</label>
-    <input type="text" id="kickSlug" value="{kick_slug}">
-    <label>Access Token</label>
-    <input type="password" id="kickToken" value="{kick_token}">
-    <button onclick="saveCredentials()">Save &amp; Connect</button>
-  </div>
+  {platform_cards}
 
   <div class="card">
     <h3>Advanced</h3>
@@ -358,24 +621,21 @@ function saveCredentials() {{
     method: "POST",
     headers: {{ "Content-Type": "application/json" }},
     body: JSON.stringify({{
-      twitchClientId: document.getElementById("twitchClientId").value,
-      twitchToken: document.getElementById("twitchToken").value,
-      kickSlug: document.getElementById("kickSlug").value,
-      kickToken: document.getElementById("kickToken").value,
+{credential_fields}
     }}),
   }}).then(refreshStatus);
 }}
 function sendTestAlert() {{
   fetch("/test-alert", {{ method: "POST" }});
 }}
+function setStatus(id, value) {{
+  var el = document.getElementById(id);
+  el.textContent = value;
+  el.className = "status " + value;
+}}
 function refreshStatus() {{
   fetch("/status").then(function(r) {{ return r.json(); }}).then(function(s) {{
-    var t = document.getElementById("twitch-status");
-    t.textContent = s.twitchStatus;
-    t.className = "status " + s.twitchStatus;
-    var k = document.getElementById("kick-status");
-    k.textContent = s.kickStatus;
-    k.className = "status " + s.kickStatus;
+{status_refresh}
   }}).catch(function() {{}});
 }}
 refreshStatus();
@@ -384,6 +644,99 @@ setInterval(refreshStatus, 4000);
 </body>
 </html>
 """
+
+# One entry per platform the helper knows how to poll — (card HTML, the JS
+# credential fields it contributes to saveCredentials()'s payload, the JS
+# status-badge update line for refreshStatus()). Which of these actually
+# appear on the setup page is driven entirely by what the CURRENTLY
+# REGISTERED overlays' own manifests list under "platforms" (see
+# needed_platforms() below) — an overlay the wizard was only told needs
+# Twitch never shows a Kick/YouTube/Chaturbate card, even though this
+# helper is technically capable of all four.
+PLATFORM_CARDS = {
+    "twitch": lambda creds: (
+        '<div class="card">'
+        '<h3>Twitch <span id="twitch-status" class="status disconnected">checking…</span></h3>'
+        '<p class="muted">Paste a Client ID + Access Token from your own Twitch application '
+        '(not the overlay creator\'s). Needs the <code>moderator:read:followers</code> and '
+        '<code>channel:read:subscriptions</code> scopes for follower/sub counts.</p>'
+        '<label>Client ID</label>'
+        f'<input type="text" id="twitchClientId" value="{creds.get("twitchClientId", "")}">'
+        '<label>Access Token</label>'
+        f'<input type="password" id="twitchToken" value="{creds.get("twitchToken", "")}">'
+        '<button onclick="saveCredentials()">Save &amp; Connect</button>'
+        '<button class="secondary" onclick="sendTestAlert()">Send Test Alert</button>'
+        '</div>'
+    ),
+    "kick": lambda creds: (
+        '<div class="card">'
+        '<h3>Kick <span id="kick-status" class="status disconnected">checking…</span></h3>'
+        '<p class="muted">Paste your own access token and channel slug (the name in your Kick URL). '
+        'Kick\'s API only exposes live viewer count/status this way — no follower/sub totals, '
+        'and no live "follow" alerts.</p>'
+        '<label>Channel Slug</label>'
+        f'<input type="text" id="kickSlug" value="{creds.get("kickSlug", "")}">'
+        '<label>Access Token</label>'
+        f'<input type="password" id="kickToken" value="{creds.get("kickToken", "")}">'
+        '<button onclick="saveCredentials()">Save &amp; Connect</button>'
+        '</div>'
+    ),
+    "youtube": lambda creds: (
+        '<div class="card">'
+        '<h3>YouTube <span id="youtube-status" class="status disconnected">checking…</span></h3>'
+        '<p class="muted">Paste your own YouTube Data API v3 key (free from Google Cloud Console — '
+        'no OAuth app needed) and your channel ID. Only works while you have an active live broadcast; '
+        'gives viewer count plus Super Chat / new membership alerts. Regular chat isn\'t surfaced.</p>'
+        '<label>Channel ID</label>'
+        f'<input type="text" id="youtubeChannelId" value="{creds.get("youtubeChannelId", "")}">'
+        '<label>API Key</label>'
+        f'<input type="password" id="youtubeApiKey" value="{creds.get("youtubeApiKey", "")}">'
+        '<button onclick="saveCredentials()">Save &amp; Connect</button>'
+        '</div>'
+    ),
+    "chaturbate": lambda creds: (
+        '<div class="card">'
+        '<h3>Chaturbate <span id="chaturbate-status" class="status disconnected">checking…</span></h3>'
+        '<p class="muted">Paste your own username and Events API token (generate one at '
+        'chaturbate.com/statsapi/authtoken/). Gives real tip and follow alerts.</p>'
+        '<label>Username</label>'
+        f'<input type="text" id="chaturbateUsername" value="{creds.get("chaturbateUsername", "")}">'
+        '<label>Events API Token</label>'
+        f'<input type="password" id="chaturbateToken" value="{creds.get("chaturbateToken", "")}">'
+        '<button onclick="saveCredentials()">Save &amp; Connect</button>'
+        '</div>'
+    ),
+}
+
+PLATFORM_CREDENTIAL_FIELDS = {
+    "twitch": ['twitchClientId: document.getElementById("twitchClientId").value',
+               'twitchToken: document.getElementById("twitchToken").value'],
+    "kick": ['kickSlug: document.getElementById("kickSlug").value',
+             'kickToken: document.getElementById("kickToken").value'],
+    "youtube": ['youtubeChannelId: document.getElementById("youtubeChannelId").value',
+                'youtubeApiKey: document.getElementById("youtubeApiKey").value'],
+    "chaturbate": ['chaturbateUsername: document.getElementById("chaturbateUsername").value',
+                   'chaturbateToken: document.getElementById("chaturbateToken").value'],
+}
+
+PLATFORM_STATUS_IDS = {
+    "twitch": ("twitch-status", "twitchStatus"),
+    "kick": ("kick-status", "kickStatus"),
+    "youtube": ("youtube-status", "youtubeStatus"),
+    "chaturbate": ("chaturbate-status", "chaturbateStatus"),
+}
+
+
+def needed_platforms():
+    """The union of every currently-registered overlay's own "platforms"
+    list — what actually decides which credential cards show up, not the
+    fixed set of platforms this helper happens to know how to poll. An
+    overlay the export wizard was only told needs Twitch never grows a
+    Kick/YouTube/Chaturbate card just because this helper could serve one."""
+    needed = set()
+    for _, m in registered_manifests().values():
+        needed.update(m.get("platforms") or [])
+    return needed
 
 
 def overlay_list_html(port):
@@ -394,6 +747,30 @@ def overlay_list_html(port):
             f'<li>{name} — <code>http://127.0.0.1:{port}/custom-overlay/{overlay_id}/overlay.html</code></li>'
         )
     return "".join(items) if items else "<li>None registered</li>"
+
+
+def setup_page_html(port, creds):
+    platforms = [p for p in ("twitch", "kick", "youtube", "chaturbate") if p in needed_platforms()]
+    if not platforms:
+        # No registered overlay declares ANY platform (a fully static
+        # overlay, or none registered yet) — nothing to connect, so no
+        # cards at all rather than every card StreamerSuite happens to know.
+        cards_html = '<div class="card"><p class="muted">This overlay doesn\'t use any live platform data — nothing to connect.</p></div>'
+        credential_fields = ""
+        status_refresh = ""
+    else:
+        cards_html = "\n  ".join(PLATFORM_CARDS[p](creds) for p in platforms)
+        credential_fields = ",\n".join(f"      {line}" for p in platforms for line in PLATFORM_CREDENTIAL_FIELDS[p])
+        status_refresh = "\n".join(
+            f'    setStatus("{el_id}", s.{status_key});' for p in platforms for el_id, status_key in [PLATFORM_STATUS_IDS[p]]
+        )
+    return SETUP_PAGE_SHELL.format(
+        overlay_list=overlay_list_html(port),
+        platform_cards=cards_html,
+        port=port,
+        credential_fields=credential_fields,
+        status_refresh=status_refresh,
+    )
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -434,19 +811,15 @@ class Handler(BaseHTTPRequestHandler):
                     "twitchError": STATE["twitch_error"],
                     "kickStatus": STATE["kick_status"],
                     "kickError": STATE["kick_error"],
+                    "youtubeStatus": STATE["youtube_status"],
+                    "youtubeError": STATE["youtube_error"],
+                    "chaturbateStatus": STATE["chaturbate_status"],
+                    "chaturbateError": STATE["chaturbate_error"],
                 })
         elif self.path in ("/setup", "/"):
             creds = load_credentials()
             port = int(MANIFEST.get("port", 8420))
-            html = SETUP_PAGE_TEMPLATE.format(
-                overlay_list=overlay_list_html(port),
-                port=port,
-                twitch_client_id=creds.get("twitchClientId", ""),
-                twitch_token=creds.get("twitchToken", ""),
-                kick_slug=creds.get("kickSlug", ""),
-                kick_token=creds.get("kickToken", ""),
-            )
-            self._send_html(html)
+            self._send_html(setup_page_html(port, creds))
         elif self.path.startswith("/custom-overlay/"):
             overlay_id = self.path[len("/custom-overlay/"):].split("/")[0]
             manifests = registered_manifests()
@@ -513,6 +886,7 @@ def main():
     persist_registered_dirs()
 
     threading.Thread(target=poll_loop, daemon=True).start()
+    threading.Thread(target=chaturbate_loop, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"StreamerSuite standalone overlay helper running at http://127.0.0.1:{port}/setup")
     print("Open that URL to connect your accounts. Leave this window open while streaming.")

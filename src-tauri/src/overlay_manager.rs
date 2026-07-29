@@ -2854,6 +2854,8 @@ pub(crate) fn overlay_export_detect_requirements(file: String, kind: String) -> 
 pub(crate) struct ExportOptions {
     include_twitch: bool,
     include_kick: bool,
+    include_youtube: bool,
+    include_chaturbate: bool,
     customize_color: bool,
     customize_font: bool,
     customize_text: bool,
@@ -3088,6 +3090,12 @@ pub(crate) fn overlay_export_standalone(
     }
     if options.include_kick {
         platforms.push("kick".to_string());
+    }
+    if options.include_youtube {
+        platforms.push("youtube".to_string());
+    }
+    if options.include_chaturbate {
+        platforms.push("chaturbate".to_string());
     }
 
     let overlay_id = stem_of(&file).to_string();
