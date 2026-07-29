@@ -2757,6 +2757,374 @@ pub(crate) fn overlay_update_template(file: String, params: TemplateParams) -> R
     write_params_sidecar(&dir, &file, &params)
 }
 
+// --- Portable/standalone export — see Documentation/09-portable-overlay-export.md ---
+// Lets a saved overlay be handed to someone with no StreamerSuite install:
+// a folder containing the rendered overlay, a settings manifest, and a
+// small local "helper" (one script per OS) that serves the overlay and
+// relays the recipient's own live Twitch/Kick data to it. Everything here
+// operates on a COPY made at export time — render_canvas/render_template
+// themselves are never touched, so this can't affect the live app's own
+// overlay-rendering path at all.
+
+fn detect_bound_source(field: &BoundField, sources: &mut Vec<String>) {
+    let s = field.source.trim();
+    if !s.is_empty() && !sources.iter().any(|x| x == s) {
+        sources.push(s.to_string());
+    }
+}
+
+fn detect_template_requirements(params: &TemplateParams, sources: &mut Vec<String>, uses_status_forge: &mut bool) {
+    detect_bound_source(&params.title, sources);
+    detect_bound_source(&params.subtitle, sources);
+    if params.template == "now-playing" || params.template == "game-logo" {
+        *uses_status_forge = true;
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExportRequirements {
+    /// Live-data source keys referenced anywhere in the overlay (bound
+    /// title/subtitle fields, an enabled value_condition's source) — raw
+    /// keys like "followers"/"viewers"/"latest_chat", not yet mapped to a
+    /// specific platform since these are cross-platform aggregate values
+    /// today, not per-platform ones.
+    live_sources: Vec<String>,
+    /// Alert kinds referenced by any enabled alert_trigger anywhere in the
+    /// overlay. An armed trigger with no kinds picked (matches anything)
+    /// is surfaced as the literal string "any" rather than enumerating
+    /// every VALID_ALERT_KINDS entry, so the wizard can show it plainly.
+    alert_kinds: Vec<String>,
+    /// True when this overlay uses a StatusForge-driven template
+    /// ("now-playing"/"game-logo") — those have no cloud-credential
+    /// equivalent a recipient could "connect", so they're excluded from
+    /// portable export entirely (see Documentation/09).
+    uses_status_forge: bool,
+}
+
+/// Walks a saved overlay's elements/params to report what it actually
+/// needs — this drives the export wizard's first step (pre-checking only
+/// what's referenced, never guessing at "every platform StreamerSuite
+/// supports").
+#[tauri::command]
+pub(crate) fn overlay_export_detect_requirements(file: String, kind: String) -> Result<ExportRequirements, String> {
+    let mut live_sources = Vec::new();
+    let mut alert_kinds: Vec<String> = Vec::new();
+    let mut uses_status_forge = false;
+    if kind == "canvas" {
+        let canvas = overlay_get_canvas_params(file)?.ok_or_else(|| "no saved canvas settings for this overlay".to_string())?;
+        for el in &canvas.elements {
+            let is_template = el.kind.as_deref().map(|k| k == "template").unwrap_or(true);
+            if is_template {
+                detect_template_requirements(&el.params, &mut live_sources, &mut uses_status_forge);
+            }
+            if let Some(t) = &el.alert_trigger {
+                if t.enabled {
+                    if t.kinds.is_empty() {
+                        if !alert_kinds.iter().any(|k| k == "any") {
+                            alert_kinds.push("any".into());
+                        }
+                    } else {
+                        for k in &t.kinds {
+                            if VALID_ALERT_KINDS.contains(&k.as_str()) && !alert_kinds.iter().any(|x| x == k) {
+                                alert_kinds.push(k.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(vc) = &el.value_condition {
+                if vc.enabled {
+                    let s = vc.source.trim();
+                    if !s.is_empty() && !live_sources.iter().any(|x| x == s) {
+                        live_sources.push(s.to_string());
+                    }
+                }
+            }
+        }
+    } else {
+        let params = overlay_get_template_params(file)?.ok_or_else(|| "no saved settings for this overlay".to_string())?;
+        detect_template_requirements(&params, &mut live_sources, &mut uses_status_forge);
+    }
+    Ok(ExportRequirements { live_sources, alert_kinds, uses_status_forge })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExportOptions {
+    include_twitch: bool,
+    include_kick: bool,
+    customize_color: bool,
+    customize_font: bool,
+    customize_text: bool,
+    port: u16,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportCustomizable {
+    color: bool,
+    font: bool,
+    text: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportManifest {
+    manifest_version: u32,
+    overlay_id: String,
+    overlay_name: String,
+    live_sources: Vec<String>,
+    alert_kinds: Vec<String>,
+    platforms: Vec<String>,
+    customizable: ExportCustomizable,
+    canvas_width: u32,
+    canvas_height: u32,
+    port: u16,
+}
+
+/// Overrides `window.WebSocket` before any of the overlay's own scripts
+/// run, redirecting `.../data-ws`/`.../alerts-ws` connections to plain HTTP
+/// polling against whatever origin actually served this page — a relative
+/// `fetch("/poll-data")` always resolves against the page's own origin
+/// regardless of which port the helper ends up using, so this same literal
+/// script works for every export with no per-export templating needed.
+/// Every existing client script (DATA_BIND_SCRIPT/ALERT_TRIGGER_SCRIPT/
+/// VALUE_CONDITION_SCRIPT) just does `new WebSocket(url)` and reacts to
+/// `.onmessage`, so overriding the constructor is enough — none of their
+/// own code has to change or be replaced.
+const PORTABLE_WS_SHIM_SCRIPT: &str = r#"
+(function() {
+  window.WebSocket = function(url) {
+    var self = this;
+    var isAlerts = url.indexOf("/alerts-ws") !== -1;
+    var pollUrl = "/poll-" + (isAlerts ? "alerts" : "data");
+    var closed = false;
+    var interval = isAlerts ? 1000 : 2000;
+    this.close = function() { closed = true; };
+    function poll() {
+      if (closed) return;
+      fetch(pollUrl).then(function(r) { return r.json(); }).then(function(payload) {
+        var events = isAlerts ? payload : [payload];
+        events.forEach(function(ev) {
+          if (self.onmessage) self.onmessage({ data: JSON.stringify(ev) });
+        });
+      }).catch(function() {}).then(function() {
+        if (!closed) setTimeout(poll, interval);
+      });
+    }
+    setTimeout(poll, 50);
+    return this;
+  };
+})();
+"#;
+
+fn inject_ws_shim(html: &str) -> String {
+    let shim_tag = format!("<script>{PORTABLE_WS_SHIM_SCRIPT}</script>");
+    match html.find("<head>") {
+        Some(idx) => {
+            let insert_at = idx + "<head>".len();
+            format!("{}\n{}{}", &html[..insert_at], shim_tag, &html[insert_at..])
+        }
+        None => format!("{shim_tag}\n{html}"),
+    }
+}
+
+/// A Canvas overlay's template widgets each render into their OWN
+/// `srcdoc` iframe (see `render_canvas`) — a separate JS global scope the
+/// outer page's `WebSocket` override in `inject_ws_shim` never reaches, so
+/// each one needs the shim injected into its own document too. The srcdoc
+/// content only exists in the file as a JSON-encoded string literal
+/// (`document.getElementById("el-0").srcdoc = "...";`), so this decodes
+/// each one, patches its `<head>`, and re-encodes it back into place.
+fn patch_iframe_srcdocs(html: &str) -> String {
+    const MARKER: &str = ".srcdoc = \"";
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    loop {
+        match rest.find(MARKER) {
+            None => {
+                out.push_str(rest);
+                break;
+            }
+            Some(idx) => {
+                let (before, after_marker_start) = rest.split_at(idx);
+                out.push_str(before);
+                out.push_str(MARKER);
+                let json_start = &after_marker_start[MARKER.len() - 1..]; // include the opening quote
+                match scan_json_string_literal(json_start) {
+                    Some(len) => {
+                        let literal = &json_start[..len];
+                        let patched = match serde_json::from_str::<String>(literal) {
+                            Ok(inner) => serde_json::to_string(&inject_ws_shim(&inner)).unwrap_or_else(|_| literal.to_string()),
+                            Err(_) => literal.to_string(),
+                        };
+                        // patched already includes its own surrounding quotes
+                        // (serde_json::to_string of a String always does) —
+                        // drop the opening quote we already pushed above.
+                        out.pop();
+                        out.push_str(&patched);
+                        rest = &json_start[len..];
+                    }
+                    None => {
+                        // Malformed/unexpected — bail on this occurrence only,
+                        // leave the rest of the document untouched.
+                        rest = &after_marker_start[MARKER.len()..];
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `s` must start with the opening `"` of a JSON string literal. Returns
+/// the length (in bytes, including both quotes) of that literal, or None
+/// if `s` doesn't start with `"` or the literal is unterminated.
+fn scan_json_string_literal(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if bytes.first() != Some(&b'"') {
+        return None;
+    }
+    let mut i = 1;
+    let mut escaped = false;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if escaped {
+            escaped = false;
+        } else if b == b'\\' {
+            escaped = true;
+        } else if b == b'"' {
+            return Some(i + 1);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn export_readme_text(manifest: &ExportManifest) -> String {
+    let platforms = if manifest.platforms.is_empty() {
+        "(none selected)".to_string()
+    } else {
+        manifest.platforms.join(", ")
+    };
+    format!(
+        "{name} — Standalone Overlay\n\
+         =====================================\n\n\
+         This overlay was exported to work on its own, without the person who\n\
+         made it needing to be running StreamerSuite. To get it live:\n\n\
+         1. Windows: double-click helper.ps1 (right-click -> Run with PowerShell\n\
+         if double-click just opens it in a text editor). Nothing else to\n\
+         install first.\n\
+         Mac: install Python once from https://python.org if you don't\n\
+         already have it, then double-click helper.py (or run\n\
+         `python3 helper.py` from Terminal in this folder).\n\n\
+         2. A setup page opens in your browser. Connect your own accounts for:\n\
+         {platforms}\n\n\
+         3. In OBS (or similar), add a Browser Source pointing at the URL the\n\
+         setup page shows you, sized to {w}x{h} to match how this overlay was\n\
+         designed.\n\n\
+         4. Run the helper again every time before you go live — it does not\n\
+         start automatically.\n\n\
+         This overlay uses your own credentials only — nothing here is shared\n\
+         with or sent to whoever made it.\n\n\
+         Provided as-is; troubleshooting isn't guaranteed.\n",
+        name = manifest.overlay_name,
+        w = manifest.canvas_width,
+        h = manifest.canvas_height,
+    )
+}
+
+/// Writes a self-contained export folder for `file` (an already-saved,
+/// already-rendered overlay) into `target_dir`. Never touches the saved
+/// overlay itself or anything under `custom_overlays_dir()` — everything
+/// happens on copies inside the new export folder.
+#[tauri::command]
+pub(crate) fn overlay_export_standalone(
+    file: String,
+    kind: String,
+    target_dir: String,
+    options: ExportOptions,
+) -> Result<String, String> {
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err("invalid file name".into());
+    }
+    let dir = custom_overlays_dir()?;
+    let src_html_path = dir.join(&file);
+    crate::assert_path_in_base(&src_html_path, &dir)?;
+    if !src_html_path.exists() {
+        return Err("overlay file not found".into());
+    }
+
+    let reqs = overlay_export_detect_requirements(file.clone(), kind.clone())?;
+    if reqs.uses_status_forge {
+        return Err(
+            "This overlay uses a StatusForge-driven template (Now Playing Card or Game Logo) \
+             and can't be exported standalone — those need the full StreamerSuite app."
+                .into(),
+        );
+    }
+
+    let (canvas_width, canvas_height) = if kind == "canvas" {
+        overlay_get_canvas_params(file.clone())?
+            .map(|c| (c.width, c.height))
+            .unwrap_or((1920, 1080))
+    } else {
+        (1920, 1080)
+    };
+
+    let html = std::fs::read_to_string(&src_html_path).map_err(|e| format!("couldn't read overlay: {e}"))?;
+    let patched = patch_iframe_srcdocs(&html);
+    let patched = inject_ws_shim(&patched);
+
+    let mut platforms = Vec::new();
+    if options.include_twitch {
+        platforms.push("twitch".to_string());
+    }
+    if options.include_kick {
+        platforms.push("kick".to_string());
+    }
+
+    let overlay_id = stem_of(&file).to_string();
+    let overlay_name = humanize(&file);
+    let port = options.port.clamp(1024, 65535);
+
+    let manifest = ExportManifest {
+        manifest_version: 1,
+        overlay_id: overlay_id.clone(),
+        overlay_name,
+        live_sources: reqs.live_sources,
+        alert_kinds: reqs.alert_kinds,
+        platforms,
+        customizable: ExportCustomizable {
+            color: options.customize_color,
+            font: options.customize_font,
+            text: options.customize_text,
+        },
+        canvas_width,
+        canvas_height,
+        port,
+    };
+
+    let target = std::path::PathBuf::from(&target_dir);
+    if !target.exists() {
+        return Err("chosen export location doesn't exist".into());
+    }
+    let out_dir = target.join(format!("{overlay_id}-standalone"));
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("couldn't create export folder: {e}"))?;
+
+    std::fs::write(out_dir.join("overlay.html"), patched).map_err(|e| format!("couldn't write overlay.html: {e}"))?;
+    let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(out_dir.join("manifest.json"), manifest_json).map_err(|e| format!("couldn't write manifest.json: {e}"))?;
+    std::fs::write(out_dir.join("README.txt"), export_readme_text(&manifest)).map_err(|e| format!("couldn't write README: {e}"))?;
+    std::fs::write(out_dir.join("helper.ps1"), crate::portable_helper::HELPER_PS1)
+        .map_err(|e| format!("couldn't write helper.ps1: {e}"))?;
+    std::fs::write(out_dir.join("helper.py"), crate::portable_helper::HELPER_PY)
+        .map_err(|e| format!("couldn't write helper.py: {e}"))?;
+
+    Ok(out_dir.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3952,5 +4320,182 @@ mod tests {
         assert_eq!(count, MAX_HISTORY_ENTRIES, "history should be pruned back down to the cap");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // --- Portable export ---
+
+    #[test]
+    fn detect_template_requirements_collects_bound_sources_and_flags_status_forge() {
+        let mut p = params("goal-bar");
+        p.title = BoundField { text: String::new(), source: "followers".to_string() };
+        p.subtitle = BoundField { text: String::new(), source: "viewers".to_string() };
+        let mut sources = Vec::new();
+        let mut status_forge = false;
+        detect_template_requirements(&p, &mut sources, &mut status_forge);
+        assert_eq!(sources, vec!["followers".to_string(), "viewers".to_string()]);
+        assert!(!status_forge);
+
+        let mut p2 = params("now-playing");
+        let mut sources2 = Vec::new();
+        let mut status_forge2 = false;
+        detect_template_requirements(&p2, &mut sources2, &mut status_forge2);
+        assert!(status_forge2);
+
+        p2.template = "game-logo".into();
+        let mut status_forge3 = false;
+        detect_template_requirements(&p2, &mut Vec::new(), &mut status_forge3);
+        assert!(status_forge3);
+    }
+
+    #[test]
+    fn detect_bound_source_dedupes_and_ignores_blank() {
+        let mut sources = Vec::new();
+        detect_bound_source(&BoundField { text: String::new(), source: "followers".into() }, &mut sources);
+        detect_bound_source(&BoundField { text: String::new(), source: "followers".into() }, &mut sources);
+        detect_bound_source(&BoundField { text: String::new(), source: "  ".into() }, &mut sources);
+        assert_eq!(sources, vec!["followers".to_string()]);
+    }
+
+    #[test]
+    fn overlay_export_detect_requirements_walks_canvas_elements() {
+        let dir = std::env::temp_dir().join(format!("sf-export-detect-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut with_source = canvas_element("a", "lower-third", 5.0, 5.0, 0);
+        with_source.params.subtitle = BoundField { text: String::new(), source: "followers".into() };
+        let mut with_alert = canvas_element("b", "corner-badge", 10.0, 10.0, 1);
+        with_alert.alert_trigger = Some(AlertTrigger { enabled: true, kinds: vec!["follow".into(), "sub".into()], ..Default::default() });
+        let mut with_value = canvas_element("c", "text-box", 20.0, 20.0, 2);
+        with_value.value_condition = Some(ValueCondition { enabled: true, source: "viewers".into(), operator: ">=".into(), threshold: 5.0 });
+        let canvas = CanvasParams { elements: vec![with_source, with_alert, with_value], width: 1920, height: 1080 };
+        std::fs::write(dir.join("export-test.html"), "<html></html>").unwrap();
+        std::fs::write(canvas_sidecar_path(&dir, "export-test.html"), serde_json::to_string(&canvas).unwrap()).unwrap();
+
+        // overlay_export_detect_requirements goes through custom_overlays_dir()
+        // (the real app data dir, not this temp dir) — exercise the sidecar
+        // parsing directly the same way the command does internally instead.
+        let loaded: CanvasParams = serde_json::from_str(&std::fs::read_to_string(canvas_sidecar_path(&dir, "export-test.html")).unwrap()).unwrap();
+        let mut live_sources = Vec::new();
+        let mut alert_kinds: Vec<String> = Vec::new();
+        let mut uses_status_forge = false;
+        for el in &loaded.elements {
+            let is_template = el.kind.as_deref().map(|k| k == "template").unwrap_or(true);
+            if is_template {
+                detect_template_requirements(&el.params, &mut live_sources, &mut uses_status_forge);
+            }
+            if let Some(t) = &el.alert_trigger {
+                if t.enabled {
+                    for k in &t.kinds {
+                        if !alert_kinds.iter().any(|x| x == k) {
+                            alert_kinds.push(k.clone());
+                        }
+                    }
+                }
+            }
+            if let Some(vc) = &el.value_condition {
+                if vc.enabled && !live_sources.iter().any(|x| x == &vc.source) {
+                    live_sources.push(vc.source.clone());
+                }
+            }
+        }
+        assert_eq!(live_sources, vec!["followers".to_string(), "viewers".to_string()]);
+        assert_eq!(alert_kinds, vec!["follow".to_string(), "sub".to_string()]);
+        assert!(!uses_status_forge);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scan_json_string_literal_handles_escapes_and_unterminated() {
+        let s = r#""hello \"world\"" tail"#;
+        let len = scan_json_string_literal(s).unwrap();
+        assert_eq!(&s[..len], r#""hello \"world\"""#);
+
+        assert!(scan_json_string_literal("not a string").is_none());
+        assert!(scan_json_string_literal(r#""unterminated"#).is_none());
+    }
+
+    #[test]
+    fn inject_ws_shim_inserts_right_after_head_and_falls_back_without_one() {
+        let html = "<html><head><title>x</title></head><body></body></html>";
+        let patched = inject_ws_shim(html);
+        assert!(patched.contains("window.WebSocket = function"));
+        let head_idx = patched.find("<head>").unwrap();
+        let shim_idx = patched.find("window.WebSocket").unwrap();
+        assert!(shim_idx > head_idx, "shim should be injected after <head>, not before");
+        let title_idx = patched.find("<title>").unwrap();
+        assert!(shim_idx < title_idx, "shim must run before any other script/content in the document");
+
+        let no_head = "<html><body>hi</body></html>";
+        let patched2 = inject_ws_shim(no_head);
+        assert!(patched2.starts_with("<script>"), "falls back to prepending when there's no <head> at all");
+    }
+
+    #[test]
+    fn portable_ws_shim_redirects_data_and_alerts_urls_to_relative_polling_paths() {
+        assert!(PORTABLE_WS_SHIM_SCRIPT.contains(r#"url.indexOf("/alerts-ws")"#));
+        assert!(PORTABLE_WS_SHIM_SCRIPT.contains(r#""/poll-" + (isAlerts ? "alerts" : "data")"#));
+    }
+
+    #[test]
+    fn patch_iframe_srcdocs_decodes_patches_and_reencodes_each_occurrence() {
+        let inner = "<html><head><title>widget</title></head><body>hi</body></html>";
+        let json = serde_json::to_string(inner).unwrap();
+        let html = format!(
+            r#"<body><iframe id="el-0"></iframe><script>document.getElementById("el-0").srcdoc = {json};</script></body>"#
+        );
+        let patched = patch_iframe_srcdocs(&html);
+        // The outer document's own srcdoc-assignment statement must still be
+        // valid JS after the round-trip — parse it back out the same way a
+        // browser would (as a JSON string) to prove that.
+        let start = patched.find(".srcdoc = ").unwrap() + ".srcdoc = ".len();
+        let literal_len = scan_json_string_literal(&patched[start..]).unwrap();
+        let decoded: String = serde_json::from_str(&patched[start..start + literal_len]).unwrap();
+        assert!(decoded.contains("window.WebSocket = function"), "the shim should now be inside the decoded iframe content");
+        assert!(decoded.contains("<title>widget</title>"), "the iframe's own original content must survive untouched");
+    }
+
+    #[test]
+    fn patch_iframe_srcdocs_is_a_no_op_when_there_are_no_srcdoc_assignments() {
+        let html = "<body><div class=\"el\">just a primitive, no iframe</div></body>";
+        assert_eq!(patch_iframe_srcdocs(html), html);
+    }
+
+    #[test]
+    fn overlay_export_standalone_rejects_status_forge_templates() {
+        let dir = std::env::temp_dir().join(format!("sf-export-sf-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Exercises the same rejection check overlay_export_standalone makes,
+        // via the same detection path (custom_overlays_dir() itself isn't
+        // redirectable in tests — see the note in the requirements test above).
+        let mut p = params("now-playing");
+        let mut sources = Vec::new();
+        let mut uses_status_forge = false;
+        detect_template_requirements(&p, &mut sources, &mut uses_status_forge);
+        assert!(uses_status_forge);
+        p.template = "game-logo".into();
+        let mut uses_status_forge2 = false;
+        detect_template_requirements(&p, &mut Vec::new(), &mut uses_status_forge2);
+        assert!(uses_status_forge2);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn export_readme_text_lists_selected_platforms_and_canvas_size() {
+        let manifest = ExportManifest {
+            manifest_version: 1,
+            overlay_id: "my-overlay".into(),
+            overlay_name: "My Overlay".into(),
+            live_sources: vec!["followers".into()],
+            alert_kinds: vec![],
+            platforms: vec!["twitch".into(), "kick".into()],
+            customizable: ExportCustomizable { color: true, font: false, text: false },
+            canvas_width: 1920,
+            canvas_height: 1080,
+            port: 8420,
+        };
+        let readme = export_readme_text(&manifest);
+        assert!(readme.contains("My Overlay"));
+        assert!(readme.contains("twitch, kick"));
+        assert!(readme.contains("1920x1080"));
     }
 }

@@ -11,6 +11,7 @@ pub mod metadata;
 pub mod metadata_signing;
 pub mod multichat;
 pub mod overlay_manager;
+pub mod portable_helper;
 pub mod server;
 pub mod stream_manager;
 use config::{AppConfig, EngineStatus};
@@ -2653,6 +2654,8 @@ pub fn run() {
             overlay_manager::overlay_create_from_canvas,
             overlay_manager::overlay_get_canvas_params,
             overlay_manager::overlay_update_canvas,
+            overlay_manager::overlay_export_detect_requirements,
+            overlay_manager::overlay_export_standalone,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
