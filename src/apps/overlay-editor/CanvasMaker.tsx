@@ -136,6 +136,96 @@ function snap(value: number, targets: number[]): { value: number; hit: number | 
   return { value, hit: null };
 }
 
+/** Rounds a percent value to the nearest multiple of a grid step (also in
+ * percent), only when it's already close — grid snap should feel like a
+ * gentle magnet near a line, not a teleport from anywhere on the canvas. */
+function snapToGridPct(value: number, stepPct: number): number | null {
+  if (stepPct <= 0) return null;
+  const nearest = Math.round(value / stepPct) * stepPct;
+  return Math.abs(value - nearest) <= SNAP_THRESHOLD_PCT ? nearest : null;
+}
+
+/** Figma/Canva-style "equal spacing" guide: if the element being dragged to
+ * `candidateX`/width `candidateW` sits between two same-row neighbors, and
+ * the gap to each is already close to equal, snap so both gaps become
+ * exactly equal (keeping the neighbors' own positions fixed) and report the
+ * two gap spans so the UI can draw a marker in each. Mirrors `snapTargetsX`
+ * but for a relationship between two OTHER elements rather than one target
+ * line — plain edge/center snapping can't express "equidistant from both". */
+function equalGapSnapX(
+  elements: CanvasElementT[],
+  draggedId: string,
+  draggedYPct: number,
+  draggedHeightPct: number,
+  candidateX: number,
+  candidateW: number
+): { x: number; gaps: [number, number]; leftEdge: number; rightEdge: number } | null {
+  const rowMates = elements.filter((el) => {
+    if (el.id === draggedId) return false;
+    const overlaps = el.yPct < draggedYPct + draggedHeightPct && el.yPct + el.heightPct > draggedYPct;
+    return overlaps;
+  });
+  let leftNeighbor: CanvasElementT | null = null;
+  let rightNeighbor: CanvasElementT | null = null;
+  for (const el of rowMates) {
+    const rightEdge = el.xPct + el.widthPct;
+    if (rightEdge <= candidateX + SNAP_THRESHOLD_PCT * 3) {
+      if (!leftNeighbor || rightEdge > leftNeighbor.xPct + leftNeighbor.widthPct) leftNeighbor = el;
+    }
+    if (el.xPct >= candidateX + candidateW - SNAP_THRESHOLD_PCT * 3) {
+      if (!rightNeighbor || el.xPct < rightNeighbor.xPct) rightNeighbor = el;
+    }
+  }
+  if (!leftNeighbor || !rightNeighbor) return null;
+  const leftEdge = leftNeighbor.xPct + leftNeighbor.widthPct;
+  const rightEdge = rightNeighbor.xPct;
+  const span = rightEdge - leftEdge;
+  if (span < candidateW) return null;
+  const leftGap = candidateX - leftEdge;
+  const rightGap = rightEdge - (candidateX + candidateW);
+  if (Math.abs(leftGap - rightGap) > SNAP_THRESHOLD_PCT) return null;
+  const equalGap = (span - candidateW) / 2;
+  return { x: leftEdge + equalGap, gaps: [equalGap, equalGap], leftEdge, rightEdge };
+}
+
+/** Same idea as {@link equalGapSnapX}, projected onto the vertical axis for
+ * elements stacked in the same column instead of the same row. */
+function equalGapSnapY(
+  elements: CanvasElementT[],
+  draggedId: string,
+  draggedXPct: number,
+  draggedWidthPct: number,
+  candidateY: number,
+  candidateH: number
+): { y: number; gaps: [number, number]; topEdge: number; bottomEdge: number } | null {
+  const colMates = elements.filter((el) => {
+    if (el.id === draggedId) return false;
+    const overlaps = el.xPct < draggedXPct + draggedWidthPct && el.xPct + el.widthPct > draggedXPct;
+    return overlaps;
+  });
+  let topNeighbor: CanvasElementT | null = null;
+  let bottomNeighbor: CanvasElementT | null = null;
+  for (const el of colMates) {
+    const bottomEdge = el.yPct + el.heightPct;
+    if (bottomEdge <= candidateY + SNAP_THRESHOLD_PCT * 3) {
+      if (!topNeighbor || bottomEdge > topNeighbor.yPct + topNeighbor.heightPct) topNeighbor = el;
+    }
+    if (el.yPct >= candidateY + candidateH - SNAP_THRESHOLD_PCT * 3) {
+      if (!bottomNeighbor || el.yPct < bottomNeighbor.yPct) bottomNeighbor = el;
+    }
+  }
+  if (!topNeighbor || !bottomNeighbor) return null;
+  const topEdge = topNeighbor.yPct + topNeighbor.heightPct;
+  const bottomEdge = bottomNeighbor.yPct;
+  const span = bottomEdge - topEdge;
+  if (span < candidateH) return null;
+  const topGap = candidateY - topEdge;
+  const bottomGap = bottomEdge - (candidateY + candidateH);
+  if (Math.abs(topGap - bottomGap) > SNAP_THRESHOLD_PCT) return null;
+  const equalGap = (span - candidateH) / 2;
+  return { y: topEdge + equalGap, gaps: [equalGap, equalGap], topEdge, bottomEdge };
+}
+
 /** Angle (degrees) from a shape's center to the mouse, offset so "straight
  * up" (where the rotate handle sits, since the handle is a child of the
  * same rotated box and so already tracks the shape's current rotation
@@ -264,6 +354,21 @@ export default function CanvasMaker({
   const historyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const clipboardRef = useRef<CanvasElementT[] | null>(null);
+  const [gridEnabled, setGridEnabled] = useState(false);
+  const [gridSize, setGridSize] = useState(20);
+  // Read inside the [] deps mousemove effect, so a ref (not the state
+  // directly) — same reason elementsRef exists.
+  const gridConfigRef = useRef({ enabled: gridEnabled, size: gridSize });
+  useEffect(() => {
+    gridConfigRef.current = { enabled: gridEnabled, size: gridSize };
+  }, [gridEnabled, gridSize]);
+  // Grid-step math in the [] deps mousemove effect needs the live canvas
+  // size, not whatever it was on mount.
+  const canvasSizeRef = useRef({ w: canvasW, h: canvasH });
+  useEffect(() => {
+    canvasSizeRef.current = { w: canvasW, h: canvasH };
+  }, [canvasW, canvasH]);
+  const [equalGapMarks, setEqualGapMarks] = useState<{ axis: "x" | "y"; a: number; b: number; cross: number }[]>([]);
   // Kept in sync so the marquee's mouseup handler (inside a `[]`-deps
   // effect, so its own closure over `elements` would otherwise be frozen
   // at whatever it was on mount) can read the current element list.
@@ -505,13 +610,40 @@ export default function CanvasMaker({
           const sy = snap(rawY, ys);
           hitX = sx.hit;
           hitY = sy.hit;
-          patch = { xPct: sx.value, yPct: sy.value };
+          let finalX = sx.value;
+          let finalY = sy.value;
+          const gapX = equalGapSnapX(prev, d.id, finalY, el.heightPct, finalX, el.widthPct);
+          const gapY = equalGapSnapY(prev, d.id, finalX, el.widthPct, finalY, el.heightPct);
+          const marks: { axis: "x" | "y"; a: number; b: number; cross: number }[] = [];
+          if (gapX) {
+            finalX = gapX.x;
+            marks.push({ axis: "x", a: gapX.leftEdge, b: finalX, cross: finalY + el.heightPct / 2 });
+            marks.push({ axis: "x", a: finalX + el.widthPct, b: gapX.rightEdge, cross: finalY + el.heightPct / 2 });
+          }
+          if (gapY) {
+            finalY = gapY.y;
+            marks.push({ axis: "y", a: gapY.topEdge, b: finalY, cross: finalX + el.widthPct / 2 });
+            marks.push({ axis: "y", a: finalY + el.heightPct, b: gapY.bottomEdge, cross: finalX + el.widthPct / 2 });
+          }
+          setEqualGapMarks(marks);
+          const grid = gridConfigRef.current;
+          if (grid.enabled && !gapX && hitX == null) {
+            const stepXPct = (grid.size / canvasSizeRef.current.w) * 100;
+            const g = snapToGridPct(finalX, stepXPct);
+            if (g != null) finalX = g;
+          }
+          if (grid.enabled && !gapY && hitY == null) {
+            const stepYPct = (grid.size / canvasSizeRef.current.h) * 100;
+            const g = snapToGridPct(finalY, stepYPct);
+            if (g != null) finalY = g;
+          }
+          patch = { xPct: finalX, yPct: finalY };
           // Group/multi-select members ride along with the dragged
           // element's own (post-snap) delta, each measured from where it
           // started — the delta never accumulates across mousemoves.
           if (d.groupStarts.length > 0) {
-            const groupDx = sx.value - d.startX;
-            const groupDy = sy.value - d.startY;
+            const groupDx = finalX - d.startX;
+            const groupDy = finalY - d.startY;
             const byId = new Map(d.groupStarts.map((g) => [g.id, g]));
             return prev.map((e2) => {
               if (e2.id === d.id) return { ...e2, ...patch };
@@ -586,6 +718,27 @@ export default function CanvasMaker({
                 hitY = s.hit;
               }
             }
+            const grid = gridConfigRef.current;
+            if (grid.enabled) {
+              const stepXPct = (grid.size / canvasSizeRef.current.w) * 100;
+              const stepYPct = (grid.size / canvasSizeRef.current.h) * 100;
+              if (hasW && hitX == null) {
+                const g = snapToGridPct(newLeft, stepXPct);
+                if (g != null) newLeft = g;
+              }
+              if (hasE && hitX == null) {
+                const g = snapToGridPct(newRight, stepXPct);
+                if (g != null) newRight = g;
+              }
+              if (hasN && hitY == null) {
+                const g = snapToGridPct(newTop, stepYPct);
+                if (g != null) newTop = g;
+              }
+              if (hasS && hitY == null) {
+                const g = snapToGridPct(newBottom, stepYPct);
+                if (g != null) newBottom = g;
+              }
+            }
           }
           patch = { xPct: newLeft, yPct: newTop, widthPct: newRight - newLeft, heightPct: newBottom - newTop };
         }
@@ -619,6 +772,7 @@ export default function CanvasMaker({
       rotateRef.current = null;
       setGuideX(null);
       setGuideY(null);
+      setEqualGapMarks([]);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -1503,6 +1657,30 @@ export default function CanvasMaker({
                     +
                   </button>
                 </div>
+                <div className="flex items-center gap-0.5 ml-1 pl-1 border-l border-white/[0.08]">
+                  <button
+                    onClick={() => setGridEnabled((g) => !g)}
+                    title="Toggle grid + snap-to-grid"
+                    className={`px-2 py-1 rounded-md text-[10px] border ${
+                      gridEnabled
+                        ? "bg-purple-500/15 border-purple-500/40 text-white"
+                        : "bg-white/[0.03] border-white/[0.06] text-white/50 hover:border-white/20"
+                    }`}
+                  >
+                    # Grid
+                  </button>
+                  {gridEnabled && (
+                    <input
+                      type="number"
+                      min={4}
+                      max={500}
+                      value={gridSize}
+                      onChange={(e) => setGridSize(Math.max(4, Math.min(500, Number(e.target.value) || 20)))}
+                      className="w-12 input-glass text-[10px] px-1.5 py-1"
+                      title="Grid size (px)"
+                    />
+                  )}
+                </div>
               </div>
             </div>
             <div
@@ -1521,6 +1699,16 @@ export default function CanvasMaker({
                 style={{ width: displayW, height: displayH }}
                 onMouseDown={startMarquee}
               >
+              {gridEnabled && (
+                <div
+                  className="absolute inset-0 pointer-events-none"
+                  style={{
+                    backgroundImage:
+                      "linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.08) 1px, transparent 1px)",
+                    backgroundSize: `${gridSize * canvasScale}px ${gridSize * canvasScale}px`,
+                  }}
+                />
+              )}
               {preview && (
                 <iframe
                   title="canvas-preview"
@@ -1603,6 +1791,21 @@ export default function CanvasMaker({
               )}
               {guideY != null && (
                 <div className="absolute left-0 right-0 h-px bg-purple-400/80 pointer-events-none" style={{ top: `${guideY}%` }} />
+              )}
+              {equalGapMarks.map((m, i) =>
+                m.axis === "x" ? (
+                  <div
+                    key={i}
+                    className="absolute h-px border-t border-dashed border-pink-400 pointer-events-none"
+                    style={{ left: `${Math.min(m.a, m.b)}%`, width: `${Math.abs(m.b - m.a)}%`, top: `${m.cross}%` }}
+                  />
+                ) : (
+                  <div
+                    key={i}
+                    className="absolute w-px border-l border-dashed border-pink-400 pointer-events-none"
+                    style={{ top: `${Math.min(m.a, m.b)}%`, height: `${Math.abs(m.b - m.a)}%`, left: `${m.cross}%` }}
+                  />
+                )
               )}
               {marqueeBox && (
                 <div
