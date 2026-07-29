@@ -267,14 +267,30 @@ export const PRIMITIVES: PrimitiveDef[] = [
  * Every field applies to every kind except where noted; unused fields for a
  * given kind (e.g. `text` on a rectangle) are simply ignored at render time
  * rather than needing a separate type per kind. */
+export const BLEND_MODES = [
+  "normal", "multiply", "screen", "overlay", "darken", "lighten",
+  "color-dodge", "color-burn", "difference", "exclusion", "hue", "saturation", "color", "luminosity",
+] as const;
+export type BlendMode = (typeof BLEND_MODES)[number];
+
 export interface PrimitiveParams {
   fill: string;
   fillOpacity: number;
+  /** "solid" uses `fill` alone; "linear"/"radial" blend `fill` -> `fillColor2`
+   * (a 2-stop gradient, not full multi-stop editing — kept simple on purpose). */
+  fillType: "solid" | "linear" | "radial";
+  fillColor2: string;
+  /** Linear gradient direction in degrees — ignored for solid/radial. */
+  gradientAngle: number;
   stroke: string;
   strokeWidth: number;
   /** Rectangle only — ellipse is always fully rounded, other kinds ignore it. */
   cornerRadius: number;
   opacity: number;
+  /** CSS mix-blend-mode against whatever's beneath this element — lets a
+   * shape/image/text genuinely composite with other layers instead of
+   * always sitting flatly on top. */
+  blendMode: BlendMode;
   shadow: boolean;
   shadowColor: string;
   shadowBlur: number;
@@ -295,10 +311,14 @@ export interface PrimitiveParams {
 export const DEFAULT_PRIMITIVE_PARAMS: PrimitiveParams = {
   fill: "#9146ff",
   fillOpacity: 1,
+  fillType: "solid",
+  fillColor2: "#43e5e5",
+  gradientAngle: 90,
   stroke: "transparent",
   strokeWidth: 0,
   cornerRadius: 0,
   opacity: 1,
+  blendMode: "normal",
   shadow: false,
   shadowColor: "#000000",
   shadowBlur: 12,

@@ -1,7 +1,7 @@
 // Fields for one free-form primitive layer (rect/ellipse/line/text/image) —
 // the free-form counterpart to TemplateFieldsEditor's whole-widget form.
 // Far fewer fields since a primitive is one shape, not a composed card.
-import type { ElementKind, PrimitiveParams } from "../overlay-library/types";
+import { BLEND_MODES, type ElementKind, type PrimitiveParams } from "../overlay-library/types";
 import { ColorField, SELECT_COMPACT_STYLE } from "./TemplateFieldsEditor";
 import { RangeSlider, Select } from "../../design-system/components/forms";
 import { Button } from "../../design-system/components/core";
@@ -55,7 +55,37 @@ export default function PrimitiveFieldsEditor({
           </div>
           {params.fill !== "transparent" && (
             <>
-              <ColorField label="Fill Color" value={params.fill} onChange={(v) => set("fill", v)} />
+              <div>
+                <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1 block">Fill Type</label>
+                <div className="flex gap-1">
+                  {([
+                    ["solid", "Solid"],
+                    ["linear", "Linear"],
+                    ["radial", "Radial"],
+                  ] as [PrimitiveParams["fillType"], string][]).map(([ft, label]) => (
+                    <button
+                      key={ft}
+                      onClick={() => set("fillType", ft)}
+                      className={`flex-1 py-1.5 rounded-lg text-[11px] border ${
+                        params.fillType === ft
+                          ? "bg-purple-500/15 border-purple-500/40 text-white"
+                          : "bg-white/[0.03] border-white/[0.06] text-white/60 hover:border-white/20"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className={params.fillType === "solid" ? "" : "grid grid-cols-2 gap-2"}>
+                <ColorField label={params.fillType === "solid" ? "Fill Color" : "Color 1"} value={params.fill} onChange={(v) => set("fill", v)} />
+                {params.fillType !== "solid" && (
+                  <ColorField label="Color 2" value={params.fillColor2} onChange={(v) => set("fillColor2", v)} />
+                )}
+              </div>
+              {params.fillType === "linear" && (
+                <NumberField label="Gradient Angle (°)" value={params.gradientAngle} min={0} max={360} onChange={(v) => set("gradientAngle", v)} />
+              )}
               <div>
                 <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
                   Fill Opacity ({Math.round(params.fillOpacity * 100)}%)
@@ -189,6 +219,14 @@ export default function PrimitiveFieldsEditor({
         </label>
         <RangeSlider min={0} max={1} step={0.05} value={params.opacity} onChange={(v) => set("opacity", v)} showValue={false} />
       </div>
+
+      <Select
+        label="Blend Mode"
+        value={params.blendMode}
+        onChange={(v) => set("blendMode", v as PrimitiveParams["blendMode"])}
+        options={BLEND_MODES.map((m) => ({ value: m, label: m.charAt(0).toUpperCase() + m.slice(1) }))}
+        style={SELECT_COMPACT_STYLE}
+      />
 
       <div className="space-y-2">
         <label className="flex items-center gap-1.5 text-[10px] text-white/50">

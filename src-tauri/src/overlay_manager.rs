@@ -353,6 +353,14 @@ pub(crate) struct PrimitiveParams {
     fill: String,
     #[serde(default = "default_one_f32")]
     fill_opacity: f32,
+    /// "solid" / "linear" / "radial" — linear/radial blend `fill` into
+    /// `fill_color2`, a 2-stop gradient (not full multi-stop editing).
+    #[serde(default = "default_fill_type")]
+    fill_type: String,
+    #[serde(default = "default_fill_color2")]
+    fill_color2: String,
+    #[serde(default = "default_gradient_angle")]
+    gradient_angle: f32,
     #[serde(default = "default_transparent")]
     stroke: String,
     #[serde(default)]
@@ -361,6 +369,10 @@ pub(crate) struct PrimitiveParams {
     corner_radius: f32,
     #[serde(default = "default_one_f32")]
     opacity: f32,
+    /// A CSS mix-blend-mode name — validated against an allowlist before
+    /// ever reaching generated CSS (see `safe_blend_mode`).
+    #[serde(default = "default_blend_mode")]
+    blend_mode: String,
     #[serde(default)]
     shadow: bool,
     #[serde(default = "default_shadow_color")]
@@ -396,10 +408,14 @@ impl Default for PrimitiveParams {
         PrimitiveParams {
             fill: default_accent_color(),
             fill_opacity: default_one_f32(),
+            fill_type: default_fill_type(),
+            fill_color2: default_fill_color2(),
+            gradient_angle: default_gradient_angle(),
             stroke: default_transparent(),
             stroke_width: 0.0,
             corner_radius: 0.0,
             opacity: default_one_f32(),
+            blend_mode: default_blend_mode(),
             shadow: false,
             shadow_color: default_shadow_color(),
             shadow_blur: default_shadow_blur(),
@@ -422,6 +438,28 @@ fn default_one_f32() -> f32 {
 }
 fn default_transparent() -> String {
     "transparent".into()
+}
+fn default_fill_type() -> String {
+    "solid".into()
+}
+fn default_fill_color2() -> String {
+    "#43e5e5".into()
+}
+fn default_gradient_angle() -> f32 {
+    90.0
+}
+fn default_blend_mode() -> String {
+    "normal".into()
+}
+const VALID_BLEND_MODES: &[&str] = &[
+    "normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "difference",
+    "exclusion", "hue", "saturation", "color", "luminosity",
+];
+/// Only a known CSS mix-blend-mode keyword is accepted — falls back to
+/// "normal" for anything else, same "reject silently, don't fail the
+/// render" convention as `safe_color`.
+fn safe_blend_mode(input: &str) -> &'static str {
+    VALID_BLEND_MODES.iter().find(|&&m| m == input).copied().unwrap_or("normal")
 }
 fn default_shadow_color() -> String {
     "#000000".into()
@@ -1358,10 +1396,27 @@ pub(crate) fn overlay_preview_template(params: TemplateParams) -> Result<String,
 fn render_primitive(kind: &str, p: &PrimitiveParams) -> String {
     let fill = safe_color_or_transparent(&p.fill);
     let fill_opacity = clamp01(p.fill_opacity);
+    // 2-stop gradient (not full multi-stop editing, kept simple on purpose)
+    // — "linear"/"radial" blend `fill` into `fill_color2`; anything else
+    // (including an unrecognized fill_type) falls back to the solid color.
+    let fill_css = match p.fill_type.as_str() {
+        "linear" => {
+            let color2 = safe_color_or_transparent(&p.fill_color2);
+            let angle = p.gradient_angle.rem_euclid(360.0);
+            format!("linear-gradient({angle}deg, {fill}, {color2})")
+        }
+        "radial" => {
+            let color2 = safe_color_or_transparent(&p.fill_color2);
+            format!("radial-gradient(circle, {fill}, {color2})")
+        }
+        _ => fill.clone(),
+    };
     let stroke = safe_color_or_transparent(&p.stroke);
     let stroke_width = p.stroke_width.clamp(0.0, 60.0);
     let corner_radius = p.corner_radius.clamp(0.0, 500.0);
     let opacity = clamp01(p.opacity);
+    let blend_mode = safe_blend_mode(&p.blend_mode);
+    let blend_css = if blend_mode == "normal" { String::new() } else { format!("mix-blend-mode: {blend_mode};") };
     let shadow_css = if p.shadow {
         let color = safe_color(&p.shadow_color, "#000000");
         let blur = p.shadow_blur.clamp(0.0, 120.0);
@@ -1374,10 +1429,10 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> String {
 
     let body = match kind {
         "ellipse" => format!(
-            r#"<div style="width:100%; height:100%; box-sizing:border-box; background:{fill}; opacity:{fill_opacity}; border:{stroke_width}px solid {stroke}; border-radius:50%;"></div>"#
+            r#"<div style="width:100%; height:100%; box-sizing:border-box; background:{fill_css}; opacity:{fill_opacity}; border:{stroke_width}px solid {stroke}; border-radius:50%;"></div>"#
         ),
         "line" => format!(
-            r#"<div style="width:100%; height:100%; background:{fill}; opacity:{fill_opacity};"></div>"#
+            r#"<div style="width:100%; height:100%; background:{fill_css}; opacity:{fill_opacity};"></div>"#
         ),
         "text" => {
             let text_color = safe_color(&p.text_color, &default_text_color());
@@ -1410,7 +1465,7 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> String {
         // "rect" and any unrecognized kind (defensive — shouldn't happen,
         // render_canvas only calls this for a non-"template" kind).
         _ => format!(
-            r#"<div style="width:100%; height:100%; box-sizing:border-box; background:{fill}; opacity:{fill_opacity}; border:{stroke_width}px solid {stroke}; border-radius:{corner_radius}px;"></div>"#
+            r#"<div style="width:100%; height:100%; box-sizing:border-box; background:{fill_css}; opacity:{fill_opacity}; border:{stroke_width}px solid {stroke}; border-radius:{corner_radius}px;"></div>"#
         ),
     };
 
@@ -1419,7 +1474,7 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> String {
 <html lang="en">
 <head><meta charset="utf-8"><style>html, body {{ margin: 0; padding: 0; background: transparent; overflow: hidden; }}</style></head>
 <body>
-<div style="width:100%; height:100%; opacity:{opacity}; {shadow_css}">{body}</div>
+<div style="width:100%; height:100%; opacity:{opacity}; {blend_css} {shadow_css}">{body}</div>
 </body>
 </html>
 "#
@@ -2096,6 +2151,44 @@ mod tests {
         p.shadow = true;
         p.shadow_blur = 20.0;
         assert!(render_primitive("rect", &p).contains("drop-shadow"));
+    }
+
+    #[test]
+    fn render_primitive_linear_gradient_blends_both_colors_at_the_given_angle() {
+        let p = PrimitiveParams { fill: "#ff0000".into(), fill_type: "linear".into(), fill_color2: "#0000ff".into(), gradient_angle: 45.0, ..Default::default() };
+        let html = render_primitive("rect", &p);
+        assert!(html.contains("linear-gradient(45deg, #ff0000, #0000ff)"));
+    }
+
+    #[test]
+    fn render_primitive_radial_gradient_ignores_angle() {
+        let p = PrimitiveParams { fill: "#ff0000".into(), fill_type: "radial".into(), fill_color2: "#0000ff".into(), ..Default::default() };
+        let html = render_primitive("ellipse", &p);
+        assert!(html.contains("radial-gradient(circle, #ff0000, #0000ff)"));
+    }
+
+    #[test]
+    fn render_primitive_solid_fill_type_never_emits_a_gradient() {
+        let p = PrimitiveParams { fill: "#ff0000".into(), fill_type: "solid".into(), fill_color2: "#0000ff".into(), ..Default::default() };
+        let html = render_primitive("rect", &p);
+        assert!(!html.contains("gradient"));
+        assert!(html.contains("background:#ff0000"));
+    }
+
+    #[test]
+    fn render_primitive_blend_mode_applied_only_when_not_normal() {
+        let mut p = PrimitiveParams { blend_mode: "normal".into(), ..Default::default() };
+        assert!(!render_primitive("rect", &p).contains("mix-blend-mode"));
+        p.blend_mode = "multiply".into();
+        assert!(render_primitive("rect", &p).contains("mix-blend-mode: multiply"));
+    }
+
+    #[test]
+    fn render_primitive_rejects_unknown_blend_mode() {
+        let p = PrimitiveParams { blend_mode: "javascript:alert(1)".into(), ..Default::default() };
+        let html = render_primitive("rect", &p);
+        assert!(!html.contains("javascript"));
+        assert!(!html.contains("mix-blend-mode"));
     }
 
     #[test]
