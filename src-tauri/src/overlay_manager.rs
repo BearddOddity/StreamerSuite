@@ -1393,7 +1393,15 @@ pub(crate) fn overlay_preview_template(params: TemplateParams) -> Result<String,
 /// since there's no position-preset/animation/font-upload system to thread
 /// through, just the one shape's own fill/stroke/effects. Infallible (no
 /// external call can fail here), unlike render_template.
-fn render_primitive(kind: &str, p: &PrimitiveParams) -> String {
+/// Returns (fragment HTML, optional Google Fonts `<link>`) rather than a full
+/// standalone document — primitives render *inline* in render_canvas's own
+/// shared document (unlike templates, which keep their own isolated iframe;
+/// see render_canvas for why). This is what makes mix-blend-mode actually
+/// blend against the elements underneath instead of an iframe's own empty
+/// transparent backdrop, and lets one Google Fonts `<link>` cover every text
+/// primitive instead of each needing (and previously silently NOT getting)
+/// its own.
+fn render_primitive(kind: &str, p: &PrimitiveParams) -> (String, Option<String>) {
     let fill = safe_color_or_transparent(&p.fill);
     let fill_opacity = clamp01(p.fill_opacity);
     // 2-stop gradient (not full multi-stop editing, kept simple on purpose)
@@ -1427,6 +1435,7 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> String {
         String::new()
     };
 
+    let mut font_link: Option<String> = None;
     let body = match kind {
         "ellipse" => format!(
             r#"<div style="width:100%; height:100%; box-sizing:border-box; background:{fill_css}; opacity:{fill_opacity}; border:{stroke_width}px solid {stroke}; border-radius:50%;"></div>"#
@@ -1441,9 +1450,19 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> String {
                 "right" => ("right", "flex-end"),
                 _ => ("left", "flex-start"),
             };
-            let font_family = safe_font_family(&p.font_family)
+            let safe_family = safe_font_family(&p.font_family);
+            let font_family = safe_family
+                .as_ref()
                 .map(|f| format!("\"{f}\", {FONT_STACK}"))
                 .unwrap_or_else(|| FONT_STACK.to_string());
+            // Same Google Fonts <link> convention as render_template's own
+            // font_family field — previously missing entirely for
+            // primitives, so a chosen preset silently fell back to the
+            // system stack instead of actually loading.
+            font_link = safe_family.map(|f| {
+                let query = f.replace(' ', "+");
+                format!(r#"<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family={query}:wght@400;500;700;800;900&display=swap">"#)
+            });
             let font_size = p.font_size.clamp(4.0, 400.0);
             let font_weight = p.font_weight.clamp(100, 900);
             let text = escape_html(&p.text).replace('\n', "<br>");
@@ -1469,16 +1488,8 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> String {
         ),
     };
 
-    format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><style>html, body {{ margin: 0; padding: 0; background: transparent; overflow: hidden; }}</style></head>
-<body>
-<div style="width:100%; height:100%; opacity:{opacity}; {blend_css} {shadow_css}">{body}</div>
-</body>
-</html>
-"#
-    )
+    let fragment = format!(r#"<div style="width:100%; height:100%; opacity:{opacity}; {blend_css} {shadow_css}">{body}</div>"#);
+    (fragment, font_link)
 }
 
 /// A Canvas overlay is one page holding several independently-placed
@@ -1491,55 +1502,85 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> String {
 /// elements for free, and every existing per-template test stays valid
 /// unmodified since `render_template` itself didn't change at all.
 fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
-    let mut iframes = String::new();
+    let mut body_html = String::new();
     let mut assigns = String::new();
-    for (i, el) in elements.iter().enumerate() {
+    // Deduped across every text primitive so N text layers on the same font
+    // load one <link>, not N of them.
+    let mut font_links: Vec<String> = Vec::new();
+    // Stacking order comes from DOM/paint order here, not the CSS z-index
+    // property — z-index on a positioned element creates its own isolated
+    // stacking context, which would block mix-blend-mode from seeing
+    // anything painted by an earlier sibling (the same isolation problem
+    // the iframe-per-primitive approach had, just one level down). A stable
+    // sort by z_index (ties keep their original relative order) and letting
+    // later-painted elements simply sit on top gives the identical visual
+    // stacking result without that isolation.
+    let mut ordered: Vec<&CanvasElement> = elements.iter().collect();
+    ordered.sort_by_key(|el| el.z_index);
+    for (i, el) in ordered.into_iter().enumerate() {
         let kind = el.kind.as_deref().unwrap_or("template");
-        let inner_html = if kind == "template" {
-            render_template(&el.params)?
-        } else {
-            let default_primitive = PrimitiveParams::default();
-            render_primitive(kind, el.primitive.as_ref().unwrap_or(&default_primitive))
-        };
         let x = el.x_pct.clamp(0.0, 100.0);
         let y = el.y_pct.clamp(0.0, 100.0);
         let w = el.width_pct.clamp(2.0, 100.0);
         let h = el.height_pct.clamp(2.0, 100.0);
-        let z = el.z_index;
-        // Rotation is applied here (on the iframe wrapper), not inside
-        // render_template/render_primitive — a rotated template still
-        // renders exactly like an unrotated one internally, it's just
-        // spun as a whole around its own center.
+        // Rotation is applied here, not inside render_template/render_primitive
+        // — a rotated element still renders exactly like an unrotated one
+        // internally, it's just spun as a whole around its own center.
         let rotation = el.rotation.clamp(-360.0, 360.0);
         let transform = if rotation != 0.0 {
             format!("transform: rotate({rotation}deg); transform-origin: center center;")
         } else {
             String::new()
         };
-        let frame_id = format!("el-{i}");
-        iframes.push_str(&format!(
-            r#"<iframe id="{frame_id}" class="el" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; z-index:{z}; {transform}"></iframe>"#
-        ));
-        // JSON-encoding the whole rendered document is what makes embedding
-        // it safely inside a <script> block trivial — serde_json already
-        // escapes quotes, newlines, and (critically) any literal `</script>`
-        // sequence the inner HTML happens to contain.
-        let json = serde_json::to_string(&inner_html).map_err(|e| e.to_string())?;
-        assigns.push_str(&format!("document.getElementById(\"{frame_id}\").srcdoc = {json};\n"));
+        if kind == "template" {
+            // Templates keep their own fully isolated iframe — real risk of
+            // one widget's scoped CSS (`.title`/`#card`/etc.) colliding with
+            // another's if they ever shared a document.
+            let inner_html = render_template(&el.params)?;
+            let frame_id = format!("el-{i}");
+            body_html.push_str(&format!(
+                r#"<iframe id="{frame_id}" class="el" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"></iframe>"#
+            ));
+            // JSON-encoding the whole rendered document is what makes
+            // embedding it safely inside a <script> block trivial —
+            // serde_json already escapes quotes, newlines, and (critically)
+            // any literal `</script>` sequence the inner HTML contains.
+            let json = serde_json::to_string(&inner_html).map_err(|e| e.to_string())?;
+            assigns.push_str(&format!("document.getElementById(\"{frame_id}\").srcdoc = {json};\n"));
+        } else {
+            // Primitives render inline in THIS shared document instead of
+            // their own iframe — they have no scoped CSS to collide (every
+            // rule is inline on the element itself), and rendering inline is
+            // what lets mix-blend-mode actually blend against whatever's
+            // beneath it (an iframe boundary would give it nothing but its
+            // own transparent backdrop to blend against, which does nothing).
+            let default_primitive = PrimitiveParams::default();
+            let (fragment, font_link) = render_primitive(kind, el.primitive.as_ref().unwrap_or(&default_primitive));
+            if let Some(link) = font_link {
+                if !font_links.contains(&link) {
+                    font_links.push(link);
+                }
+            }
+            body_html.push_str(&format!(
+                r#"<div class="el" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}">{fragment}</div>"#
+            ));
+        }
     }
+    let font_links_html = font_links.join("\n");
     Ok(format!(
         r#"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>StreamerSuite Overlay</title>
+{font_links_html}
 <style>
   html, body {{ margin: 0; padding: 0; background: transparent; overflow: hidden; }}
   .el {{ position: absolute; border: 0; background: transparent; }}
 </style>
 </head>
 <body>
-{iframes}
+{body_html}
 <script>
 {TOKEN_FROM_PATH_JS}
 {assigns}
@@ -2102,7 +2143,7 @@ mod tests {
     #[test]
     fn render_primitive_rect_uses_fill_stroke_and_corner_radius() {
         let p = PrimitiveParams { fill: "#ff0000".into(), fill_opacity: 0.5, stroke: "#00ff00".into(), stroke_width: 3.0, corner_radius: 12.0, ..Default::default() };
-        let html = render_primitive("rect", &p);
+        let (html, _) = render_primitive("rect", &p);
         assert!(html.contains("background:#ff0000"));
         assert!(html.contains("opacity:0.5"));
         assert!(html.contains("border:3px solid #00ff00"));
@@ -2112,14 +2153,14 @@ mod tests {
     #[test]
     fn render_primitive_ellipse_is_always_fully_rounded() {
         let p = PrimitiveParams { fill: "#123456".into(), ..Default::default() };
-        let html = render_primitive("ellipse", &p);
+        let (html, _) = render_primitive("ellipse", &p);
         assert!(html.contains("border-radius:50%"));
     }
 
     #[test]
     fn render_primitive_text_escapes_and_applies_style() {
         let p = PrimitiveParams { text: "<script>x".into(), text_color: "#eeeeee".into(), font_size: 60.0, font_weight: 900, text_align: "center".into(), ..Default::default() };
-        let html = render_primitive("text", &p);
+        let (html, _) = render_primitive("text", &p);
         assert!(html.contains("&lt;script&gt;x"));
         assert!(!html.contains("<script>x"));
         assert!(html.contains("color:#eeeeee"));
@@ -2131,7 +2172,7 @@ mod tests {
     #[test]
     fn render_primitive_image_rejects_non_data_uri() {
         let p = PrimitiveParams { image_data_uri: Some("https://evil.example/x.png".into()), ..Default::default() };
-        let html = render_primitive("image", &p);
+        let (html, _) = render_primitive("image", &p);
         assert!(!html.contains("https://evil.example"));
         assert!(html.contains("No image"));
     }
@@ -2139,7 +2180,7 @@ mod tests {
     #[test]
     fn render_primitive_image_accepts_data_uri() {
         let p = PrimitiveParams { image_data_uri: Some("data:image/png;base64,AAAA".into()), object_fit: "cover".into(), ..Default::default() };
-        let html = render_primitive("image", &p);
+        let (html, _) = render_primitive("image", &p);
         assert!(html.contains("data:image/png;base64,AAAA"));
         assert!(html.contains("object-fit:cover"));
     }
@@ -2147,30 +2188,30 @@ mod tests {
     #[test]
     fn render_primitive_applies_drop_shadow_only_when_enabled() {
         let mut p = PrimitiveParams { shadow: false, ..Default::default() };
-        assert!(!render_primitive("rect", &p).contains("drop-shadow"));
+        assert!(!render_primitive("rect", &p).0.contains("drop-shadow"));
         p.shadow = true;
         p.shadow_blur = 20.0;
-        assert!(render_primitive("rect", &p).contains("drop-shadow"));
+        assert!(render_primitive("rect", &p).0.contains("drop-shadow"));
     }
 
     #[test]
     fn render_primitive_linear_gradient_blends_both_colors_at_the_given_angle() {
         let p = PrimitiveParams { fill: "#ff0000".into(), fill_type: "linear".into(), fill_color2: "#0000ff".into(), gradient_angle: 45.0, ..Default::default() };
-        let html = render_primitive("rect", &p);
+        let (html, _) = render_primitive("rect", &p);
         assert!(html.contains("linear-gradient(45deg, #ff0000, #0000ff)"));
     }
 
     #[test]
     fn render_primitive_radial_gradient_ignores_angle() {
         let p = PrimitiveParams { fill: "#ff0000".into(), fill_type: "radial".into(), fill_color2: "#0000ff".into(), ..Default::default() };
-        let html = render_primitive("ellipse", &p);
+        let (html, _) = render_primitive("ellipse", &p);
         assert!(html.contains("radial-gradient(circle, #ff0000, #0000ff)"));
     }
 
     #[test]
     fn render_primitive_solid_fill_type_never_emits_a_gradient() {
         let p = PrimitiveParams { fill: "#ff0000".into(), fill_type: "solid".into(), fill_color2: "#0000ff".into(), ..Default::default() };
-        let html = render_primitive("rect", &p);
+        let (html, _) = render_primitive("rect", &p);
         assert!(!html.contains("gradient"));
         assert!(html.contains("background:#ff0000"));
     }
@@ -2178,15 +2219,15 @@ mod tests {
     #[test]
     fn render_primitive_blend_mode_applied_only_when_not_normal() {
         let mut p = PrimitiveParams { blend_mode: "normal".into(), ..Default::default() };
-        assert!(!render_primitive("rect", &p).contains("mix-blend-mode"));
+        assert!(!render_primitive("rect", &p).0.contains("mix-blend-mode"));
         p.blend_mode = "multiply".into();
-        assert!(render_primitive("rect", &p).contains("mix-blend-mode: multiply"));
+        assert!(render_primitive("rect", &p).0.contains("mix-blend-mode: multiply"));
     }
 
     #[test]
     fn render_primitive_rejects_unknown_blend_mode() {
         let p = PrimitiveParams { blend_mode: "javascript:alert(1)".into(), ..Default::default() };
-        let html = render_primitive("rect", &p);
+        let (html, _) = render_primitive("rect", &p);
         assert!(!html.contains("javascript"));
         assert!(!html.contains("mix-blend-mode"));
     }
@@ -2212,10 +2253,47 @@ mod tests {
         el.kind = Some("rect".to_string());
         el.primitive = Some(PrimitiveParams { fill: "#abcdef".into(), ..Default::default() });
         let html = render_canvas(&[el]).unwrap();
-        // The primitive's fill color appears in the JSON-encoded srcdoc string;
-        // the template's own title text ("Hello <World>" from params()) must not.
+        // The primitive's fill color appears directly inline; the template's
+        // own title text ("Hello <World>" from params()) must not.
         assert!(html.contains("#abcdef"));
         assert!(!html.contains("Hello"));
+    }
+
+    #[test]
+    fn render_canvas_embeds_primitives_inline_not_as_an_iframe() {
+        // Inline (not iframed) is what makes mix-blend-mode able to blend
+        // against other elements at all — an iframe boundary would give it
+        // nothing to blend against but its own empty transparent backdrop.
+        let mut el = canvas_element("a", "lower-third", 10.0, 10.0, 0);
+        el.kind = Some("rect".to_string());
+        el.primitive = Some(PrimitiveParams { fill: "#abcdef".into(), ..Default::default() });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("<iframe"));
+        assert!(html.contains(r#"<div class="el""#));
+        assert!(html.contains("background:#abcdef"));
+    }
+
+    #[test]
+    fn render_canvas_loads_one_deduped_google_font_link_for_text_primitives() {
+        let mut a = canvas_element("a", "lower-third", 5.0, 5.0, 0);
+        a.kind = Some("text".to_string());
+        a.primitive = Some(PrimitiveParams { font_family: "Bebas Neue".into(), text: "A".into(), ..Default::default() });
+        let mut b = canvas_element("b", "lower-third", 40.0, 40.0, 1);
+        b.kind = Some("text".to_string());
+        b.primitive = Some(PrimitiveParams { font_family: "Bebas Neue".into(), text: "B".into(), ..Default::default() });
+        let html = render_canvas(&[a, b]).unwrap();
+        assert_eq!(html.matches("fonts.googleapis.com").count(), 1, "one shared <link>, not one per text element");
+        assert!(html.contains("family=Bebas+Neue"));
+        assert!(html.contains(r#"font-family:"Bebas Neue""#));
+    }
+
+    #[test]
+    fn render_canvas_no_font_link_when_text_primitive_uses_system_default() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 5.0, 0);
+        el.kind = Some("text".to_string());
+        el.primitive = Some(PrimitiveParams { font_family: String::new(), text: "A".into(), ..Default::default() });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("fonts.googleapis.com"));
     }
 
     #[test]
@@ -2299,14 +2377,31 @@ mod tests {
         assert!(html.contains(r#"id="el-1""#));
         assert!(html.contains("left:5%"));
         assert!(html.contains("top:10%"));
-        assert!(html.contains("z-index:1"));
         assert!(html.contains("left:60%"));
-        assert!(html.contains("z-index:2"));
+        // Stacking order is DOM/paint order, not the CSS z-index property
+        // (see render_canvas's own comment on why) — the higher z_index
+        // element (b, z=2) must appear later in the document than the
+        // lower one (a, z=1) so it paints on top.
+        assert!(html.find("left:5%").unwrap() < html.find("left:60%").unwrap());
+        assert!(!html.contains("z-index"));
         // Each element's full document (including its own <style>) is
         // embedded as a JSON-encoded srcdoc assignment, not inlined raw —
         // that's what keeps their CSS from colliding.
         assert!(html.contains("srcdoc ="));
         assert!(html.contains("Hello \\u003cWorld\\u003e") || html.contains("Hello &lt;World&gt;"));
+    }
+
+    #[test]
+    fn canvas_stacking_order_follows_z_index_even_when_input_order_differs() {
+        // Elements are given to render_canvas in reverse-z order — the
+        // output must still paint the higher-z one (b) after (on top of)
+        // the lower-z one (a), i.e. later in the DOM.
+        let elements = vec![
+            canvas_element("b", "goal-bar", 60.0, 70.0, 5),
+            canvas_element("a", "lower-third", 5.0, 10.0, 1),
+        ];
+        let html = render_canvas(&elements).unwrap();
+        assert!(html.find("left:5%").unwrap() < html.find("left:60%").unwrap());
     }
 
     #[test]
