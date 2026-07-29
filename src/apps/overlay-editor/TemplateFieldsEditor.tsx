@@ -30,16 +30,62 @@ function pushRecentColor(color: string) {
   }
 }
 
-/** A color picker plus swatches for the last few colors used across any
- * overlay — makes it fast to keep several widgets on a matching accent
- * without re-typing (or re-eyedropping) the same hex code each time. */
+// A deliberately-curated palette, distinct from "recent" (which is
+// automatic and unlabeled history) — you choose what goes in it and it
+// stays until you remove it, e.g. a brand's exact accent colors kept handy
+// across every overlay you ever build.
+const SAVED_PALETTE_KEY = "bd-overlay-saved-palette";
+
+function getSavedPalette(): string[] {
+  try {
+    const raw = localStorage.getItem(SAVED_PALETTE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((c) => typeof c === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveToPalette(color: string) {
+  try {
+    const next = [...getSavedPalette().filter((c) => c !== color), color].slice(-16);
+    localStorage.setItem(SAVED_PALETTE_KEY, JSON.stringify(next));
+  } catch {
+    // localStorage unavailable — the pin just won't persist
+  }
+}
+
+function removeFromPalette(color: string) {
+  try {
+    localStorage.setItem(SAVED_PALETTE_KEY, JSON.stringify(getSavedPalette().filter((c) => c !== color)));
+  } catch {
+    // no-op
+  }
+}
+
+/** A color picker plus two swatch rows: the last few colors used anywhere
+ * (automatic, unlabeled) and a deliberately-saved palette (pin/unpin, kept
+ * until you remove it) — makes it fast to keep every widget on a matching
+ * set of brand colors without re-typing (or re-eyedropping) the same hex
+ * code each time. */
 export function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   const [recent, setRecent] = useState<string[]>(() => getRecentColors());
+  const [palette, setPalette] = useState<string[]>(() => getSavedPalette());
 
   const commit = (v: string) => {
     onChange(v);
     pushRecentColor(v);
     setRecent(getRecentColors());
+  };
+
+  const pinCurrent = () => {
+    saveToPalette(value);
+    setPalette(getSavedPalette());
+  };
+
+  const unpin = (c: string) => {
+    removeFromPalette(c);
+    setPalette(getSavedPalette());
   };
 
   return (
@@ -65,6 +111,35 @@ export function ColorField({ label, value, onChange }: { label: string; value: s
           ))}
         </div>
       )}
+      <div className="flex items-center gap-1 mt-1 flex-wrap">
+        {palette.map((c) => (
+          <div key={c} className="relative group">
+            <button
+              type="button"
+              onClick={() => commit(c)}
+              title={c}
+              className="w-4 h-4 rounded border border-white/30 shrink-0"
+              style={{ background: c }}
+            />
+            <button
+              type="button"
+              onClick={() => unpin(c)}
+              title="Remove from saved palette"
+              className="absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full bg-black/80 border border-white/30 text-white/60 text-[7px] leading-none opacity-0 group-hover:opacity-100 flex items-center justify-center"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={pinCurrent}
+          title="Save this color to your palette"
+          className="w-4 h-4 rounded border border-dashed border-white/30 text-white/40 text-[9px] leading-none flex items-center justify-center hover:border-white/60 hover:text-white/70"
+        >
+          +
+        </button>
+      </div>
     </div>
   );
 }

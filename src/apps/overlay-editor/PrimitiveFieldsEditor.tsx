@@ -1,10 +1,51 @@
 // Fields for one free-form primitive layer (rect/ellipse/line/text/image) —
 // the free-form counterpart to TemplateFieldsEditor's whole-widget form.
 // Far fewer fields since a primitive is one shape, not a composed card.
+import { useState } from "react";
 import { BLEND_MODES, type ElementKind, type PrimitiveParams } from "../overlay-library/types";
 import { ColorField, SELECT_COMPACT_STYLE } from "./TemplateFieldsEditor";
 import { RangeSlider, Select } from "../../design-system/components/forms";
 import { Button } from "../../design-system/components/core";
+
+/** A saved "look" — every style field except the two that are actually
+ * content (`text`, `imageDataUri`), so one preset works across kinds: a
+ * gradient+shadow combo saved from a rectangle applies the same way to an
+ * ellipse, and a font+color combo saved from one text layer applies to
+ * another. */
+type StyleValues = Omit<PrimitiveParams, "text" | "imageDataUri">;
+interface StylePreset {
+  id: string;
+  name: string;
+  style: StyleValues;
+}
+const STYLE_PRESETS_KEY = "bd-overlay-style-presets";
+
+function getStylePresets(): StylePreset[] {
+  try {
+    const raw = localStorage.getItem(STYLE_PRESETS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStylePreset(name: string, style: StyleValues) {
+  try {
+    const next = [...getStylePresets(), { id: `style-${Date.now()}`, name, style }].slice(-20);
+    localStorage.setItem(STYLE_PRESETS_KEY, JSON.stringify(next));
+  } catch {
+    // localStorage unavailable — the preset just won't persist
+  }
+}
+
+function deleteStylePreset(id: string) {
+  try {
+    localStorage.setItem(STYLE_PRESETS_KEY, JSON.stringify(getStylePresets().filter((p) => p.id !== id)));
+  } catch {
+    // no-op
+  }
+}
 
 function NumberField({ label, value, onChange, min, max, step = 1 }: { label: string; value: number; onChange: (v: number) => void; min: number; max: number; step?: number }) {
   return (
@@ -38,8 +79,73 @@ export default function PrimitiveFieldsEditor({
   const isText = kind === "text";
   const isImage = kind === "image";
 
+  const [presets, setPresets] = useState<StylePreset[]>(() => getStylePresets());
+  const [presetName, setPresetName] = useState("");
+  const [showPresetSave, setShowPresetSave] = useState(false);
+
+  const applyPreset = (style: StyleValues) => {
+    (Object.keys(style) as (keyof StyleValues)[]).forEach((key) => set(key, style[key]));
+  };
+
+  const saveCurrentAsPreset = () => {
+    if (!presetName.trim()) return;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { text: _text, imageDataUri: _imageDataUri, ...style } = params;
+    saveStylePreset(presetName.trim(), style);
+    setPresets(getStylePresets());
+    setPresetName("");
+    setShowPresetSave(false);
+  };
+
   return (
     <div className="space-y-4">
+      <div className="space-y-1.5 pb-3 border-b border-white/[0.06]">
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] text-white/40 uppercase tracking-wide">Style Presets</label>
+          <button onClick={() => setShowPresetSave((s) => !s)} className="text-[10px] text-white/40 hover:text-white/70">
+            {showPresetSave ? "Cancel" : "+ Save Current"}
+          </button>
+        </div>
+        {showPresetSave && (
+          <div className="flex gap-1.5">
+            <input
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              placeholder="Preset name"
+              className="flex-1 min-w-0 input-glass text-[11px]"
+              onKeyDown={(e) => e.key === "Enter" && saveCurrentAsPreset()}
+            />
+            <Button variant="ghost" size="sm" onClick={saveCurrentAsPreset} disabled={!presetName.trim()}>
+              Save
+            </Button>
+          </div>
+        )}
+        {presets.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {presets.map((p) => (
+              <div key={p.id} className="relative group">
+                <button
+                  onClick={() => applyPreset(p.style)}
+                  title={`Apply "${p.name}"`}
+                  className="px-2 py-1 pr-4 rounded-lg text-[10px] text-white/60 bg-white/[0.03] border border-white/[0.06] hover:border-white/20"
+                >
+                  {p.name}
+                </button>
+                <button
+                  onClick={() => {
+                    deleteStylePreset(p.id);
+                    setPresets(getStylePresets());
+                  }}
+                  title="Delete preset"
+                  className="absolute top-1/2 -translate-y-1/2 right-1 w-3 h-3 rounded-full text-white/30 text-[8px] leading-none opacity-0 group-hover:opacity-100 hover:text-red-400"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       {hasFill && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">

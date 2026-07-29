@@ -40,6 +40,51 @@ function elementIconLabel(el: CanvasElementT): { icon: string; label: string } {
   return { icon: p.icon, label };
 }
 
+// A personal library of saved elements (any kind — a styled shape, a
+// pre-written text layer, a configured widget) you can drop onto ANY
+// canvas, not just this one — persisted in localStorage rather than with
+// the canvas file. Inserting one places a fresh independent copy (not a
+// live-linked instance): editing the library item later never retroactively
+// changes anything already placed from it.
+interface LibraryItem {
+  id: string;
+  name: string;
+  kind: ReturnType<typeof elementKind>;
+  widthPct: number;
+  heightPct: number;
+  rotation: number;
+  params: TemplateParams;
+  primitive?: PrimitiveParams;
+}
+const ELEMENT_LIBRARY_KEY = "bd-overlay-element-library";
+
+function getElementLibrary(): LibraryItem[] {
+  try {
+    const raw = localStorage.getItem(ELEMENT_LIBRARY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveToElementLibrary(item: LibraryItem) {
+  try {
+    const next = [...getElementLibrary(), item].slice(-30);
+    localStorage.setItem(ELEMENT_LIBRARY_KEY, JSON.stringify(next));
+  } catch {
+    // localStorage unavailable — the save just won't persist
+  }
+}
+
+function deleteFromElementLibrary(id: string) {
+  try {
+    localStorage.setItem(ELEMENT_LIBRARY_KEY, JSON.stringify(getElementLibrary().filter((i) => i.id !== id)));
+  } catch {
+    // no-op
+  }
+}
+
 function NumberField({ label, value, onChange, min, max }: { label: string; value: number; onChange: (v: number) => void; min: number; max: number }) {
   return (
     <div>
@@ -178,6 +223,9 @@ export default function CanvasMaker({
     JSON.stringify({ elements: initialElements ?? [], w: initialWidth ?? DEFAULT_CANVAS_W, h: initialHeight ?? DEFAULT_CANVAS_H })
   );
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [library, setLibrary] = useState<LibraryItem[]>(() => getElementLibrary());
+  const [showLibrarySave, setShowLibrarySave] = useState(false);
+  const [libraryItemName, setLibraryItemName] = useState("");
   const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -698,6 +746,47 @@ export default function CanvasMaker({
     setShowTemplatePicker(false);
   };
 
+  const saveSelectedToLibrary = () => {
+    if (!selected || !libraryItemName.trim()) return;
+    saveToElementLibrary({
+      id: `lib-${Date.now()}`,
+      name: libraryItemName.trim(),
+      kind: elementKind(selected),
+      widthPct: selected.widthPct,
+      heightPct: selected.heightPct,
+      rotation: selected.rotation ?? 0,
+      params: selected.params,
+      primitive: selected.primitive,
+    });
+    setLibrary(getElementLibrary());
+    setLibraryItemName("");
+    setShowLibrarySave(false);
+  };
+
+  const addFromLibrary = (item: LibraryItem) => {
+    recordBeforeChange(elements);
+    const el: CanvasElementT = {
+      id: `el-${Date.now()}`,
+      kind: item.kind,
+      rotation: item.rotation,
+      xPct: 8,
+      yPct: 8,
+      widthPct: item.widthPct,
+      heightPct: item.heightPct,
+      zIndex: elements.length,
+      params: { ...item.params },
+      primitive: item.primitive ? { ...item.primitive } : undefined,
+    };
+    setElements((prev) => [...prev, el]);
+    setSelectedId(el.id);
+    setShowTemplatePicker(false);
+  };
+
+  const removeFromLibrary = (id: string) => {
+    deleteFromElementLibrary(id);
+    setLibrary(getElementLibrary());
+  };
+
   const removeElement = (id: string) => {
     recordBeforeChange(elements);
     setElements((prev) => prev.filter((e) => e.id !== id));
@@ -1119,6 +1208,28 @@ export default function CanvasMaker({
               />
             </div>
 
+            {selected && (
+              <div className="space-y-1.5">
+                <Button variant="ghost" size="sm" onClick={() => setShowLibrarySave((s) => !s)} className="w-full">
+                  {showLibrarySave ? "Cancel" : "📚 Save to Library"}
+                </Button>
+                {showLibrarySave && (
+                  <div className="flex gap-1.5">
+                    <input
+                      value={libraryItemName}
+                      onChange={(e) => setLibraryItemName(e.target.value)}
+                      placeholder="Item name"
+                      className="flex-1 min-w-0 input-glass text-[11px]"
+                      onKeyDown={(e) => e.key === "Enter" && saveSelectedToLibrary()}
+                    />
+                    <Button variant="ghost" size="sm" onClick={saveSelectedToLibrary} disabled={!libraryItemName.trim()}>
+                      Save
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {showTemplatePicker ? (
               <div className="space-y-2 pt-1">
                 <div className="space-y-1">
@@ -1147,6 +1258,33 @@ export default function CanvasMaker({
                     </button>
                   ))}
                 </div>
+                {library.length > 0 && (
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-white/30 uppercase tracking-wide block px-0.5">
+                      My Library — reusable elements saved from any canvas
+                    </label>
+                    {library.map((item) => {
+                      const p = item.kind === "template" ? TEMPLATES.find((t) => t.id === item.params.template) : PRIMITIVES.find((pp) => pp.id === item.kind);
+                      return (
+                        <div key={item.id} className="flex items-center gap-1">
+                          <button
+                            onClick={() => addFromLibrary(item)}
+                            className="flex-1 text-left px-2.5 py-1.5 rounded-lg text-[11px] text-white/60 bg-white/[0.02] border border-white/[0.06] hover:border-white/15 truncate"
+                          >
+                            {p?.icon ?? "▭"} {item.name}
+                          </button>
+                          <button
+                            onClick={() => removeFromLibrary(item.id)}
+                            title="Remove from library"
+                            className="text-[10px] text-white/20 hover:text-red-400 px-1"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <button onClick={() => setShowTemplatePicker(false)} className="w-full text-[10px] text-white/25 pt-1">
                   Cancel
                 </button>
