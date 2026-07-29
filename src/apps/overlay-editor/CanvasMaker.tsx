@@ -374,6 +374,10 @@ export default function CanvasMaker({
   const clipboardRef = useRef<CanvasElementT[] | null>(null);
   const [gridEnabled, setGridEnabled] = useState(false);
   const [gridSize, setGridSize] = useState(20);
+  // Broadcast-safe guides — purely visual, editor-only (never affects the
+  // rendered overlay), so a plain toggle is all this needs, no ref/effect
+  // plumbing into the mousemove handler the way grid snapping needed.
+  const [safeZonesEnabled, setSafeZonesEnabled] = useState(false);
   // Read inside the [] deps mousemove effect, so a ref (not the state
   // directly) — same reason elementsRef exists.
   const gridConfigRef = useRef({ enabled: gridEnabled, size: gridSize });
@@ -2049,6 +2053,17 @@ export default function CanvasMaker({
                       title="Grid size (px)"
                     />
                   )}
+                  <button
+                    onClick={() => setSafeZonesEnabled((s) => !s)}
+                    title="Toggle title-safe/action-safe broadcast guides (editor-only, never rendered)"
+                    className={`px-2 py-1 rounded-md text-[10px] border ${
+                      safeZonesEnabled
+                        ? "bg-purple-500/15 border-purple-500/40 text-white"
+                        : "bg-white/[0.03] border-white/[0.06] text-white/50 hover:border-white/20"
+                    }`}
+                  >
+                    ⛶ Safe Zones
+                  </button>
                 </div>
               </div>
             </div>
@@ -2154,6 +2169,28 @@ export default function CanvasMaker({
                   </div>
                 );
               })}
+
+              {safeZonesEnabled && (
+                <>
+                  {/* Standard broadcast convention: 90% action-safe (5% margin), 80% title-safe (10% margin). */}
+                  <div
+                    className="absolute border border-dashed border-amber-400/50 pointer-events-none"
+                    style={{ inset: "5%" }}
+                  >
+                    <span className="absolute -top-4 left-0 text-[8px] text-amber-400/60 whitespace-nowrap">
+                      Action Safe (90%)
+                    </span>
+                  </div>
+                  <div
+                    className="absolute border border-dashed border-red-400/50 pointer-events-none"
+                    style={{ inset: "10%" }}
+                  >
+                    <span className="absolute -top-4 left-0 text-[8px] text-red-400/60 whitespace-nowrap">
+                      Title Safe (80%)
+                    </span>
+                  </div>
+                </>
+              )}
 
               {guideX != null && (
                 <div className="absolute top-0 bottom-0 w-px bg-purple-400/80 pointer-events-none" style={{ left: `${guideX}%` }} />
