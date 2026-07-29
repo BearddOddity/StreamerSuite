@@ -302,6 +302,12 @@ pub(crate) struct TemplateParams {
 pub(crate) struct CanvasElement {
     #[serde(default)]
     id: String,
+    /// "template" (the default, absent on every element saved before
+    /// free-form primitives existed) or one of the primitive shapes —
+    /// `rect`/`ellipse`/`line`/`text`/`image`. Drives which of `params`
+    /// (template) or `primitive` (shape) render_canvas actually reads.
+    #[serde(default)]
+    kind: Option<String>,
     #[serde(default = "default_x_pct")]
     x_pct: f32,
     #[serde(default = "default_y_pct")]
@@ -312,6 +318,11 @@ pub(crate) struct CanvasElement {
     height_pct: f32,
     #[serde(default)]
     z_index: i32,
+    /// Degrees, any kind — applied as a CSS transform on the element's own
+    /// iframe wrapper in render_canvas, so it never has to be understood by
+    /// render_template/render_primitive themselves.
+    #[serde(default)]
+    rotation: f32,
     /// Editor-only bookkeeping — never affects the rendered HTML, just
     /// whether the Canvas Maker lets this element be dragged/resized and
     /// whether it moves together with other elements sharing its `group_id`.
@@ -319,7 +330,119 @@ pub(crate) struct CanvasElement {
     locked: bool,
     #[serde(default)]
     group_id: Option<String>,
+    /// Used when `kind` is "template" (or absent) — unused-but-present for
+    /// primitive elements too, so a mixed canvas round-trips through any
+    /// code path that still assumes every element has a full `params`.
+    /// (No `#[serde(default)]` here — TemplateParams isn't Default, and
+    /// every element, primitive or not, already carries a full one from
+    /// the frontend.)
     params: TemplateParams,
+    /// Used when `kind` is a primitive shape; absent/ignored for templates.
+    #[serde(default)]
+    primitive: Option<PrimitiveParams>,
+}
+
+/// A free-form shape/text/image layer — the non-template element kinds.
+/// Every field has a serde default so an element that predates a given
+/// field (or a hand-edited/AI-generated one missing fields) still renders
+/// something reasonable instead of failing to parse.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PrimitiveParams {
+    #[serde(default = "default_accent_color")]
+    fill: String,
+    #[serde(default = "default_one_f32")]
+    fill_opacity: f32,
+    #[serde(default = "default_transparent")]
+    stroke: String,
+    #[serde(default)]
+    stroke_width: f32,
+    #[serde(default)]
+    corner_radius: f32,
+    #[serde(default = "default_one_f32")]
+    opacity: f32,
+    #[serde(default)]
+    shadow: bool,
+    #[serde(default = "default_shadow_color")]
+    shadow_color: String,
+    #[serde(default = "default_shadow_blur")]
+    shadow_blur: f32,
+    #[serde(default)]
+    shadow_offset_x: f32,
+    #[serde(default = "default_shadow_offset_y")]
+    shadow_offset_y: f32,
+    /// Text kind only.
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    font_family: String,
+    #[serde(default = "default_font_size")]
+    font_size: f32,
+    #[serde(default = "default_font_weight")]
+    font_weight: u32,
+    #[serde(default = "default_text_color")]
+    text_color: String,
+    #[serde(default = "default_text_align")]
+    text_align: String,
+    /// Image kind only.
+    #[serde(default)]
+    image_data_uri: Option<String>,
+    #[serde(default = "default_object_fit")]
+    object_fit: String,
+}
+
+impl Default for PrimitiveParams {
+    fn default() -> Self {
+        PrimitiveParams {
+            fill: default_accent_color(),
+            fill_opacity: default_one_f32(),
+            stroke: default_transparent(),
+            stroke_width: 0.0,
+            corner_radius: 0.0,
+            opacity: default_one_f32(),
+            shadow: false,
+            shadow_color: default_shadow_color(),
+            shadow_blur: default_shadow_blur(),
+            shadow_offset_x: 0.0,
+            shadow_offset_y: default_shadow_offset_y(),
+            text: String::new(),
+            font_family: String::new(),
+            font_size: default_font_size(),
+            font_weight: default_font_weight(),
+            text_color: default_text_color(),
+            text_align: default_text_align(),
+            image_data_uri: None,
+            object_fit: default_object_fit(),
+        }
+    }
+}
+
+fn default_one_f32() -> f32 {
+    1.0
+}
+fn default_transparent() -> String {
+    "transparent".into()
+}
+fn default_shadow_color() -> String {
+    "#000000".into()
+}
+fn default_shadow_blur() -> f32 {
+    12.0
+}
+fn default_shadow_offset_y() -> f32 {
+    4.0
+}
+fn default_font_size() -> f32 {
+    48.0
+}
+fn default_font_weight() -> u32 {
+    700
+}
+fn default_text_align() -> String {
+    "left".into()
+}
+fn default_object_fit() -> String {
+    "contain".into()
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
@@ -418,6 +541,16 @@ fn safe_logo(input: &Option<String>) -> Option<String> {
 
 fn clamp01(v: f32) -> f32 {
     v.clamp(0.0, 1.0)
+}
+
+/// Same hex-only validation as `safe_color`, but also accepts the literal
+/// "transparent" — needed for primitive shapes' fill/stroke, which default
+/// to no fill/no stroke rather than a specific color.
+fn safe_color_or_transparent(input: &str) -> String {
+    if input == "transparent" {
+        return input.to_string();
+    }
+    safe_color(input, "transparent")
 }
 
 /// Only a `data:` URI is accepted for an uploaded font — most browsers/OSes
@@ -1195,6 +1328,81 @@ pub(crate) fn overlay_preview_template(params: TemplateParams) -> Result<String,
     render_template(&params)
 }
 
+/// A free-form shape/text/image layer — much simpler than render_template
+/// since there's no position-preset/animation/font-upload system to thread
+/// through, just the one shape's own fill/stroke/effects. Infallible (no
+/// external call can fail here), unlike render_template.
+fn render_primitive(kind: &str, p: &PrimitiveParams) -> String {
+    let fill = safe_color_or_transparent(&p.fill);
+    let fill_opacity = clamp01(p.fill_opacity);
+    let stroke = safe_color_or_transparent(&p.stroke);
+    let stroke_width = p.stroke_width.clamp(0.0, 60.0);
+    let corner_radius = p.corner_radius.clamp(0.0, 500.0);
+    let opacity = clamp01(p.opacity);
+    let shadow_css = if p.shadow {
+        let color = safe_color(&p.shadow_color, "#000000");
+        let blur = p.shadow_blur.clamp(0.0, 120.0);
+        let ox = p.shadow_offset_x.clamp(-300.0, 300.0);
+        let oy = p.shadow_offset_y.clamp(-300.0, 300.0);
+        format!("filter: drop-shadow({ox}px {oy}px {blur}px {color});")
+    } else {
+        String::new()
+    };
+
+    let body = match kind {
+        "ellipse" => format!(
+            r#"<div style="width:100%; height:100%; box-sizing:border-box; background:{fill}; opacity:{fill_opacity}; border:{stroke_width}px solid {stroke}; border-radius:50%;"></div>"#
+        ),
+        "line" => format!(
+            r#"<div style="width:100%; height:100%; background:{fill}; opacity:{fill_opacity};"></div>"#
+        ),
+        "text" => {
+            let text_color = safe_color(&p.text_color, &default_text_color());
+            let (text_align, justify) = match p.text_align.as_str() {
+                "center" => ("center", "center"),
+                "right" => ("right", "flex-end"),
+                _ => ("left", "flex-start"),
+            };
+            let font_family = safe_font_family(&p.font_family)
+                .map(|f| format!("\"{f}\", {FONT_STACK}"))
+                .unwrap_or_else(|| FONT_STACK.to_string());
+            let font_size = p.font_size.clamp(4.0, 400.0);
+            let font_weight = p.font_weight.clamp(100, 900);
+            let text = escape_html(&p.text).replace('\n', "<br>");
+            format!(
+                r#"<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:{justify}; text-align:{text_align}; color:{text_color}; font-family:{font_family}; font-size:{font_size}px; font-weight:{font_weight}; white-space:pre-wrap; word-break:break-word; overflow:hidden;">{text}</div>"#
+            )
+        }
+        "image" => {
+            let fit = match p.object_fit.as_str() {
+                "cover" => "cover",
+                "fill" => "fill",
+                _ => "contain",
+            };
+            match safe_logo(&p.image_data_uri) {
+                Some(src) => format!(r#"<img src="{src}" alt="" style="width:100%; height:100%; object-fit:{fit}; display:block;">"#),
+                None => r#"<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,0.3); font-family:sans-serif; font-size:14px;">No image</div>"#.to_string(),
+            }
+        }
+        // "rect" and any unrecognized kind (defensive — shouldn't happen,
+        // render_canvas only calls this for a non-"template" kind).
+        _ => format!(
+            r#"<div style="width:100%; height:100%; box-sizing:border-box; background:{fill}; opacity:{fill_opacity}; border:{stroke_width}px solid {stroke}; border-radius:{corner_radius}px;"></div>"#
+        ),
+    };
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><style>html, body {{ margin: 0; padding: 0; background: transparent; overflow: hidden; }}</style></head>
+<body>
+<div style="width:100%; height:100%; opacity:{opacity}; {shadow_css}">{body}</div>
+</body>
+</html>
+"#
+    )
+}
+
 /// A Canvas overlay is one page holding several independently-placed
 /// widgets. Rather than teaching every template arm above to render inside
 /// a shared, CSS-scoped fragment (real risk of `.title`/`#card` rules from
@@ -1208,15 +1416,31 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
     let mut iframes = String::new();
     let mut assigns = String::new();
     for (i, el) in elements.iter().enumerate() {
-        let inner_html = render_template(&el.params)?;
+        let kind = el.kind.as_deref().unwrap_or("template");
+        let inner_html = if kind == "template" {
+            render_template(&el.params)?
+        } else {
+            let default_primitive = PrimitiveParams::default();
+            render_primitive(kind, el.primitive.as_ref().unwrap_or(&default_primitive))
+        };
         let x = el.x_pct.clamp(0.0, 100.0);
         let y = el.y_pct.clamp(0.0, 100.0);
         let w = el.width_pct.clamp(2.0, 100.0);
         let h = el.height_pct.clamp(2.0, 100.0);
         let z = el.z_index;
+        // Rotation is applied here (on the iframe wrapper), not inside
+        // render_template/render_primitive — a rotated template still
+        // renders exactly like an unrotated one internally, it's just
+        // spun as a whole around its own center.
+        let rotation = el.rotation.clamp(-360.0, 360.0);
+        let transform = if rotation != 0.0 {
+            format!("transform: rotate({rotation}deg); transform-origin: center center;")
+        } else {
+            String::new()
+        };
         let frame_id = format!("el-{i}");
         iframes.push_str(&format!(
-            r#"<iframe id="{frame_id}" class="el" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; z-index:{z};"></iframe>"#
+            r#"<iframe id="{frame_id}" class="el" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; z-index:{z}; {transform}"></iframe>"#
         ));
         // JSON-encoding the whole rendered document is what makes embedding
         // it safely inside a <script> block trivial — serde_json already
@@ -1305,13 +1529,16 @@ fn build_canvas_from_specs(specs: Vec<AiElementSpec>) -> Vec<CanvasElement> {
         .filter(|(_, spec)| VALID_TEMPLATES.contains(&spec.template.as_str()))
         .map(|(i, spec)| CanvasElement {
             id: format!("ai-{i}"),
+            kind: None,
             x_pct: spec.x_pct.clamp(0.0, 90.0),
             y_pct: spec.y_pct.clamp(0.0, 90.0),
             width_pct: if spec.width_pct <= 0.0 { 30.0 } else { spec.width_pct.clamp(10.0, 60.0) },
             height_pct: if spec.height_pct <= 0.0 { 20.0 } else { spec.height_pct.clamp(10.0, 50.0) },
             z_index: i as i32,
+            rotation: 0.0,
             locked: false,
             group_id: None,
+            primitive: None,
             params: TemplateParams {
                 template: spec.template,
                 title: BoundField { text: spec.title.chars().take(80).collect(), source: String::new() },
@@ -1767,15 +1994,126 @@ mod tests {
     fn canvas_element(id: &str, template: &str, x: f32, y: f32, z: i32) -> CanvasElement {
         CanvasElement {
             id: id.to_string(),
+            kind: None,
             x_pct: x,
             y_pct: y,
             width_pct: 30.0,
             height_pct: 20.0,
             z_index: z,
+            rotation: 0.0,
             locked: false,
             group_id: None,
+            primitive: None,
             params: params(template),
         }
+    }
+
+    #[test]
+    fn render_primitive_rect_uses_fill_stroke_and_corner_radius() {
+        let p = PrimitiveParams { fill: "#ff0000".into(), fill_opacity: 0.5, stroke: "#00ff00".into(), stroke_width: 3.0, corner_radius: 12.0, ..Default::default() };
+        let html = render_primitive("rect", &p);
+        assert!(html.contains("background:#ff0000"));
+        assert!(html.contains("opacity:0.5"));
+        assert!(html.contains("border:3px solid #00ff00"));
+        assert!(html.contains("border-radius:12px"));
+    }
+
+    #[test]
+    fn render_primitive_ellipse_is_always_fully_rounded() {
+        let p = PrimitiveParams { fill: "#123456".into(), ..Default::default() };
+        let html = render_primitive("ellipse", &p);
+        assert!(html.contains("border-radius:50%"));
+    }
+
+    #[test]
+    fn render_primitive_text_escapes_and_applies_style() {
+        let p = PrimitiveParams { text: "<script>x".into(), text_color: "#eeeeee".into(), font_size: 60.0, font_weight: 900, text_align: "center".into(), ..Default::default() };
+        let html = render_primitive("text", &p);
+        assert!(html.contains("&lt;script&gt;x"));
+        assert!(!html.contains("<script>x"));
+        assert!(html.contains("color:#eeeeee"));
+        assert!(html.contains("font-size:60px"));
+        assert!(html.contains("font-weight:900"));
+        assert!(html.contains("justify-content:center"));
+    }
+
+    #[test]
+    fn render_primitive_image_rejects_non_data_uri() {
+        let p = PrimitiveParams { image_data_uri: Some("https://evil.example/x.png".into()), ..Default::default() };
+        let html = render_primitive("image", &p);
+        assert!(!html.contains("https://evil.example"));
+        assert!(html.contains("No image"));
+    }
+
+    #[test]
+    fn render_primitive_image_accepts_data_uri() {
+        let p = PrimitiveParams { image_data_uri: Some("data:image/png;base64,AAAA".into()), object_fit: "cover".into(), ..Default::default() };
+        let html = render_primitive("image", &p);
+        assert!(html.contains("data:image/png;base64,AAAA"));
+        assert!(html.contains("object-fit:cover"));
+    }
+
+    #[test]
+    fn render_primitive_applies_drop_shadow_only_when_enabled() {
+        let mut p = PrimitiveParams { shadow: false, ..Default::default() };
+        assert!(!render_primitive("rect", &p).contains("drop-shadow"));
+        p.shadow = true;
+        p.shadow_blur = 20.0;
+        assert!(render_primitive("rect", &p).contains("drop-shadow"));
+    }
+
+    #[test]
+    fn render_canvas_applies_rotation_transform_to_the_iframe_wrapper() {
+        let mut el = canvas_element("a", "lower-third", 10.0, 10.0, 0);
+        el.rotation = 45.0;
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains("transform: rotate(45deg)"));
+    }
+
+    #[test]
+    fn render_canvas_no_transform_when_rotation_is_zero() {
+        let el = canvas_element("a", "lower-third", 10.0, 10.0, 0);
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("rotate("));
+    }
+
+    #[test]
+    fn render_canvas_dispatches_primitive_kinds_to_render_primitive_not_render_template() {
+        let mut el = canvas_element("a", "lower-third", 10.0, 10.0, 0);
+        el.kind = Some("rect".to_string());
+        el.primitive = Some(PrimitiveParams { fill: "#abcdef".into(), ..Default::default() });
+        let html = render_canvas(&[el]).unwrap();
+        // The primitive's fill color appears in the JSON-encoded srcdoc string;
+        // the template's own title text ("Hello <World>" from params()) must not.
+        assert!(html.contains("#abcdef"));
+        assert!(!html.contains("Hello"));
+    }
+
+    #[test]
+    fn canvas_element_with_kind_and_rotation_round_trips_through_json() {
+        let mut el = canvas_element("a", "lower-third", 10.0, 20.0, 1);
+        el.kind = Some("text".to_string());
+        el.rotation = 90.0;
+        el.primitive = Some(PrimitiveParams { text: "hi".into(), ..Default::default() });
+        let json = serde_json::to_string(&el).unwrap();
+        let back: CanvasElement = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.kind.as_deref(), Some("text"));
+        assert_eq!(back.rotation, 90.0);
+        assert_eq!(back.primitive.unwrap().text, "hi");
+    }
+
+    #[test]
+    fn canvas_element_missing_kind_rotation_primitive_deserializes_as_pre_existing_template() {
+        // A saved canvas from before primitives existed has none of these
+        // fields at all — must still parse and behave as a template element.
+        let old_json = r#"{
+            "id": "a", "xPct": 10.0, "yPct": 10.0, "widthPct": 30.0, "heightPct": 20.0, "zIndex": 0,
+            "params": { "template": "lower-third", "title": {"text": "t", "source": ""}, "subtitle": {"text": "", "source": ""} }
+        }"#;
+        let el: CanvasElement = serde_json::from_str(old_json).unwrap();
+        assert_eq!(el.kind, None);
+        assert_eq!(el.rotation, 0.0);
+        assert!(el.primitive.is_none());
     }
 
     #[test]

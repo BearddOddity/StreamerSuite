@@ -242,12 +242,90 @@ export const DEFAULT_TEMPLATE_PARAMS: TemplateParams = {
   countdownTarget: "",
 };
 
-/** One placed widget inside a Canvas overlay — the exact same per-widget
- * fields as a standalone overlay (`params`), plus where it sits and how big
- * it is inside the canvas (percent of the canvas, not pixels, so it holds
- * up across any OBS Browser Source resolution) and its stacking order. */
+/** A placed element is either one of the 10 pre-designed template widgets,
+ * or a free-form primitive shape/text/image layer. "template" is the
+ * default/absent value — every canvas saved before primitives existed has
+ * no `kind` field at all and should keep behaving exactly as it did. */
+export type ElementKind = "template" | "rect" | "ellipse" | "line" | "text" | "image";
+
+export interface PrimitiveDef {
+  id: Exclude<ElementKind, "template">;
+  label: string;
+  icon: string;
+}
+
+export const PRIMITIVES: PrimitiveDef[] = [
+  { id: "rect", label: "Rectangle", icon: "▭" },
+  { id: "ellipse", label: "Ellipse", icon: "⬭" },
+  { id: "line", label: "Line", icon: "➖" },
+  { id: "text", label: "Text", icon: "T" },
+  { id: "image", label: "Image", icon: "🖼" },
+];
+
+/** Style fields for a free-form primitive layer — a single self-contained
+ * shape/text/image, not a whole composed widget the way TemplateParams is.
+ * Every field applies to every kind except where noted; unused fields for a
+ * given kind (e.g. `text` on a rectangle) are simply ignored at render time
+ * rather than needing a separate type per kind. */
+export interface PrimitiveParams {
+  fill: string;
+  fillOpacity: number;
+  stroke: string;
+  strokeWidth: number;
+  /** Rectangle only — ellipse is always fully rounded, other kinds ignore it. */
+  cornerRadius: number;
+  opacity: number;
+  shadow: boolean;
+  shadowColor: string;
+  shadowBlur: number;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
+  /** Text kind only. */
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  textColor: string;
+  textAlign: "left" | "center" | "right";
+  /** Image kind only. */
+  imageDataUri: string | null;
+  objectFit: "contain" | "cover" | "fill";
+}
+
+export const DEFAULT_PRIMITIVE_PARAMS: PrimitiveParams = {
+  fill: "#9146ff",
+  fillOpacity: 1,
+  stroke: "transparent",
+  strokeWidth: 0,
+  cornerRadius: 0,
+  opacity: 1,
+  shadow: false,
+  shadowColor: "#000000",
+  shadowBlur: 12,
+  shadowOffsetX: 0,
+  shadowOffsetY: 4,
+  text: "Text",
+  fontFamily: "",
+  fontSize: 48,
+  fontWeight: 700,
+  textColor: "#ffffff",
+  textAlign: "left",
+  imageDataUri: null,
+  objectFit: "contain",
+};
+
+/** One placed widget/shape inside a Canvas overlay — where it sits and how
+ * big it is (percent of the canvas, not pixels, so it holds up across any
+ * OBS Browser Source resolution), its rotation and stacking order, and
+ * either `params` (a template widget) or `primitive` (a free-form shape),
+ * per `kind`. */
 export interface CanvasElementT {
   id: string;
+  /** Absent/"template" = a pre-designed widget (`params`); anything else is
+   * a free-form primitive (`primitive`). */
+  kind?: ElementKind;
+  /** Degrees, any kind. */
+  rotation?: number;
   xPct: number;
   yPct: number;
   widthPct: number;
@@ -257,7 +335,16 @@ export interface CanvasElementT {
   locked?: boolean;
   /** Elements sharing a groupId move together when any one of them is dragged. */
   groupId?: string | null;
+  /** Used when kind is "template" (or absent). Always present (even on a
+   * primitive element, where it's an unused default) so any code path that
+   * assumes every element has full params never has to null-check it. */
   params: TemplateParams;
+  /** Used when kind is a primitive shape; absent/ignored for templates. */
+  primitive?: PrimitiveParams;
+}
+
+export function elementKind(el: CanvasElementT): ElementKind {
+  return el.kind ?? "template";
 }
 
 export function newCanvasElement(template: OverlayTemplateId, index: number): CanvasElementT {
@@ -267,11 +354,38 @@ export function newCanvasElement(template: OverlayTemplateId, index: number): Ca
   const offset = (index % 4) * 8;
   return {
     id: `el-${Date.now()}-${index}`,
+    kind: "template",
+    rotation: 0,
     xPct: 8 + offset,
     yPct: 8 + offset,
     widthPct: 32,
     heightPct: 22,
     zIndex: index,
     params: { ...DEFAULT_TEMPLATE_PARAMS, template },
+  };
+}
+
+const PRIMITIVE_DEFAULT_SIZE: Record<Exclude<ElementKind, "template">, { w: number; h: number }> = {
+  rect: { w: 24, h: 16 },
+  ellipse: { w: 20, h: 20 },
+  line: { w: 24, h: 0.6 },
+  text: { w: 30, h: 8 },
+  image: { w: 24, h: 24 },
+};
+
+export function newPrimitiveElement(kind: Exclude<ElementKind, "template">, index: number): CanvasElementT {
+  const offset = (index % 4) * 8;
+  const size = PRIMITIVE_DEFAULT_SIZE[kind];
+  return {
+    id: `el-${Date.now()}-${index}`,
+    kind,
+    rotation: 0,
+    xPct: 8 + offset,
+    yPct: 8 + offset,
+    widthPct: size.w,
+    heightPct: size.h,
+    zIndex: index,
+    params: { ...DEFAULT_TEMPLATE_PARAMS },
+    primitive: { ...DEFAULT_PRIMITIVE_PARAMS },
   };
 }

@@ -33,7 +33,7 @@ function pushRecentColor(color: string) {
 /** A color picker plus swatches for the last few colors used across any
  * overlay — makes it fast to keep several widgets on a matching accent
  * without re-typing (or re-eyedropping) the same hex code each time. */
-function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+export function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   const [recent, setRecent] = useState<string[]>(() => getRecentColors());
 
   const commit = (v: string) => {

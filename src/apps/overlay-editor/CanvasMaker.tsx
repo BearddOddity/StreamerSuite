@@ -6,13 +6,39 @@
 // CSS can never collide with each other.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { TEMPLATES, newCanvasElement, type CanvasElementT, type TemplateParams } from "../overlay-library/types";
+import {
+  TEMPLATES,
+  PRIMITIVES,
+  newCanvasElement,
+  newPrimitiveElement,
+  elementKind,
+  DEFAULT_PRIMITIVE_PARAMS,
+  type CanvasElementT,
+  type TemplateParams,
+  type PrimitiveParams,
+} from "../overlay-library/types";
 import { useLiveSources } from "../overlay-library/useLiveSources";
 import TemplateFieldsEditor from "./TemplateFieldsEditor";
+import PrimitiveFieldsEditor from "./PrimitiveFieldsEditor";
 import { SaveChoiceDialog, UnsavedChangesDialog } from "./ConfirmDialogs";
 import VersionHistoryPanel from "./VersionHistoryPanel";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
 import { Tooltip } from "../../design-system/components/overlay";
+
+/** Icon + display label for a Layers row or the on-canvas floating label —
+ * a template widget uses its TEMPLATES entry (icon + title/type name); a
+ * primitive uses its PRIMITIVES entry (icon + shape name, or its own text
+ * for a Text layer so multiple text layers are distinguishable at a glance). */
+function elementIconLabel(el: CanvasElementT): { icon: string; label: string } {
+  const kind = elementKind(el);
+  if (kind === "template") {
+    const t = TEMPLATES.find((tt) => tt.id === el.params.template);
+    return { icon: t?.icon ?? "▭", label: el.params.title.text || t?.label || "Widget" };
+  }
+  const p = PRIMITIVES.find((pp) => pp.id === kind)!;
+  const label = kind === "text" && el.primitive?.text ? el.primitive.text.slice(0, 24) : p.label;
+  return { icon: p.icon, label };
+}
 
 function NumberField({ label, value, onChange, min, max }: { label: string; value: number; onChange: (v: number) => void; min: number; max: number }) {
   return (
@@ -58,6 +84,20 @@ function snap(value: number, targets: number[]): { value: number; hit: number | 
     if (Math.abs(value - t) <= SNAP_THRESHOLD_PCT) return { value: t, hit: t };
   }
   return { value, hit: null };
+}
+
+/** Angle (degrees) from a shape's center to the mouse, offset so "straight
+ * up" (where the rotate handle sits, since the handle is a child of the
+ * same rotated box and so already tracks the shape's current rotation
+ * visually) reads as 0° — matches render_canvas's own rotate(deg). */
+function angleFromCenter(centerX: number, centerY: number, mouseX: number, mouseY: number): number {
+  return (Math.atan2(mouseY - centerY, mouseX - centerX) * 180) / Math.PI + 90;
+}
+
+interface RotateState {
+  id: string;
+  centerX: number;
+  centerY: number;
 }
 
 type DragMode = "move" | "resize";
@@ -116,6 +156,7 @@ export default function CanvasMaker({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const rotateRef = useRef<RotateState | null>(null);
   const pendingBeforeRef = useRef<CanvasElementT[] | null>(null);
   const historyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -232,6 +273,7 @@ export default function CanvasMaker({
       ...selected,
       id: `el-${Date.now()}`,
       params: { ...selected.params },
+      primitive: selected.primitive ? { ...selected.primitive } : undefined,
       xPct: Math.min(96, selected.xPct + 3),
       yPct: Math.min(96, selected.yPct + 3),
       zIndex: elements.length,
@@ -303,6 +345,15 @@ export default function CanvasMaker({
   // direct-manipulation interaction the number inputs alone don't give you.
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
+      const r = rotateRef.current;
+      if (r) {
+        const angle = Math.round(angleFromCenter(r.centerX, r.centerY, e.clientX, e.clientY));
+        setElements((prev) => {
+          recordBeforeChange(prev);
+          return prev.map((e2) => (e2.id === r.id ? { ...e2, rotation: angle } : e2));
+        });
+        return;
+      }
       const d = dragRef.current;
       if (!d) return;
       const dxPct = ((e.clientX - d.startMouseX) / d.rectW) * 100;
@@ -353,6 +404,7 @@ export default function CanvasMaker({
     };
     const onUp = () => {
       dragRef.current = null;
+      rotateRef.current = null;
       setGuideX(null);
       setGuideY(null);
     };
@@ -391,6 +443,21 @@ export default function CanvasMaker({
     };
   };
 
+  const startRotate = (e: React.MouseEvent, el: CanvasElementT) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedId(el.id);
+    setMultiSelected(new Set());
+    if (el.locked) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    rotateRef.current = {
+      id: el.id,
+      centerX: rect.left + ((el.xPct + el.widthPct / 2) / 100) * rect.width,
+      centerY: rect.top + ((el.yPct + el.heightPct / 2) / 100) * rect.height,
+    };
+  };
+
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
@@ -424,6 +491,14 @@ export default function CanvasMaker({
     setShowTemplatePicker(false);
   };
 
+  const addPrimitive = (kind: (typeof PRIMITIVES)[number]["id"]) => {
+    recordBeforeChange(elements);
+    const el = newPrimitiveElement(kind, elements.length);
+    setElements((prev) => [...prev, el]);
+    setSelectedId(el.id);
+    setShowTemplatePicker(false);
+  };
+
   const removeElement = (id: string) => {
     recordBeforeChange(elements);
     setElements((prev) => prev.filter((e) => e.id !== id));
@@ -437,7 +512,18 @@ export default function CanvasMaker({
     );
   };
 
-  const setSelectedPlacement = (patch: Partial<Pick<CanvasElementT, "xPct" | "yPct" | "widthPct" | "heightPct" | "zIndex">>) => {
+  const setSelectedPrimitive = <K extends keyof PrimitiveParams>(key: K, value: PrimitiveParams[K]) => {
+    recordBeforeChange(elements);
+    setElements((prev) =>
+      prev.map((e) =>
+        e.id === selectedId
+          ? { ...e, primitive: { ...(e.primitive ?? DEFAULT_PRIMITIVE_PARAMS), [key]: value } }
+          : e
+      )
+    );
+  };
+
+  const setSelectedPlacement = (patch: Partial<Pick<CanvasElementT, "xPct" | "yPct" | "widthPct" | "heightPct" | "zIndex" | "rotation">>) => {
     recordBeforeChange(elements);
     setElements((prev) => prev.map((e) => (e.id === selectedId ? { ...e, ...patch } : e)));
   };
@@ -645,7 +731,7 @@ export default function CanvasMaker({
               {[...elements]
                 .sort((a, b) => b.zIndex - a.zIndex)
                 .map((el) => {
-                  const t = TEMPLATES.find((t) => t.id === el.params.template)!;
+                  const { icon, label } = elementIconLabel(el);
                   const isPicked = multiSelected.size > 0 ? multiSelected.has(el.id) : selectedId === el.id;
                   return (
                     <div
@@ -670,10 +756,8 @@ export default function CanvasMaker({
                       }`}
                     >
                       <span className="text-white/15 text-[10px] leading-none">⋮⋮</span>
-                      <span className="text-[13px]">{t.icon}</span>
-                      <span className="text-[11px] text-white/70 flex-1 truncate">
-                        {el.params.title.text || t.label}
-                      </span>
+                      <span className="text-[13px]">{icon}</span>
+                      <span className="text-[11px] text-white/70 flex-1 truncate">{label}</span>
                       {el.groupId && (
                         <Tooltip label="Grouped — moves together with linked elements">
                           <span className="text-[10px] text-purple-300/70">🔗</span>
@@ -736,16 +820,33 @@ export default function CanvasMaker({
             </div>
 
             {showTemplatePicker ? (
-              <div className="space-y-1 pt-1">
-                {TEMPLATES.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => addElement(t.id)}
-                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] text-white/60 bg-white/[0.02] border border-white/[0.06] hover:border-white/15"
-                  >
-                    {t.icon} {t.label}
-                  </button>
-                ))}
+              <div className="space-y-2 pt-1">
+                <div className="space-y-1">
+                  <label className="text-[9px] text-white/30 uppercase tracking-wide block px-0.5">Shapes & Text</label>
+                  <div className="grid grid-cols-2 gap-1">
+                    {PRIMITIVES.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => addPrimitive(p.id)}
+                        className="text-left px-2.5 py-1.5 rounded-lg text-[11px] text-white/60 bg-white/[0.02] border border-white/[0.06] hover:border-white/15"
+                      >
+                        {p.icon} {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] text-white/30 uppercase tracking-wide block px-0.5">Widgets</label>
+                  {TEMPLATES.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => addElement(t.id)}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] text-white/60 bg-white/[0.02] border border-white/[0.06] hover:border-white/15"
+                    >
+                      {t.icon} {t.label}
+                    </button>
+                  ))}
+                </div>
                 <button onClick={() => setShowTemplatePicker(false)} className="w-full text-[10px] text-white/25 pt-1">
                   Cancel
                 </button>
@@ -816,8 +917,9 @@ export default function CanvasMaker({
                   <NumberField label="Y (%)" value={selected.yPct} min={0} max={100} onChange={(v) => setSelectedPlacement({ yPct: v })} />
                   <NumberField label="Width (%)" value={selected.widthPct} min={2} max={100} onChange={(v) => setSelectedPlacement({ widthPct: v })} />
                   <NumberField label="Height (%)" value={selected.heightPct} min={2} max={100} onChange={(v) => setSelectedPlacement({ heightPct: v })} />
+                  <NumberField label="Rotation (°)" value={selected.rotation ?? 0} min={-360} max={360} onChange={(v) => setSelectedPlacement({ rotation: v })} />
                   <div className="col-span-2 grid grid-cols-[1fr_auto_auto] gap-2 items-end">
-                    <NumberField label="Layer (z-order, higher = on top)" value={selected.zIndex} min={0} max={99} onChange={(v) => setSelectedPlacement({ zIndex: v })} />
+                    <NumberField label="Layer" value={selected.zIndex} min={0} max={99} onChange={(v) => setSelectedPlacement({ zIndex: v })} />
                     <Button variant="ghost" size="sm" onClick={() => bringToFront(selected.id)}>
                       Front
                     </Button>
@@ -826,12 +928,20 @@ export default function CanvasMaker({
                     </Button>
                   </div>
                 </div>
-                <TemplateFieldsEditor
-                  params={selected.params}
-                  set={setSelectedParam}
-                  liveSources={liveSources}
-                  showTemplatePicker={false}
-                />
+                {elementKind(selected) === "template" ? (
+                  <TemplateFieldsEditor
+                    params={selected.params}
+                    set={setSelectedParam}
+                    liveSources={liveSources}
+                    showTemplatePicker={false}
+                  />
+                ) : (
+                  <PrimitiveFieldsEditor
+                    kind={elementKind(selected)}
+                    params={selected.primitive ?? DEFAULT_PRIMITIVE_PARAMS}
+                    set={setSelectedPrimitive}
+                  />
+                )}
               </div>
             ) : (
               <p className="text-[11px] text-white/25 pt-2">
@@ -860,7 +970,7 @@ export default function CanvasMaker({
               )}
 
               {elements.map((el) => {
-                const t = TEMPLATES.find((tt) => tt.id === el.params.template)!;
+                const { icon, label } = elementIconLabel(el);
                 const isSelected = multiSelected.size > 0 ? multiSelected.has(el.id) : el.id === selectedId;
                 return (
                   <div
@@ -882,19 +992,31 @@ export default function CanvasMaker({
                       width: `${el.widthPct}%`,
                       height: `${el.heightPct}%`,
                       zIndex: el.zIndex + 1,
+                      transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
+                      transformOrigin: "center center",
                     }}
                   >
                     <span className="absolute -top-5 left-0 text-[9px] text-white/50 whitespace-nowrap">
                       {el.locked && "🔒 "}
-                      {t.icon} {el.params.title.text || t.label}
+                      {icon} {label}
                     </span>
                     {!el.locked && (
-                      <div
-                        onMouseDown={(e) => startDrag(e, el, "resize")}
-                        className={`absolute -right-1.5 -bottom-1.5 w-3 h-3 rounded-sm cursor-nwse-resize ${
-                          isSelected ? "bg-purple-400" : "bg-white/30"
-                        }`}
-                      />
+                      <>
+                        <div
+                          onMouseDown={(e) => startDrag(e, el, "resize")}
+                          className={`absolute -right-1.5 -bottom-1.5 w-3 h-3 rounded-sm cursor-nwse-resize ${
+                            isSelected ? "bg-purple-400" : "bg-white/30"
+                          }`}
+                        />
+                        {isSelected && (
+                          <Tooltip label="Drag to rotate">
+                            <div
+                              onMouseDown={(e) => startRotate(e, el)}
+                              className="absolute -top-6 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-purple-400 cursor-grab active:cursor-grabbing border border-white/40"
+                            />
+                          </Tooltip>
+                        )}
+                      </>
                     )}
                   </div>
                 );
