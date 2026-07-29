@@ -412,6 +412,9 @@ pub(crate) struct PrimitiveParams {
     object_position_x: f32,
     #[serde(default = "default_object_position")]
     object_position_y: f32,
+    /// Icon kind only — one of icon_svg_body's ids, recolored via `fill`.
+    #[serde(default = "default_icon_id")]
+    icon_id: String,
 }
 
 impl Default for PrimitiveParams {
@@ -442,6 +445,7 @@ impl Default for PrimitiveParams {
             object_fit: default_object_fit(),
             object_position_x: default_object_position(),
             object_position_y: default_object_position(),
+            icon_id: default_icon_id(),
         }
     }
 }
@@ -497,6 +501,37 @@ fn default_object_fit() -> String {
 }
 fn default_object_position() -> f32 {
     50.0
+}
+fn default_icon_id() -> String {
+    "star".into()
+}
+
+/// Mirrors ICON_LIBRARY in src/apps/overlay-editor/icons.ts — kept in sync
+/// by hand (the frontend only needs this table to preview the picker; the
+/// actual overlay render always goes through here, not the TS copy). Every
+/// icon draws with currentColor so `render_primitive`'s "icon" arm can
+/// recolor any of them just by setting the wrapping div's `color`.
+fn icon_svg_body(id: &str) -> &'static str {
+    match id {
+        "heart" => r#"<path d="M12,21.35 L10.55,20.03 C5.4,15.36 2,12.28 2,8.5 C2,5.42 4.42,3 7.5,3 C9.24,3 10.91,3.81 12,5.09 C13.09,3.81 14.76,3 16.5,3 C19.58,3 22,5.42 22,8.5 C22,12.28 18.6,15.36 13.45,20.04 L12,21.35 Z" fill="currentColor"/>"#,
+        "bell" => r#"<path d="M12,22 C13.1,22 14,21.1 14,20 L10,20 C10,21.1 10.89,22 12,22 Z M18,16 L18,11 C18,7.93 16.36,5.36 13.5,4.68 L13.5,4 C13.5,3.17 12.83,2.5 12,2.5 C11.17,2.5 10.5,3.17 10.5,4 L10.5,4.68 C7.63,5.36 6,7.92 6,11 L6,16 L4,18 L4,19 L20,19 L20,18 Z" fill="currentColor"/>"#,
+        "play" => r#"<polygon points="6,3 20,12 6,21" fill="currentColor"/>"#,
+        "pause" => r#"<rect x="5" y="4" width="5" height="16" fill="currentColor"/><rect x="14" y="4" width="5" height="16" fill="currentColor"/>"#,
+        "check" => r#"<polyline points="4,12 9,17 20,6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>"#,
+        "x" => r#"<line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>"#,
+        "plus" => r#"<line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>"#,
+        "minus" => r#"<line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>"#,
+        "arrow-up" => r#"<polyline points="6,10 12,4 18,10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>"#,
+        "arrow-down" => r#"<polyline points="6,14 12,20 18,14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>"#,
+        "arrow-left" => r#"<polyline points="10,6 4,12 10,18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>"#,
+        "arrow-right" => r#"<polyline points="14,6 20,12 14,18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>"#,
+        "home" => r#"<polygon points="12,3 21,11 18,11 18,20 6,20 6,11 3,11" fill="currentColor"/>"#,
+        "gear" => r#"<polygon points="22,12 21.81,13.95 18.47,14.68 17.82,15.89 19.07,19.07 17.56,20.31 14.68,18.47 13.37,18.87 12,22 10.05,21.81 9.32,18.47 8.11,17.82 4.93,19.07 3.69,17.56 5.53,14.68 5.13,13.37 2,12 2.19,10.05 5.53,9.32 6.18,8.11 4.93,4.93 6.44,3.69 9.32,5.53 10.63,5.13 12,2 13.95,2.19 14.68,5.53 15.89,6.18 19.07,4.93 20.31,6.44 18.47,9.32 18.87,10.63" fill="currentColor"/>"#,
+        "chat-bubble" => r#"<path d="M4,4 H20 A2,2 0 0 1 22,6 V15 A2,2 0 0 1 20,17 H9 L4,21 V17 H4 A2,2 0 0 1 2,15 V6 A2,2 0 0 1 4,4 Z" fill="currentColor"/>"#,
+        // "star" and any unrecognized id — same "reject silently, fall back
+        // to a known-good default" convention as safe_color/safe_blend_mode.
+        _ => r#"<polygon points="12,2 14.35,8.76 21.51,8.91 15.8,13.24 17.88,20.09 12,16 6.12,20.09 8.2,13.24 2.49,8.91 9.65,8.76" fill="currentColor"/>"#,
+    }
 }
 
 /// Editor-only sizing hint — render_canvas itself is fully percent-based and
@@ -1502,6 +1537,12 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> (String, Option<String>)
                 None => r#"<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,0.3); font-family:sans-serif; font-size:14px;">No image</div>"#.to_string(),
             }
         }
+        "icon" => {
+            let body = icon_svg_body(&p.icon_id);
+            format!(
+                r#"<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:{fill};"><svg viewBox="0 0 24 24" width="100%" height="100%">{body}</svg></div>"#
+            )
+        }
         // "rect" and any unrecognized kind (defensive — shouldn't happen,
         // render_canvas only calls this for a non-"template" kind).
         _ => format!(
@@ -2244,6 +2285,19 @@ mod tests {
         };
         let (html, _) = render_primitive("image", &p);
         assert!(html.contains("object-position:100% 0%"));
+    }
+
+    #[test]
+    fn render_primitive_icon_recolors_via_fill_and_falls_back_to_star_for_unknown_id() {
+        let p = PrimitiveParams { fill: "#00ff00".into(), icon_id: "heart".into(), ..Default::default() };
+        let (html, _) = render_primitive("icon", &p);
+        assert!(html.contains("color:#00ff00"));
+        assert!(html.contains("<svg viewBox=\"0 0 24 24\""));
+        assert!(html.contains("M12,21.35"), "expected the heart path for icon_id \"heart\"");
+
+        let p2 = PrimitiveParams { icon_id: "not-a-real-icon".into(), ..Default::default() };
+        let (html2, _) = render_primitive("icon", &p2);
+        assert!(html2.contains("12,2 14.35,8.76"), "unknown icon_id should fall back to the star shape");
     }
 
     #[test]

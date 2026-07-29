@@ -246,7 +246,7 @@ export const DEFAULT_TEMPLATE_PARAMS: TemplateParams = {
  * or a free-form primitive shape/text/image layer. "template" is the
  * default/absent value — every canvas saved before primitives existed has
  * no `kind` field at all and should keep behaving exactly as it did. */
-export type ElementKind = "template" | "rect" | "ellipse" | "line" | "text" | "image";
+export type ElementKind = "template" | "rect" | "ellipse" | "line" | "text" | "image" | "icon";
 
 export interface PrimitiveDef {
   id: Exclude<ElementKind, "template">;
@@ -260,6 +260,7 @@ export const PRIMITIVES: PrimitiveDef[] = [
   { id: "line", label: "Line", icon: "➖" },
   { id: "text", label: "Text", icon: "T" },
   { id: "image", label: "Image", icon: "🖼" },
+  { id: "icon", label: "Icon", icon: "★" },
 ];
 
 /** Style fields for a free-form primitive layer — a single self-contained
@@ -312,6 +313,10 @@ export interface PrimitiveParams {
    * pins the image's top-left corner to the box's top-left. */
   objectPositionX: number;
   objectPositionY: number;
+  /** Icon kind only — one of ICON_LIBRARY's ids. Recolored via the shared
+   * `fill` field (icons are drawn with currentColor) rather than needing
+   * their own color field. */
+  iconId: string;
 }
 
 export const DEFAULT_PRIMITIVE_PARAMS: PrimitiveParams = {
@@ -340,6 +345,7 @@ export const DEFAULT_PRIMITIVE_PARAMS: PrimitiveParams = {
   objectFit: "contain",
   objectPositionX: 50,
   objectPositionY: 50,
+  iconId: "star",
 };
 
 /** One placed widget/shape inside a Canvas overlay — where it sits and how
@@ -404,6 +410,7 @@ const PRIMITIVE_DEFAULT_SIZE: Record<Exclude<ElementKind, "template">, { w: numb
   line: { w: 24, h: 0.6 },
   text: { w: 30, h: 8 },
   image: { w: 24, h: 24 },
+  icon: { w: 10, h: 10 },
 };
 
 export function newPrimitiveElement(kind: Exclude<ElementKind, "template">, index: number): CanvasElementT {

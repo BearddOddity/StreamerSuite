@@ -3,6 +3,7 @@
 // Far fewer fields since a primitive is one shape, not a composed card.
 import { useState } from "react";
 import { BLEND_MODES, type ElementKind, type PrimitiveParams } from "../overlay-library/types";
+import { ICON_LIBRARY } from "./icons";
 import { ColorField, SELECT_COMPACT_STYLE } from "./TemplateFieldsEditor";
 import { RangeSlider, Select } from "../../design-system/components/forms";
 import { Button } from "../../design-system/components/core";
@@ -78,6 +79,7 @@ export default function PrimitiveFieldsEditor({
   const hasCornerRadius = kind === "rect";
   const isText = kind === "text";
   const isImage = kind === "image";
+  const isIcon = kind === "icon";
 
   const [presets, setPresets] = useState<StylePreset[]>(() => getStylePresets());
   const [presetName, setPresetName] = useState("");
@@ -270,6 +272,31 @@ export default function PrimitiveFieldsEditor({
               ))}
             </div>
           </div>
+        </>
+      )}
+
+      {isIcon && (
+        <>
+          <div>
+            <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">Icon</label>
+            <div className="grid grid-cols-6 gap-1.5">
+              {ICON_LIBRARY.map((icon) => (
+                <button
+                  key={icon.id}
+                  title={icon.label}
+                  onClick={() => set("iconId", icon.id)}
+                  className={`aspect-square rounded-lg flex items-center justify-center border ${
+                    params.iconId === icon.id
+                      ? "bg-purple-500/15 border-purple-500/40 text-white"
+                      : "bg-white/[0.03] border-white/[0.06] text-white/60 hover:border-white/20"
+                  }`}
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" dangerouslySetInnerHTML={{ __html: icon.svg }} />
+                </button>
+              ))}
+            </div>
+          </div>
+          <ColorField label="Color" value={params.fill} onChange={(v) => set("fill", v)} />
         </>
       )}
 
