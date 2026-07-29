@@ -3026,6 +3026,11 @@ fn export_readme_text(manifest: &ExportManifest) -> String {
          designed.\n\n\
          4. Run the helper again every time before you go live — it does not\n\
          start automatically.\n\n\
+         If you've already been given another StreamerSuite overlay before this\n\
+         one, you do NOT need a second helper — running this one will notice the\n\
+         other is already up, hand this overlay over to it, and close itself.\n\
+         Just open the other helper's setup page to find this overlay's URL\n\
+         alongside your others; your already-connected accounts carry over.\n\n\
          This overlay uses your own credentials only — nothing here is shared\n\
          with or sent to whoever made it.\n\n\
          Provided as-is; troubleshooting isn't guaranteed.\n",

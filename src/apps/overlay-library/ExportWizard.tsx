@@ -154,9 +154,9 @@ export function ExportWizard({
                 <input type="checkbox" checked={options.includeTwitch} onChange={(e) => set("includeTwitch", e.target.checked)} />
                 Twitch (recipient supplies their own token + Client ID)
               </label>
-              <label className="flex items-center gap-2 text-[12px] text-white/40">
-                <input type="checkbox" checked={options.includeKick} onChange={(e) => set("includeKick", e.target.checked)} disabled />
-                Kick — not yet implemented
+              <label className="flex items-center gap-2 text-[12px] text-white/70">
+                <input type="checkbox" checked={options.includeKick} onChange={(e) => set("includeKick", e.target.checked)} />
+                Kick (recipient supplies their own token + channel slug — live viewer count/status only, no follower/sub totals or alerts)
               </label>
             </div>
 
