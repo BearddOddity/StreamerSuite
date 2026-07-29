@@ -18,6 +18,9 @@ interface ExportRequirements {
 interface ExportOptions {
   includeTwitch: boolean;
   includeKick: boolean;
+  includeYoutube: boolean;
+  includeChaturbate: boolean;
+  includeStreamerbot: boolean;
   customizeColor: boolean;
   customizeFont: boolean;
   customizeText: boolean;
@@ -47,6 +50,9 @@ export function ExportWizard({
   const [options, setOptions] = useState<ExportOptions>({
     includeTwitch: true,
     includeKick: false,
+    includeYoutube: false,
+    includeChaturbate: false,
+    includeStreamerbot: false,
     customizeColor: true,
     customizeFont: true,
     customizeText: true,
@@ -152,12 +158,27 @@ export function ExportWizard({
               <p className="text-[11px] text-white/40 uppercase tracking-wide">Platforms the recipient can connect</p>
               <label className="flex items-center gap-2 text-[12px] text-white/70">
                 <input type="checkbox" checked={options.includeTwitch} onChange={(e) => set("includeTwitch", e.target.checked)} />
-                Twitch (recipient supplies their own token + Client ID)
+                Twitch (own token + Client ID — viewers/followers/subs, real follow alerts)
               </label>
               <label className="flex items-center gap-2 text-[12px] text-white/70">
                 <input type="checkbox" checked={options.includeKick} onChange={(e) => set("includeKick", e.target.checked)} />
-                Kick (recipient supplies their own token + channel slug — live viewer count/status only, no follower/sub totals or alerts)
+                Kick (own token + channel slug — live viewer count/status only, no alerts)
               </label>
+              <label className="flex items-center gap-2 text-[12px] text-white/70">
+                <input type="checkbox" checked={options.includeYoutube} onChange={(e) => set("includeYoutube", e.target.checked)} />
+                YouTube (own Data API key + channel ID — viewer count, Super Chat/membership alerts, only while live)
+              </label>
+              <label className="flex items-center gap-2 text-[12px] text-white/70">
+                <input type="checkbox" checked={options.includeChaturbate} onChange={(e) => set("includeChaturbate", e.target.checked)} />
+                Chaturbate (own username + Events API token — real tip/follow alerts)
+              </label>
+              <label className="flex items-center gap-2 text-[12px] text-white/70">
+                <input type="checkbox" checked={options.includeStreamerbot} onChange={(e) => set("includeStreamerbot", e.target.checked)} />
+                Streamer.bot (relays latest chat message from a Streamer.bot already running on the recipient's machine — including YouTube chat)
+              </label>
+              <p className="text-[10px] text-white/25 pt-1">
+                Joystick.tv isn't supported yet — its live data needs an OAuth login flow this export can't do standalone.
+              </p>
             </div>
 
             <div className="mb-4 space-y-2">

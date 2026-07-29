@@ -2856,6 +2856,7 @@ pub(crate) struct ExportOptions {
     include_kick: bool,
     include_youtube: bool,
     include_chaturbate: bool,
+    include_streamerbot: bool,
     customize_color: bool,
     customize_font: bool,
     customize_text: bool,
@@ -3116,6 +3117,9 @@ pub(crate) fn overlay_export_standalone(
     }
     if options.include_chaturbate {
         platforms.push("chaturbate".to_string());
+    }
+    if options.include_streamerbot {
+        platforms.push("streamerbot".to_string());
     }
 
     let overlay_id = stem_of(&file).to_string();
