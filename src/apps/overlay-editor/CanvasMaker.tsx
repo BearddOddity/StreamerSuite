@@ -246,7 +246,13 @@ export default function CanvasMaker({
    * a square/wide canvas (max-height alone constrains height without
    * proportionally shrinking a width:100% box, breaking the ratio). */
   const [boxSize, setBoxSize] = useState({ w: DEFAULT_CANVAS_W, h: DEFAULT_CANVAS_H });
-  const canvasScale = canvasW > 0 ? boxSize.w / canvasW : 1;
+  // 1 = the auto-computed "fit" size above; independent of it so zooming
+  // in/out never fights the ResizeObserver that keeps boxSize matching the
+  // wrap container's available space.
+  const [zoom, setZoom] = useState(1);
+  const displayW = boxSize.w * zoom;
+  const displayH = boxSize.h * zoom;
+  const canvasScale = canvasW > 0 ? displayW / canvasW : 1;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -1474,13 +1480,45 @@ export default function CanvasMaker({
                   className="w-16 input-glass text-[10px] px-1.5 py-1"
                   title="Custom height (px)"
                 />
+                <div className="flex items-center gap-0.5 ml-1 pl-1 border-l border-white/[0.08]">
+                  <button
+                    onClick={() => setZoom((z) => Math.max(0.25, Math.round((z - 0.25) * 100) / 100))}
+                    title="Zoom out"
+                    className="w-6 h-6 flex items-center justify-center rounded-md text-[12px] bg-white/[0.03] border border-white/[0.06] text-white/50 hover:border-white/20 hover:text-white"
+                  >
+                    −
+                  </button>
+                  <button
+                    onClick={() => setZoom(1)}
+                    title="Reset zoom to fit"
+                    className="px-2 py-1 rounded-md text-[10px] tabular-nums bg-white/[0.03] border border-white/[0.06] text-white/50 hover:border-white/20 hover:text-white min-w-[42px] text-center"
+                  >
+                    {Math.round(zoom * 100)}%
+                  </button>
+                  <button
+                    onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.25) * 100) / 100))}
+                    title="Zoom in"
+                    className="w-6 h-6 flex items-center justify-center rounded-md text-[12px] bg-white/[0.03] border border-white/[0.06] text-white/50 hover:border-white/20 hover:text-white"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
             </div>
-            <div ref={canvasWrapRef} className="flex items-center justify-center" style={{ height: "70vh" }}>
+            <div
+              ref={canvasWrapRef}
+              className="flex items-center justify-center overflow-auto"
+              style={{ height: "70vh" }}
+              onWheel={(e) => {
+                if (!e.ctrlKey && !e.metaKey) return;
+                e.preventDefault();
+                setZoom((z) => Math.max(0.25, Math.min(4, Math.round((z - e.deltaY * 0.001) * 100) / 100)));
+              }}
+            >
               <div
                 ref={canvasRef}
-                className="relative rounded-xl overflow-hidden border border-white/[0.06] bg-[repeating-conic-gradient(#111_0%_25%,#0a0a0a_0%_50%)] bg-[length:20px_20px] select-none"
-                style={{ width: boxSize.w, height: boxSize.h }}
+                className="relative rounded-xl overflow-hidden border border-white/[0.06] bg-[repeating-conic-gradient(#111_0%_25%,#0a0a0a_0%_50%)] bg-[length:20px_20px] select-none shrink-0"
+                style={{ width: displayW, height: displayH }}
                 onMouseDown={startMarquee}
               >
               {preview && (
