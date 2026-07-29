@@ -347,6 +347,15 @@ pub(crate) struct CanvasElement {
     /// `duration_seconds` after a matching `/alerts-ws` event fires.
     #[serde(default)]
     alert_trigger: Option<AlertTrigger>,
+    /// "none" (the default)/"pulse"/"bounce"/"spin"/"glow" — a continuous
+    /// animation independent of any entrance, applicable to any element
+    /// kind since render_canvas applies it via a shared inner wrapper (see
+    /// LOOP_ANIMATION_STYLE) rather than anything render_template/
+    /// render_primitive need to know about.
+    #[serde(default = "default_loop_animation")]
+    loop_animation: String,
+    #[serde(default = "default_loop_speed")]
+    loop_speed_seconds: f32,
     /// Used when `kind` is "template" (or absent) — unused-but-present for
     /// primitive elements too, so a mixed canvas round-trips through any
     /// code path that still assumes every element has a full `params`.
@@ -426,6 +435,15 @@ pub(crate) struct PrimitiveParams {
     /// Icon kind only — one of icon_svg_body's ids, recolored via `fill`.
     #[serde(default = "default_icon_id")]
     icon_id: String,
+    /// Plays once when the overlay loads — same style vocabulary/keyframes
+    /// as TemplateParams' own animations_enabled/animation_style, applied
+    /// by wrapping the whole rendered fragment in one more div so the
+    /// animation's own opacity keyframe (0->1) never fights this element's
+    /// separate, fixed `opacity` field.
+    #[serde(default)]
+    animations_enabled: bool,
+    #[serde(default = "default_animation_style")]
+    animation_style: String,
 }
 
 impl Default for PrimitiveParams {
@@ -457,6 +475,8 @@ impl Default for PrimitiveParams {
             object_position_x: default_object_position(),
             object_position_y: default_object_position(),
             icon_id: default_icon_id(),
+            animations_enabled: false,
+            animation_style: default_animation_style(),
         }
     }
 }
@@ -571,6 +591,13 @@ fn default_alert_animation() -> String {
 }
 
 const VALID_ALERT_KINDS: &[&str] = &["follow", "sub", "raid", "cheer", "tip"];
+
+fn default_loop_animation() -> String {
+    "none".into()
+}
+fn default_loop_speed() -> f32 {
+    2.0
+}
 
 /// Editor-only sizing hint — render_canvas itself is fully percent-based and
 /// doesn't care about absolute pixel dimensions at all (an OBS Browser
@@ -1589,6 +1616,23 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> (String, Option<String>)
     };
 
     let fragment = format!(r#"<div style="width:100%; height:100%; opacity:{opacity}; {blend_css} {shadow_css}">{body}</div>"#);
+    // Wrapped in one more div rather than animating the fragment div above
+    // directly — that div already carries a fixed `opacity:{opacity}` of
+    // its own, and a CSS animation whose keyframes touch `opacity` would
+    // otherwise fight that fixed value for as long as it plays (and, with
+    // `forwards`, permanently overwrite it once done). A separate outer
+    // div with no opacity of its own composes correctly: entrance_opacity
+    // (0->1) x element_opacity (fixed) is exactly what should be visible.
+    let fragment = if p.animations_enabled {
+        let style_class = match p.animation_style.as_str() {
+            "slide" => "ss-entrance-slide",
+            "fade" => "ss-entrance-fade",
+            _ => "ss-entrance-pop",
+        };
+        format!(r#"<div class="{style_class}">{fragment}</div>"#)
+    } else {
+        fragment
+    };
     (fragment, font_link)
 }
 
@@ -1632,6 +1676,13 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
     // a WebSocket it has no use for (same "pay only for what's used"
     // convention as font_links/DATA_BIND_SCRIPT elsewhere in this file).
     let mut has_alert_trigger = false;
+    // Same "only pay for what's used" reasoning — the shared pop/slide/fade
+    // keyframes are needed the moment either an alert trigger OR a
+    // primitive's own entrance animation is in play; the loop keyframes are
+    // their own separate flag since a canvas can use one feature without
+    // the other.
+    let mut needs_entrance_keyframes = false;
+    let mut has_loop_animation = false;
     for (i, el) in ordered.into_iter().enumerate() {
         let wants_group: Option<(String, f32)> = match &el.group_id {
             Some(gid) if el.group_opacity < 0.999 => Some((gid.clone(), el.group_opacity.clamp(0.0, 1.0))),
@@ -1668,6 +1719,7 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
         let (alert_attrs, alert_class) = match &el.alert_trigger {
             Some(t) if t.enabled => {
                 has_alert_trigger = true;
+                needs_entrance_keyframes = true;
                 let kinds: Vec<&str> = t.kinds.iter().filter_map(|k| VALID_ALERT_KINDS.iter().find(|&&v| v == k).copied()).collect();
                 let kinds_attr = kinds.join(",");
                 let duration = t.duration_seconds.clamp(1.0, 120.0);
@@ -1683,15 +1735,30 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
             }
             _ => (String::new(), String::new()),
         };
+        // A loop-animated element gets one extra inner wrapper around its
+        // content (iframe or fragment) rather than being animated directly
+        // — see LOOP_ANIMATION_STYLE's doc comment for why. Elements with
+        // no loop animation keep the exact same markup as before this
+        // feature existed.
+        let loop_kind = safe_loop_animation(&el.loop_animation);
+        if loop_kind.is_some() {
+            has_loop_animation = true;
+        }
+        let loop_speed = el.loop_speed_seconds.clamp(0.2, 20.0);
         if kind == "template" {
             // Templates keep their own fully isolated iframe — real risk of
             // one widget's scoped CSS (`.title`/`#card`/etc.) colliding with
             // another's if they ever shared a document.
             let inner_html = render_template(&el.params)?;
             let frame_id = format!("el-{i}");
-            body_html.push_str(&format!(
-                r#"<iframe id="{frame_id}" class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}></iframe>"#
-            ));
+            match loop_kind {
+                Some(lk) => body_html.push_str(&format!(
+                    r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}><div class="ss-loop-{lk}" style="width:100%; height:100%; --loop-speed:{loop_speed}s;"><iframe id="{frame_id}" style="width:100%; height:100%; border:0; background:transparent;"></iframe></div></div>"#
+                )),
+                None => body_html.push_str(&format!(
+                    r#"<iframe id="{frame_id}" class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}></iframe>"#
+                )),
+            }
             // JSON-encoding the whole rendered document is what makes
             // embedding it safely inside a <script> block trivial —
             // serde_json already escapes quotes, newlines, and (critically)
@@ -1706,15 +1773,24 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
             // beneath it (an iframe boundary would give it nothing but its
             // own transparent backdrop to blend against, which does nothing).
             let default_primitive = PrimitiveParams::default();
-            let (fragment, font_link) = render_primitive(kind, el.primitive.as_ref().unwrap_or(&default_primitive));
+            let primitive = el.primitive.as_ref().unwrap_or(&default_primitive);
+            if primitive.animations_enabled {
+                needs_entrance_keyframes = true;
+            }
+            let (fragment, font_link) = render_primitive(kind, primitive);
             if let Some(link) = font_link {
                 if !font_links.contains(&link) {
                     font_links.push(link);
                 }
             }
-            body_html.push_str(&format!(
-                r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}>{fragment}</div>"#
-            ));
+            match loop_kind {
+                Some(lk) => body_html.push_str(&format!(
+                    r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}><div class="ss-loop-{lk}" style="width:100%; height:100%; --loop-speed:{loop_speed}s;">{fragment}</div></div>"#
+                )),
+                None => body_html.push_str(&format!(
+                    r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}>{fragment}</div>"#
+                )),
+            }
         }
     }
     if open_group.is_some() {
@@ -1723,6 +1799,8 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
     let font_links_html = font_links.join("\n");
     let alert_style = if has_alert_trigger { ALERT_TRIGGER_STYLE } else { "" };
     let alert_script = if has_alert_trigger { ALERT_TRIGGER_SCRIPT } else { "" };
+    let entrance_style = if needs_entrance_keyframes { ENTRANCE_KEYFRAMES_STYLE } else { "" };
+    let loop_style = if has_loop_animation { LOOP_ANIMATION_STYLE } else { "" };
     Ok(format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -1733,6 +1811,8 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
 <style>
   html, body {{ margin: 0; padding: 0; background: transparent; overflow: hidden; }}
   .el {{ position: absolute; border: 0; background: transparent; }}
+  {entrance_style}
+  {loop_style}
   {alert_style}
 </style>
 </head>
@@ -1765,11 +1845,52 @@ const ALERT_TRIGGER_STYLE: &str = r#"
   .el[data-alert-armed].alert-anim-slide.alert-active { animation: overlay-slide-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
   .el[data-alert-armed].alert-anim-fade.alert-active { animation: overlay-fade-in 0.5s ease forwards; }
   .el[data-alert-armed].alert-leaving { visibility: visible; opacity: 1; animation: overlay-alert-fade-out 0.4s ease forwards; }
+  @keyframes overlay-alert-fade-out { from { opacity: 1; } to { opacity: 0; } }
+"#;
+
+/// The pop/slide/fade entrance keyframes — shared by alert-triggered
+/// elements (ALERT_TRIGGER_STYLE above) AND primitive entrance animation
+/// (`.ss-entrance-*`, applied by render_primitive), so they're kept in one
+/// place and emitted whenever *either* feature is in use, not duplicated
+/// per caller. Templates keep their own identically-named copy scoped
+/// inside their own iframe's srcdoc (see render_template) — no collision,
+/// since CSS is scoped per document.
+const ENTRANCE_KEYFRAMES_STYLE: &str = r#"
+  .ss-entrance-pop { animation: overlay-pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+  .ss-entrance-slide { animation: overlay-slide-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+  .ss-entrance-fade { animation: overlay-fade-in 0.5s ease forwards; }
   @keyframes overlay-pop-in { from { opacity: 0; transform: scale(0.9) translateY(-8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
   @keyframes overlay-slide-in { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes overlay-fade-in { from { opacity: 0; } to { opacity: 1; } }
-  @keyframes overlay-alert-fade-out { from { opacity: 1; } to { opacity: 0; } }
 "#;
+
+/// Continuous loop animations — applied to a small inner wrapper div
+/// (`.ss-loop-*`) around an element's iframe/fragment content, not to `.el`
+/// itself, for two reasons: `.el` already owns its own `animation` for
+/// alert-trigger show/hide (a single element can only run one `animation`
+/// shorthand at a time), and `.el` carries the element's static rotation
+/// transform, which a `transform`-based loop would otherwise overwrite for
+/// as long as it's running. A separate inner element sidesteps both.
+const LOOP_ANIMATION_STYLE: &str = r#"
+  .ss-loop-pulse { animation: overlay-loop-pulse var(--loop-speed, 2s) ease-in-out infinite; }
+  .ss-loop-bounce { animation: overlay-loop-bounce var(--loop-speed, 2s) ease-in-out infinite; }
+  .ss-loop-spin { animation: overlay-loop-spin var(--loop-speed, 2s) linear infinite; }
+  .ss-loop-glow { animation: overlay-loop-glow var(--loop-speed, 2s) ease-in-out infinite; }
+  @keyframes overlay-loop-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  @keyframes overlay-loop-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+  @keyframes overlay-loop-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes overlay-loop-glow { 0%, 100% { filter: drop-shadow(0 0 2px rgba(255,255,255,0.15)); } 50% { filter: drop-shadow(0 0 14px rgba(255,255,255,0.85)); } }
+"#;
+
+fn safe_loop_animation(input: &str) -> Option<&'static str> {
+    match input {
+        "pulse" => Some("pulse"),
+        "bounce" => Some("bounce"),
+        "spin" => Some("spin"),
+        "glow" => Some("glow"),
+        _ => None,
+    }
+}
 
 /// Listens on the same `/alerts-ws` feed `widgets/alerts-overlay.html`
 /// already uses (see push_alert_event/alert_broadcast in server.rs) and
@@ -1888,6 +2009,8 @@ fn build_canvas_from_specs(specs: Vec<AiElementSpec>) -> Vec<CanvasElement> {
             group_opacity: default_one_f32(),
             component_id: None,
             alert_trigger: None,
+            loop_animation: default_loop_animation(),
+            loop_speed_seconds: default_loop_speed(),
             primitive: None,
             params: TemplateParams {
                 template: spec.template,
@@ -2369,6 +2492,8 @@ mod tests {
             group_opacity: default_one_f32(),
             component_id: None,
             alert_trigger: None,
+            loop_animation: default_loop_animation(),
+            loop_speed_seconds: default_loop_speed(),
             primitive: None,
             params: params(template),
         }
@@ -2753,6 +2878,73 @@ mod tests {
         assert!(render_canvas(&[el.clone()]).is_ok());
         let json = serde_json::to_value(&el).unwrap();
         assert_eq!(json["componentId"], "component-123");
+    }
+
+    #[test]
+    fn canvas_element_with_no_loop_animation_gets_no_loop_wrapper_or_style() {
+        let el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("ss-loop-"));
+        assert!(!html.contains("overlay-loop-"));
+    }
+
+    #[test]
+    fn canvas_template_with_loop_animation_gets_wrapped_and_iframe_still_gets_srcdoc() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.loop_animation = "pulse".into();
+        el.loop_speed_seconds = 3.5;
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains(r#"<div class="ss-loop-pulse""#));
+        assert!(html.contains("--loop-speed:3.5s"));
+        assert!(html.contains("overlay-loop-pulse"));
+        // The iframe keeps its own id and still gets srcdoc-assigned even
+        // though it's now nested one level deeper inside the loop wrapper.
+        assert!(html.contains(r#"<iframe id="el-0""#));
+        assert!(html.contains("document.getElementById(\"el-0\").srcdoc"));
+    }
+
+    #[test]
+    fn canvas_unknown_loop_animation_id_is_rejected_not_passed_through() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.loop_animation = "not-a-real-loop".into();
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("ss-loop-"));
+    }
+
+    #[test]
+    fn canvas_loop_speed_is_clamped_to_sane_bounds() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.loop_animation = "spin".into();
+        el.loop_speed_seconds = 9999.0;
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains("--loop-speed:20s"));
+    }
+
+    #[test]
+    fn render_primitive_entrance_animation_wraps_fragment_without_touching_its_own_opacity() {
+        let p = PrimitiveParams { animations_enabled: true, animation_style: "slide".into(), opacity: 0.7, ..Default::default() };
+        let (html, _) = render_primitive("rect", &p);
+        assert!(html.starts_with(r#"<div class="ss-entrance-slide">"#));
+        // The element's own fixed opacity is still present, untouched, one
+        // level deeper — not overwritten by the entrance wrapper.
+        assert!(html.contains("opacity:0.7"));
+    }
+
+    #[test]
+    fn render_primitive_no_entrance_animation_by_default() {
+        let p = PrimitiveParams::default();
+        let (html, _) = render_primitive("rect", &p);
+        assert!(!html.contains("ss-entrance-"));
+    }
+
+    #[test]
+    fn canvas_primitive_entrance_animation_triggers_shared_entrance_keyframes() {
+        let mut el = canvas_element("a", "rect", 5.0, 10.0, 0);
+        el.kind = Some("rect".into());
+        el.primitive = Some(PrimitiveParams { animations_enabled: true, animation_style: "pop".into(), ..Default::default() });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains("ss-entrance-pop"));
+        assert!(html.contains("@keyframes overlay-pop-in"));
     }
 
     #[test]

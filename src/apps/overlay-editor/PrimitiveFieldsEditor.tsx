@@ -392,6 +392,30 @@ export default function PrimitiveFieldsEditor({
       />
 
       <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] text-white/60">Entrance animation</label>
+          <input
+            type="checkbox"
+            checked={params.animationsEnabled}
+            onChange={(e) => set("animationsEnabled", e.target.checked)}
+          />
+        </div>
+        {params.animationsEnabled && (
+          <Select
+            label="Animation Style"
+            value={params.animationStyle}
+            onChange={(v) => set("animationStyle", v as PrimitiveParams["animationStyle"])}
+            options={[
+              { value: "pop", label: "Pop" },
+              { value: "slide", label: "Slide Up" },
+              { value: "fade", label: "Fade" },
+            ]}
+            style={SELECT_COMPACT_STYLE}
+          />
+        )}
+      </div>
+
+      <div className="space-y-2">
         <label className="flex items-center gap-1.5 text-[10px] text-white/50">
           <input type="checkbox" checked={params.shadow} onChange={(e) => set("shadow", e.target.checked)} />
           Drop Shadow

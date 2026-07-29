@@ -343,6 +343,14 @@ export interface PrimitiveParams {
    * `fill` field (icons are drawn with currentColor) rather than needing
    * their own color field. */
   iconId: string;
+  /** Plays once when the overlay loads — same style vocabulary as
+   * TemplateParams' own animationsEnabled/animationStyle, kept as a
+   * separate field (not shared) since a primitive and a template render
+   * through entirely different code paths. Off by default, unlike
+   * templates: a plain background rect popping in on every load is more
+   * often unwanted noise than a lower-third's entrance is. */
+  animationsEnabled: boolean;
+  animationStyle: "pop" | "slide" | "fade";
 }
 
 export const DEFAULT_PRIMITIVE_PARAMS: PrimitiveParams = {
@@ -372,6 +380,8 @@ export const DEFAULT_PRIMITIVE_PARAMS: PrimitiveParams = {
   objectPositionX: 50,
   objectPositionY: 50,
   iconId: "star",
+  animationsEnabled: false,
+  animationStyle: "pop",
 };
 
 /** One placed widget/shape inside a Canvas overlay — where it sits and how
@@ -413,6 +423,14 @@ export interface CanvasElementT {
    * element's placement/style is otherwise completely normal, this only
    * controls whether it starts hidden and what makes it appear. */
   alertTrigger?: AlertTrigger;
+  /** Continuous, always-on animation independent of any entrance — applies
+   * uniformly to ANY element kind (template or primitive) since it wraps
+   * the element's content in its own inner div rather than touching the
+   * element's own markup, which is also why it composes cleanly with the
+   * element's own static rotation (a separate, outer transform) instead of
+   * fighting it. "none"/absent = static. */
+  loopAnimation?: "none" | "pulse" | "bounce" | "spin" | "glow";
+  loopSpeedSeconds?: number;
   /** Used when kind is "template" (or absent). Always present (even on a
    * primitive element, where it's an unused default) so any code path that
    * assumes every element has full params never has to null-check it. */

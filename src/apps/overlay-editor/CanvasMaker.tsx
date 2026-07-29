@@ -1016,7 +1016,11 @@ export default function CanvasMaker({
     );
   };
 
-  const setSelectedPlacement = (patch: Partial<Pick<CanvasElementT, "xPct" | "yPct" | "widthPct" | "heightPct" | "zIndex" | "rotation">>) => {
+  const setSelectedPlacement = (
+    patch: Partial<
+      Pick<CanvasElementT, "xPct" | "yPct" | "widthPct" | "heightPct" | "zIndex" | "rotation" | "loopAnimation" | "loopSpeedSeconds">
+    >
+  ) => {
     recordBeforeChange(elements);
     setElements((prev) => prev.map((e) => (e.id === selectedId ? { ...e, ...patch } : e)));
   };
@@ -1734,6 +1738,54 @@ export default function CanvasMaker({
                     <p className="text-[9px] text-white/25">
                       Off — this element renders normally, always visible.
                     </p>
+                  )}
+                </div>
+                <div className="space-y-2 pb-3 mb-1 border-b border-white/[0.06]">
+                  <label className="text-[10px] text-white/40 uppercase tracking-wide block">
+                    Loop Animation
+                  </label>
+                  <p className="text-[9px] text-white/25">
+                    Plays continuously the whole time this element is visible — pairs with Alert Trigger above,
+                    or works on its own on an always-visible element.
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {(
+                      [
+                        ["none", "None"],
+                        ["pulse", "Pulse"],
+                        ["bounce", "Bounce"],
+                        ["spin", "Spin"],
+                        ["glow", "Glow"],
+                      ] as [NonNullable<CanvasElementT["loopAnimation"]>, string][]
+                    ).map(([style, label]) => (
+                      <button
+                        key={style}
+                        onClick={() => setSelectedPlacement({ loopAnimation: style })}
+                        className={`px-2 py-1 rounded-md text-[10px] border ${
+                          (selected.loopAnimation ?? "none") === style
+                            ? "bg-purple-500/15 border-purple-500/40 text-white"
+                            : "bg-white/[0.03] border-white/[0.06] text-white/50 hover:border-white/20"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {selected.loopAnimation && selected.loopAnimation !== "none" && (
+                    <div>
+                      <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1 block">
+                        Cycle Length (sec)
+                      </label>
+                      <input
+                        type="number"
+                        min={0.2}
+                        max={20}
+                        step={0.1}
+                        value={selected.loopSpeedSeconds ?? 2}
+                        onChange={(e) => setSelectedPlacement({ loopSpeedSeconds: Number(e.target.value) || 2 })}
+                        className="w-full input-glass text-[11px]"
+                      />
+                    </div>
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
