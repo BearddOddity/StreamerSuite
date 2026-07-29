@@ -29,7 +29,7 @@ import TemplateFieldsEditor from "./TemplateFieldsEditor";
 import PrimitiveFieldsEditor from "./PrimitiveFieldsEditor";
 import { SaveChoiceDialog, UnsavedChangesDialog } from "./ConfirmDialogs";
 import VersionHistoryPanel from "./VersionHistoryPanel";
-import { Button, Card, SectionHead } from "../../design-system/components/core";
+import { Button, Card, SectionHead, CopyButton } from "../../design-system/components/core";
 import { Tooltip } from "../../design-system/components/overlay";
 import { RangeSlider } from "../../design-system/components/forms";
 
@@ -338,6 +338,16 @@ export default function CanvasMaker({
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; elId: string } | null>(null);
+  // Only needed to build the OBS Browser Source URL for the "Copy URL"
+  // button below — fetched once, same command the Overlay Library's own
+  // Copy URL buttons use (useOverlays.ts).
+  const [overlayToken, setOverlayToken] = useState("");
+  useEffect(() => {
+    if (mode !== "edit" || !editFile) return;
+    invoke<string>("get_overlay_token")
+      .then(setOverlayToken)
+      .catch(() => {});
+  }, [mode, editFile]);
   /** The drag surface's actual on-screen pixel size — computed in JS (best
    * fit within the wrap container honoring canvasW/canvasH's aspect ratio)
    * rather than left to CSS `aspect-ratio`, which fights `max-height` for
@@ -1331,6 +1341,12 @@ export default function CanvasMaker({
               <Button variant="ghost" size="sm" onClick={redo} disabled={future.length === 0}>
                 ↷ Redo
               </Button>
+              {mode === "edit" && editFile && overlayToken && (
+                <CopyButton
+                  value={`http://127.0.0.1:53735/custom-overlay/${encodeURIComponent(overlayToken)}/${encodeURIComponent(editFile)}`}
+                  label="Copy URL"
+                />
+              )}
               <Button variant="ghost" size="sm" onClick={requestClose}>
                 ✕ Close
               </Button>

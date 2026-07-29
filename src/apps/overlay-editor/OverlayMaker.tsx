@@ -6,7 +6,7 @@ import TemplateFieldsEditor from "./TemplateFieldsEditor";
 import ScaledPreview from "./ScaledPreview";
 import { SaveChoiceDialog, UnsavedChangesDialog } from "./ConfirmDialogs";
 import VersionHistoryPanel from "./VersionHistoryPanel";
-import { Button, Card, SectionHead } from "../../design-system/components/core";
+import { Button, Card, SectionHead, CopyButton } from "../../design-system/components/core";
 
 export default function OverlayMaker({
   onSaved,
@@ -32,6 +32,16 @@ export default function OverlayMaker({
   const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
   const [past, setPast] = useState<TemplateParams[]>([]);
   const [future, setFuture] = useState<TemplateParams[]>([]);
+  // Only needed to build the OBS Browser Source URL for the "Copy URL"
+  // button below — same command the Overlay Library's own Copy URL
+  // buttons use (useOverlays.ts).
+  const [overlayToken, setOverlayToken] = useState("");
+  useEffect(() => {
+    if (mode !== "edit" || !editFile) return;
+    invoke<string>("get_overlay_token")
+      .then(setOverlayToken)
+      .catch(() => {});
+  }, [mode, editFile]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialSnapshotRef = useRef(JSON.stringify(initialParams ?? DEFAULT_TEMPLATE_PARAMS));
   const pendingBeforeRef = useRef<TemplateParams | null>(null);
@@ -187,6 +197,12 @@ export default function OverlayMaker({
               <Button variant="ghost" size="sm" onClick={redo} disabled={future.length === 0}>
                 ↷ Redo
               </Button>
+              {mode === "edit" && editFile && overlayToken && (
+                <CopyButton
+                  value={`http://127.0.0.1:53735/custom-overlay/${encodeURIComponent(overlayToken)}/${encodeURIComponent(editFile)}`}
+                  label="Copy URL"
+                />
+              )}
               <Button variant="ghost" size="sm" onClick={requestClose}>
                 ✕ Close
               </Button>
