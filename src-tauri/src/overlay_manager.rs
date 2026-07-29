@@ -336,6 +336,17 @@ pub(crate) struct CanvasElement {
     /// overlapping group members don't double up where they cross.
     #[serde(default = "default_one_f32")]
     group_opacity: f32,
+    /// Editor-only, like `group_id`/`locked` — round-tripped here purely so
+    /// a saved-then-reloaded canvas doesn't silently lose which elements
+    /// are linked as manual-sync component instances (render_canvas never
+    /// reads this field; linking has no effect on the rendered overlay).
+    #[serde(default)]
+    component_id: Option<String>,
+    /// When present and `enabled`, this element starts hidden in the
+    /// rendered overlay and is only shown (with an entrance animation) for
+    /// `duration_seconds` after a matching `/alerts-ws` event fires.
+    #[serde(default)]
+    alert_trigger: Option<AlertTrigger>,
     /// Used when `kind` is "template" (or absent) — unused-but-present for
     /// primitive elements too, so a mixed canvas round-trips through any
     /// code path that still assumes every element has a full `params`.
@@ -533,6 +544,33 @@ fn icon_svg_body(id: &str) -> &'static str {
         _ => r#"<polygon points="12,2 14.35,8.76 21.51,8.91 15.8,13.24 17.88,20.09 12,16 6.12,20.09 8.2,13.24 2.49,8.91 9.65,8.76" fill="currentColor"/>"#,
     }
 }
+
+/// Ties a Canvas element's visibility to a live `/alerts-ws` event instead
+/// of always rendering — the element stays hidden until a matching alert
+/// (follow/sub/raid/cheer/tip, or any kind when `kinds` is empty) fires,
+/// then animates in and auto-hides again after `duration_seconds`.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AlertTrigger {
+    #[serde(default)]
+    enabled: bool,
+    /// Empty = matches every alert kind.
+    #[serde(default)]
+    kinds: Vec<String>,
+    #[serde(default = "default_alert_duration")]
+    duration_seconds: f32,
+    #[serde(default = "default_alert_animation")]
+    animation_style: String,
+}
+
+fn default_alert_duration() -> f32 {
+    5.0
+}
+fn default_alert_animation() -> String {
+    "pop".into()
+}
+
+const VALID_ALERT_KINDS: &[&str] = &["follow", "sub", "raid", "cheer", "tip"];
 
 /// Editor-only sizing hint — render_canvas itself is fully percent-based and
 /// doesn't care about absolute pixel dimensions at all (an OBS Browser
@@ -1588,6 +1626,12 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
     // another element interleaved between its members) simply gets more
     // than one wrapper — same total opacity, just not one shared flatten.
     let mut open_group: Option<(String, f32)> = None;
+    // Set the moment any element carries an enabled alert_trigger — only
+    // then do the shared armed/active CSS + the /alerts-ws-listening
+    // <script> get emitted at all, so a canvas with no triggers never opens
+    // a WebSocket it has no use for (same "pay only for what's used"
+    // convention as font_links/DATA_BIND_SCRIPT elsewhere in this file).
+    let mut has_alert_trigger = false;
     for (i, el) in ordered.into_iter().enumerate() {
         let wants_group: Option<(String, f32)> = match &el.group_id {
             Some(gid) if el.group_opacity < 0.999 => Some((gid.clone(), el.group_opacity.clamp(0.0, 1.0))),
@@ -1616,6 +1660,29 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
         } else {
             String::new()
         };
+        // Armed elements render exactly like any other element (same
+        // iframe-vs-inline-div split below) — this just adds a data-*
+        // attribute set and a class the shared alert script/CSS use to
+        // start it hidden and toggle it on a matching live event, without
+        // render_template/render_primitive needing to know any of this.
+        let (alert_attrs, alert_class) = match &el.alert_trigger {
+            Some(t) if t.enabled => {
+                has_alert_trigger = true;
+                let kinds: Vec<&str> = t.kinds.iter().filter_map(|k| VALID_ALERT_KINDS.iter().find(|&&v| v == k).copied()).collect();
+                let kinds_attr = kinds.join(",");
+                let duration = t.duration_seconds.clamp(1.0, 120.0);
+                let anim = match t.animation_style.as_str() {
+                    "slide" => "slide",
+                    "fade" => "fade",
+                    _ => "pop",
+                };
+                (
+                    format!(r#" data-alert-armed="1" data-alert-kinds="{kinds_attr}" data-alert-duration="{duration}""#),
+                    format!(" alert-anim-{anim}"),
+                )
+            }
+            _ => (String::new(), String::new()),
+        };
         if kind == "template" {
             // Templates keep their own fully isolated iframe — real risk of
             // one widget's scoped CSS (`.title`/`#card`/etc.) colliding with
@@ -1623,7 +1690,7 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
             let inner_html = render_template(&el.params)?;
             let frame_id = format!("el-{i}");
             body_html.push_str(&format!(
-                r#"<iframe id="{frame_id}" class="el" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"></iframe>"#
+                r#"<iframe id="{frame_id}" class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}></iframe>"#
             ));
             // JSON-encoding the whole rendered document is what makes
             // embedding it safely inside a <script> block trivial —
@@ -1646,7 +1713,7 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
                 }
             }
             body_html.push_str(&format!(
-                r#"<div class="el" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}">{fragment}</div>"#
+                r#"<div class="el{alert_class}" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}"{alert_attrs}>{fragment}</div>"#
             ));
         }
     }
@@ -1654,6 +1721,8 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
         body_html.push_str("</div>");
     }
     let font_links_html = font_links.join("\n");
+    let alert_style = if has_alert_trigger { ALERT_TRIGGER_STYLE } else { "" };
+    let alert_script = if has_alert_trigger { ALERT_TRIGGER_SCRIPT } else { "" };
     Ok(format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -1664,6 +1733,7 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
 <style>
   html, body {{ margin: 0; padding: 0; background: transparent; overflow: hidden; }}
   .el {{ position: absolute; border: 0; background: transparent; }}
+  {alert_style}
 </style>
 </head>
 <body>
@@ -1671,12 +1741,83 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
 <script>
 {TOKEN_FROM_PATH_JS}
 {assigns}
+{alert_script}
 </script>
 </body>
 </html>
 "#
     ))
 }
+
+/// Only emitted when at least one element has an enabled alert_trigger.
+/// Armed elements start fully hidden (`visibility:hidden` too, not just
+/// `opacity:0`, so they can't be clicked/focused while off) and only the
+/// `alert-active`/`alert-leaving` classes — toggled by ALERT_TRIGGER_SCRIPT
+/// on a matching /alerts-ws event — bring them on screen. Reuses the exact
+/// same entrance keyframe names/timings render_template already defines for
+/// its own animationStyle field (harmless duplication: each lives in its
+/// own document — a template's copy is scoped inside its iframe's srcdoc,
+/// this one is scoped to the shared canvas document).
+const ALERT_TRIGGER_STYLE: &str = r#"
+  .el[data-alert-armed] { opacity: 0; visibility: hidden; pointer-events: none; }
+  .el[data-alert-armed].alert-active { visibility: visible; opacity: 1; pointer-events: auto; }
+  .el[data-alert-armed].alert-anim-pop.alert-active { animation: overlay-pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+  .el[data-alert-armed].alert-anim-slide.alert-active { animation: overlay-slide-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+  .el[data-alert-armed].alert-anim-fade.alert-active { animation: overlay-fade-in 0.5s ease forwards; }
+  .el[data-alert-armed].alert-leaving { visibility: visible; opacity: 1; animation: overlay-alert-fade-out 0.4s ease forwards; }
+  @keyframes overlay-pop-in { from { opacity: 0; transform: scale(0.9) translateY(-8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+  @keyframes overlay-slide-in { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes overlay-fade-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes overlay-alert-fade-out { from { opacity: 1; } to { opacity: 0; } }
+"#;
+
+/// Listens on the same `/alerts-ws` feed `widgets/alerts-overlay.html`
+/// already uses (see push_alert_event/alert_broadcast in server.rs) and
+/// shows/re-hides every armed `.el` whose `data-alert-kinds` matches (empty
+/// = matches anything) the fired event's `kind`. No token (the Canvas
+/// Maker's own srcDoc live preview, same case DATA_BIND_SCRIPT handles) —
+/// rather than sitting permanently hidden and giving no sense of what the
+/// trigger will actually look like, it fires each armed element once on
+/// load so designing one is a normal "watch it happen" loop, not a leap of
+/// faith into invisible state.
+const ALERT_TRIGGER_SCRIPT: &str = r#"
+(function() {
+  var armed = Array.prototype.slice.call(document.querySelectorAll("[data-alert-armed]"));
+  if (armed.length === 0) return;
+  function matches(el, kind) {
+    var raw = el.getAttribute("data-alert-kinds") || "";
+    if (!raw) return true;
+    return raw.split(",").indexOf(kind) !== -1;
+  }
+  function show(el) {
+    var duration = Math.max(1, parseFloat(el.getAttribute("data-alert-duration")) || 5) * 1000;
+    clearTimeout(el._alertShowTimer);
+    clearTimeout(el._alertHideTimer);
+    el.classList.remove("alert-leaving");
+    el.classList.add("alert-active");
+    el._alertShowTimer = setTimeout(function() {
+      el.classList.remove("alert-active");
+      el.classList.add("alert-leaving");
+      el._alertHideTimer = setTimeout(function() { el.classList.remove("alert-leaving"); }, 450);
+    }, duration);
+  }
+  function handle(event) {
+    armed.forEach(function(el) { if (matches(el, event.kind)) show(el); });
+  }
+  var token = getOverlayToken();
+  if (!token) {
+    armed.forEach(show);
+    return;
+  }
+  function connect() {
+    var ws = new WebSocket("ws://127.0.0.1:53735/alerts-ws?token=" + encodeURIComponent(token));
+    ws.onmessage = function(ev) { try { handle(JSON.parse(ev.data)); } catch (e) {} };
+    ws.onclose = function() { setTimeout(connect, 3000); };
+    ws.onerror = function() { ws.close(); };
+  }
+  connect();
+})();
+"#;
 
 // --- "Design with AI": generate a whole Canvas layout from a text prompt ---
 // Same Hugging Face Inference Providers call as AI Co-Host (see cohost.rs) —
@@ -1745,6 +1886,8 @@ fn build_canvas_from_specs(specs: Vec<AiElementSpec>) -> Vec<CanvasElement> {
             locked: false,
             group_id: None,
             group_opacity: default_one_f32(),
+            component_id: None,
+            alert_trigger: None,
             primitive: None,
             params: TemplateParams {
                 template: spec.template,
@@ -2224,6 +2367,8 @@ mod tests {
             locked: false,
             group_id: None,
             group_opacity: default_one_f32(),
+            component_id: None,
+            alert_trigger: None,
             primitive: None,
             params: params(template),
         }
@@ -2546,6 +2691,68 @@ mod tests {
         b.group_opacity = 1.0;
         let html = render_canvas(&[a, b]).unwrap();
         assert!(!html.contains("opacity:0."));
+    }
+
+    #[test]
+    fn canvas_element_with_no_alert_trigger_renders_no_alert_markup_or_script() {
+        let el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("data-alert-armed"));
+        assert!(!html.contains("alerts-ws"));
+        assert!(!html.contains("alert-anim-"));
+    }
+
+    #[test]
+    fn canvas_element_with_disabled_alert_trigger_renders_no_alert_markup() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.alert_trigger = Some(AlertTrigger { enabled: false, kinds: vec!["follow".into()], duration_seconds: 5.0, animation_style: "pop".into() });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(!html.contains("data-alert-armed"));
+    }
+
+    #[test]
+    fn canvas_element_with_enabled_alert_trigger_gets_armed_attributes_and_shared_script() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.alert_trigger = Some(AlertTrigger {
+            enabled: true,
+            kinds: vec!["follow".into(), "sub".into()],
+            duration_seconds: 8.0,
+            animation_style: "slide".into(),
+        });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains(r#"data-alert-armed="1""#));
+        assert!(html.contains(r#"data-alert-kinds="follow,sub""#));
+        assert!(html.contains(r#"data-alert-duration="8""#));
+        assert!(html.contains("alert-anim-slide"));
+        assert!(html.contains("alerts-ws"));
+        assert!(html.contains("overlay-pop-in"), "shared keyframes are always emitted once the feature is armed, regardless of which style this element uses");
+    }
+
+    #[test]
+    fn canvas_alert_trigger_duration_and_kinds_are_clamped_and_filtered() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.alert_trigger = Some(AlertTrigger {
+            enabled: true,
+            kinds: vec!["follow".into(), "not-a-real-kind".into()],
+            duration_seconds: 999.0,
+            animation_style: "not-a-real-style".into(),
+        });
+        let html = render_canvas(&[el]).unwrap();
+        assert!(html.contains(r#"data-alert-kinds="follow""#), "unrecognized kind should be dropped, not passed through");
+        assert!(html.contains(r#"data-alert-duration="120""#), "duration should clamp to the 120s ceiling");
+        assert!(html.contains("alert-anim-pop"), "unrecognized animation style should fall back to pop");
+    }
+
+    #[test]
+    fn canvas_component_id_round_trips_even_though_render_never_reads_it() {
+        let mut el = canvas_element("a", "lower-third", 5.0, 10.0, 0);
+        el.component_id = Some("component-123".into());
+        // component_id is editor-only bookkeeping — it must deserialize and
+        // re-serialize through CanvasElement (round-trip via the sidecar)
+        // without render_canvas erroring or needing to reference it.
+        assert!(render_canvas(&[el.clone()]).is_ok());
+        let json = serde_json::to_value(&el).unwrap();
+        assert_eq!(json["componentId"], "component-123");
     }
 
     #[test]

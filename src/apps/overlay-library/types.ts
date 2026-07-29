@@ -274,6 +274,32 @@ export const BLEND_MODES = [
 ] as const;
 export type BlendMode = (typeof BLEND_MODES)[number];
 
+/** Mirrors AlertKind in src/apps/alerts-hub/types.ts — kept as its own copy
+ * (not an import from alerts-hub) since overlay-library shouldn't depend on
+ * a specific tool's app folder for a value list this generic. */
+export const ALERT_KINDS: { id: string; label: string }[] = [
+  { id: "follow", label: "Follow" },
+  { id: "sub", label: "Subscribe" },
+  { id: "raid", label: "Raid" },
+  { id: "cheer", label: "Cheer/Bits" },
+  { id: "tip", label: "Tip" },
+];
+
+export interface AlertTrigger {
+  enabled: boolean;
+  /** Empty = matches every alert kind. */
+  kinds: string[];
+  durationSeconds: number;
+  animationStyle: "pop" | "slide" | "fade";
+}
+
+export const DEFAULT_ALERT_TRIGGER: AlertTrigger = {
+  enabled: false,
+  kinds: [],
+  durationSeconds: 5,
+  animationStyle: "pop",
+};
+
 export interface PrimitiveParams {
   fill: string;
   fillOpacity: number;
@@ -381,6 +407,12 @@ export interface CanvasElementT {
    * sharing this id. Editing a member without syncing leaves the others
    * untouched, unlike a real Figma-style instance. */
   componentId?: string | null;
+  /** When set and enabled, this element stays hidden in the rendered
+   * overlay until a matching live alert (follow/sub/raid/cheer/tip) fires,
+   * then animates in and auto-hides again after durationSeconds — the
+   * element's placement/style is otherwise completely normal, this only
+   * controls whether it starts hidden and what makes it appear. */
+  alertTrigger?: AlertTrigger;
   /** Used when kind is "template" (or absent). Always present (even on a
    * primitive element, where it's an unused default) so any code path that
    * assumes every element has full params never has to null-check it. */

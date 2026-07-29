@@ -13,9 +13,12 @@ import {
   newPrimitiveElement,
   elementKind,
   DEFAULT_PRIMITIVE_PARAMS,
+  ALERT_KINDS,
+  DEFAULT_ALERT_TRIGGER,
   type CanvasElementT,
   type TemplateParams,
   type PrimitiveParams,
+  type AlertTrigger,
 } from "../overlay-library/types";
 import { useLiveSources } from "../overlay-library/useLiveSources";
 import TemplateFieldsEditor from "./TemplateFieldsEditor";
@@ -1018,6 +1021,15 @@ export default function CanvasMaker({
     setElements((prev) => prev.map((e) => (e.id === selectedId ? { ...e, ...patch } : e)));
   };
 
+  const setSelectedAlertTrigger = (patch: Partial<AlertTrigger>) => {
+    recordBeforeChange(elements);
+    setElements((prev) =>
+      prev.map((e) =>
+        e.id === selectedId ? { ...e, alertTrigger: { ...(e.alertTrigger ?? DEFAULT_ALERT_TRIGGER), ...patch } } : e
+      )
+    );
+  };
+
   /** Generates a whole layout from a text description via Hugging Face
    * (same real-call pattern as AI Co-Host, not a mockup) and replaces the
    * canvas with it — undoable like any other change, so a bad result is
@@ -1354,6 +1366,11 @@ export default function CanvasMaker({
                           <span className="text-[10px] text-cyan-300/70">🧩</span>
                         </Tooltip>
                       )}
+                      {el.alertTrigger?.enabled && (
+                        <Tooltip label="Hidden until a matching alert fires">
+                          <span className="text-[10px] text-amber-300/70">🔔</span>
+                        </Tooltip>
+                      )}
                       <Tooltip label={el.locked ? "Unlock (allow drag/resize)" : "Lock (prevent drag/resize)"}>
                         <span
                           onClick={(ev) => {
@@ -1635,6 +1652,90 @@ export default function CanvasMaker({
                     </Button>
                   </Tooltip>
                 )}
+                <div className="space-y-2 pb-3 mb-1 border-b border-white/[0.06]">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-white/40 uppercase tracking-wide block">Alert Trigger</label>
+                    <button
+                      onClick={() => setSelectedAlertTrigger({ enabled: !(selected.alertTrigger?.enabled ?? false) })}
+                      className={`px-2 py-0.5 rounded-md text-[10px] border ${
+                        selected.alertTrigger?.enabled
+                          ? "bg-purple-500/15 border-purple-500/40 text-white"
+                          : "bg-white/[0.03] border-white/[0.06] text-white/50 hover:border-white/20"
+                      }`}
+                    >
+                      {selected.alertTrigger?.enabled ? "On" : "Off"}
+                    </button>
+                  </div>
+                  {selected.alertTrigger?.enabled ? (
+                    <>
+                      <p className="text-[9px] text-white/25">
+                        Hidden in the rendered overlay until a matching alert fires, then animates in and
+                        auto-hides again.
+                      </p>
+                      <div>
+                        <label className="text-[9px] text-white/30 uppercase tracking-wide mb-1 block">
+                          Fires on (none picked = any alert)
+                        </label>
+                        <div className="flex flex-wrap gap-1">
+                          {ALERT_KINDS.map((k) => {
+                            const kinds = selected.alertTrigger?.kinds ?? [];
+                            const picked = kinds.includes(k.id);
+                            return (
+                              <button
+                                key={k.id}
+                                onClick={() =>
+                                  setSelectedAlertTrigger({
+                                    kinds: picked ? kinds.filter((id) => id !== k.id) : [...kinds, k.id],
+                                  })
+                                }
+                                className={`px-2 py-1 rounded-md text-[10px] border ${
+                                  picked
+                                    ? "bg-purple-500/15 border-purple-500/40 text-white"
+                                    : "bg-white/[0.03] border-white/[0.06] text-white/50 hover:border-white/20"
+                                }`}
+                              >
+                                {k.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <NumberField
+                          label="Show for (sec)"
+                          value={selected.alertTrigger?.durationSeconds ?? 5}
+                          min={1}
+                          max={120}
+                          onChange={(v) => setSelectedAlertTrigger({ durationSeconds: v })}
+                        />
+                        <div>
+                          <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1 block">
+                            Animation
+                          </label>
+                          <div className="flex gap-1">
+                            {(["pop", "slide", "fade"] as const).map((style) => (
+                              <button
+                                key={style}
+                                onClick={() => setSelectedAlertTrigger({ animationStyle: style })}
+                                className={`flex-1 py-1.5 rounded-lg text-[10px] capitalize border ${
+                                  (selected.alertTrigger?.animationStyle ?? "pop") === style
+                                    ? "bg-purple-500/15 border-purple-500/40 text-white"
+                                    : "bg-white/[0.03] border-white/[0.06] text-white/50 hover:border-white/20"
+                                }`}
+                              >
+                                {style}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-[9px] text-white/25">
+                      Off — this element renders normally, always visible.
+                    </p>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <NumberField label="X (%)" value={selected.xPct} min={0} max={100} onChange={(v) => setSelectedPlacement({ xPct: v })} />
                   <NumberField label="Y (%)" value={selected.yPct} min={0} max={100} onChange={(v) => setSelectedPlacement({ yPct: v })} />
