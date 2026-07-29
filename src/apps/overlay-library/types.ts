@@ -363,6 +363,11 @@ export interface CanvasElementT {
   locked?: boolean;
   /** Elements sharing a groupId move together when any one of them is dragged. */
   groupId?: string | null;
+  /** Shared across every member of a group (kept in sync when set from the
+   * inspector) — renders the whole group flattened behind one opacity
+   * instead of each member fading independently, so overlapping members
+   * don't double up where they cross. No effect on an ungrouped element. */
+  groupOpacity?: number;
   /** Used when kind is "template" (or absent). Always present (even on a
    * primitive element, where it's an unused default) so any code path that
    * assumes every element has full params never has to null-check it. */

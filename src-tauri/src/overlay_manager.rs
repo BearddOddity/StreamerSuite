@@ -330,6 +330,12 @@ pub(crate) struct CanvasElement {
     locked: bool,
     #[serde(default)]
     group_id: Option<String>,
+    /// Shared by every element carrying the same `group_id` — when < 1.0,
+    /// render_canvas flattens that group's consecutive run behind one
+    /// wrapper `<div>` opacity instead of applying it per-member, so
+    /// overlapping group members don't double up where they cross.
+    #[serde(default = "default_one_f32")]
+    group_opacity: f32,
     /// Used when `kind` is "template" (or absent) — unused-but-present for
     /// primitive elements too, so a mixed canvas round-trips through any
     /// code path that still assumes every element has a full `params`.
@@ -1532,7 +1538,29 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
     // stacking result without that isolation.
     let mut ordered: Vec<&CanvasElement> = elements.iter().collect();
     ordered.sort_by_key(|el| el.z_index);
+    // Tracks the group wrapper (group_id, opacity) currently open in
+    // body_html, if any — a maximal *consecutive* run (after the z_index
+    // sort above) of elements sharing both gets flattened behind one
+    // wrapper <div style="opacity:...">, so overlapping group members
+    // don't double up where they cross the way independently-faded
+    // siblings would. A group split across non-adjacent z-indexes (by
+    // another element interleaved between its members) simply gets more
+    // than one wrapper — same total opacity, just not one shared flatten.
+    let mut open_group: Option<(String, f32)> = None;
     for (i, el) in ordered.into_iter().enumerate() {
+        let wants_group: Option<(String, f32)> = match &el.group_id {
+            Some(gid) if el.group_opacity < 0.999 => Some((gid.clone(), el.group_opacity.clamp(0.0, 1.0))),
+            _ => None,
+        };
+        if open_group != wants_group {
+            if open_group.is_some() {
+                body_html.push_str("</div>");
+            }
+            if let Some((_, opacity)) = &wants_group {
+                body_html.push_str(&format!(r#"<div style="opacity:{opacity};">"#));
+            }
+            open_group = wants_group;
+        }
         let kind = el.kind.as_deref().unwrap_or("template");
         let x = el.x_pct.clamp(0.0, 100.0);
         let y = el.y_pct.clamp(0.0, 100.0);
@@ -1580,6 +1608,9 @@ fn render_canvas(elements: &[CanvasElement]) -> Result<String, String> {
                 r#"<div class="el" style="left:{x}%; top:{y}%; width:{w}%; height:{h}%; {transform}">{fragment}</div>"#
             ));
         }
+    }
+    if open_group.is_some() {
+        body_html.push_str("</div>");
     }
     let font_links_html = font_links.join("\n");
     Ok(format!(
@@ -1672,6 +1703,7 @@ fn build_canvas_from_specs(specs: Vec<AiElementSpec>) -> Vec<CanvasElement> {
             rotation: 0.0,
             locked: false,
             group_id: None,
+            group_opacity: default_one_f32(),
             primitive: None,
             params: TemplateParams {
                 template: spec.template,
@@ -2150,6 +2182,7 @@ mod tests {
             rotation: 0.0,
             locked: false,
             group_id: None,
+            group_opacity: default_one_f32(),
             primitive: None,
             params: params(template),
         }
@@ -2430,6 +2463,35 @@ mod tests {
         ];
         let html = render_canvas(&elements).unwrap();
         assert!(html.find("left:5%").unwrap() < html.find("left:60%").unwrap());
+    }
+
+    #[test]
+    fn canvas_wraps_a_consecutive_group_in_one_shared_opacity_div() {
+        let mut a = canvas_element("a", "lower-third", 5.0, 10.0, 1);
+        a.group_id = Some("g1".into());
+        a.group_opacity = 0.4;
+        let mut b = canvas_element("b", "goal-bar", 60.0, 70.0, 2);
+        b.group_id = Some("g1".into());
+        b.group_opacity = 0.4;
+        let html = render_canvas(&[a, b]).unwrap();
+        assert!(html.contains(r#"<div style="opacity:0.4;">"#));
+        // Both members' own iframes sit inside that one wrapper (template
+        // elements render as <iframe>, so the wrapper's own </div> is the
+        // very first one after it opens) — not each individually faded.
+        let wrapper_start = html.find(r#"<div style="opacity:0.4;">"#).unwrap();
+        let wrapper_end = html[wrapper_start..].find("</div>").unwrap() + wrapper_start;
+        assert!(html[wrapper_start..wrapper_end].contains("left:5%"));
+        assert!(html[wrapper_start..wrapper_end].contains("left:60%"));
+    }
+
+    #[test]
+    fn canvas_ungrouped_or_full_opacity_elements_get_no_group_wrapper() {
+        let a = canvas_element("a", "lower-third", 5.0, 10.0, 1);
+        let mut b = canvas_element("b", "goal-bar", 60.0, 70.0, 2);
+        b.group_id = Some("g1".into());
+        b.group_opacity = 1.0;
+        let html = render_canvas(&[a, b]).unwrap();
+        assert!(!html.contains("opacity:0."));
     }
 
     #[test]

@@ -24,6 +24,7 @@ import { SaveChoiceDialog, UnsavedChangesDialog } from "./ConfirmDialogs";
 import VersionHistoryPanel from "./VersionHistoryPanel";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
 import { Tooltip } from "../../design-system/components/overlay";
+import { RangeSlider } from "../../design-system/components/forms";
 
 /** Icon + display label for a Layers row or the on-canvas floating label —
  * a template widget uses its TEMPLATES entry (icon + title/type name); a
@@ -407,7 +408,14 @@ export default function CanvasMaker({
 
   const ungroupSelected = () => {
     recordBeforeChange(elements);
-    setElements((prev) => prev.map((e) => (effectiveSelection.has(e.id) ? { ...e, groupId: null } : e)));
+    setElements((prev) => prev.map((e) => (effectiveSelection.has(e.id) ? { ...e, groupId: null, groupOpacity: undefined } : e)));
+  };
+
+  /** Applies to every member sharing `groupId`, not just the one currently
+   * selected — a group's opacity is one shared value, not per-member. */
+  const setGroupOpacity = (groupId: string, opacity: number) => {
+    recordBeforeChange(elements);
+    setElements((prev) => prev.map((e) => (e.groupId === groupId ? { ...e, groupOpacity: opacity } : e)));
   };
 
   const toggleMultiSelect = (id: string) => {
@@ -1553,6 +1561,22 @@ export default function CanvasMaker({
                     ))}
                   </div>
                 </div>
+                {selected.groupId && (
+                  <div>
+                    <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1 block">
+                      Group Opacity ({Math.round((selected.groupOpacity ?? 1) * 100)}%)
+                    </label>
+                    <RangeSlider
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={selected.groupOpacity ?? 1}
+                      onChange={(v) => setGroupOpacity(selected.groupId!, v)}
+                      showValue={false}
+                    />
+                    <p className="text-[9px] text-white/25 mt-1">Shared by every element in this group.</p>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <NumberField label="X (%)" value={selected.xPct} min={0} max={100} onChange={(v) => setSelectedPlacement({ xPct: v })} />
                   <NumberField label="Y (%)" value={selected.yPct} min={0} max={100} onChange={(v) => setSelectedPlacement({ yPct: v })} />
