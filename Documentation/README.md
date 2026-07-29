@@ -14,6 +14,7 @@ Research notes and technical references for the StreamerSuite project.
 | 06 | [`06-plugin-registry-pattern.md`](./06-plugin-registry-pattern.md) | App registry pattern, shell architecture, state management |
 | 07 | [`07-sound-board-audio.md`](./07-sound-board-audio.md) | Audio playback, routing, hotkeys, file management |
 | 08 | [`08-stream-overlays-alerts.md`](./08-stream-overlays-alerts.md) | Alert types, overlay architecture, browser source approach |
+| 09 | [`09-portable-overlay-export.md`](./09-portable-overlay-export.md) | Design for exporting overlays to users without StreamerSuite installed (design only, not implemented) |
 
 ## Key Platforms
 
