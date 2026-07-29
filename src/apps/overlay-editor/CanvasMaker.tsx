@@ -418,6 +418,40 @@ export default function CanvasMaker({
     setElements((prev) => prev.map((e) => (e.groupId === groupId ? { ...e, groupOpacity: opacity } : e)));
   };
 
+  /** Marks the current selection as instances of the same "component" —
+   * linking alone changes nothing; it just makes {@link syncFromComponent}
+   * available. Deliberately a separate concept from groupId (grouping is
+   * about moving together; linking is about sharing a look/content). */
+  const linkAsComponent = () => {
+    if (effectiveSelection.size < 2) return;
+    recordBeforeChange(elements);
+    const componentId = `component-${Date.now()}`;
+    setElements((prev) => prev.map((e) => (effectiveSelection.has(e.id) ? { ...e, componentId } : e)));
+  };
+
+  const unlinkComponent = () => {
+    recordBeforeChange(elements);
+    setElements((prev) => prev.map((e) => (effectiveSelection.has(e.id) ? { ...e, componentId: null } : e)));
+  };
+
+  /** Copies `source`'s look/content (kind, params, primitive, rotation) —
+   * never its placement (x/y/width/height/zIndex) or editor-only state
+   * (locked/groupId) — onto every other element sharing its componentId.
+   * A manual, one-shot push, not a live binding: editing a linked element
+   * again without re-syncing leaves the others exactly as they were. */
+  const syncFromComponent = (source: CanvasElementT) => {
+    if (!source.componentId) return;
+    recordBeforeChange(elements);
+    const { kind, params, primitive, rotation } = source;
+    setElements((prev) =>
+      prev.map((e) =>
+        e.componentId === source.componentId && e.id !== source.id
+          ? { ...e, kind, params: { ...params }, primitive: primitive ? { ...primitive } : primitive, rotation }
+          : e
+      )
+    );
+  };
+
   const toggleMultiSelect = (id: string) => {
     setMultiSelected((prev) => {
       const next = new Set(prev.size > 0 ? prev : selectedId ? [selectedId] : []);
@@ -1315,6 +1349,11 @@ export default function CanvasMaker({
                           <span className="text-[10px] text-purple-300/70">🔗</span>
                         </Tooltip>
                       )}
+                      {el.componentId && (
+                        <Tooltip label="Linked component instance — select it and use Sync to push its look onto the others">
+                          <span className="text-[10px] text-cyan-300/70">🧩</span>
+                        </Tooltip>
+                      )}
                       <Tooltip label={el.locked ? "Unlock (allow drag/resize)" : "Lock (prevent drag/resize)"}>
                         <span
                           onClick={(ev) => {
@@ -1348,6 +1387,18 @@ export default function CanvasMaker({
             {elements.some((e) => effectiveSelection.has(e.id) && e.groupId) && (
               <Button variant="ghost" size="sm" onClick={ungroupSelected} className="w-full">
                 Ungroup
+              </Button>
+            )}
+            {effectiveSelection.size >= 2 && (
+              <Tooltip label="Marks these as the same reusable component — lets you push one instance's look/content onto the others later with Sync (placement stays independent).">
+                <Button variant="ghost" size="sm" onClick={linkAsComponent} className="w-full">
+                  🧩 Link as Component
+                </Button>
+              </Tooltip>
+            )}
+            {elements.some((e) => effectiveSelection.has(e.id) && e.componentId) && (
+              <Button variant="ghost" size="sm" onClick={unlinkComponent} className="w-full">
+                Unlink Component
               </Button>
             )}
 
@@ -1576,6 +1627,13 @@ export default function CanvasMaker({
                     />
                     <p className="text-[9px] text-white/25 mt-1">Shared by every element in this group.</p>
                   </div>
+                )}
+                {selected.componentId && (
+                  <Tooltip label="Pushes this element's look and content (not its position/size) onto every other element linked to the same component.">
+                    <Button variant="ghost" size="sm" onClick={() => syncFromComponent(selected)} className="w-full">
+                      ↻ Sync from this instance
+                    </Button>
+                  </Tooltip>
                 )}
                 <div className="grid grid-cols-2 gap-2">
                   <NumberField label="X (%)" value={selected.xPct} min={0} max={100} onChange={(v) => setSelectedPlacement({ xPct: v })} />

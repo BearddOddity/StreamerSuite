@@ -374,6 +374,13 @@ export interface CanvasElementT {
    * instead of each member fading independently, so overlapping members
    * don't double up where they cross. No effect on an ungrouped element. */
   groupOpacity?: number;
+  /** Elements sharing a componentId are "linked" — a lighter, MANUAL-sync
+   * alternative to a true live-linked component instance. Linking doesn't
+   * change anything by itself; an explicit "sync" action copies one
+   * instance's look/content (never its placement) onto every other member
+   * sharing this id. Editing a member without syncing leaves the others
+   * untouched, unlike a real Figma-style instance. */
+  componentId?: string | null;
   /** Used when kind is "template" (or absent). Always present (even on a
    * primitive element, where it's an unused default) so any code path that
    * assumes every element has full params never has to null-check it. */
