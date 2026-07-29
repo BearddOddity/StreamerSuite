@@ -401,6 +401,11 @@ pub(crate) struct PrimitiveParams {
     image_data_uri: Option<String>,
     #[serde(default = "default_object_fit")]
     object_fit: String,
+    /// Image kind only, meaningful only when object_fit is "cover".
+    #[serde(default = "default_object_position")]
+    object_position_x: f32,
+    #[serde(default = "default_object_position")]
+    object_position_y: f32,
 }
 
 impl Default for PrimitiveParams {
@@ -429,6 +434,8 @@ impl Default for PrimitiveParams {
             text_align: default_text_align(),
             image_data_uri: None,
             object_fit: default_object_fit(),
+            object_position_x: default_object_position(),
+            object_position_y: default_object_position(),
         }
     }
 }
@@ -481,6 +488,9 @@ fn default_text_align() -> String {
 }
 fn default_object_fit() -> String {
     "contain".into()
+}
+fn default_object_position() -> f32 {
+    50.0
 }
 
 /// Editor-only sizing hint — render_canvas itself is fully percent-based and
@@ -1476,8 +1486,13 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> (String, Option<String>)
                 "fill" => "fill",
                 _ => "contain",
             };
+            // object-position only has a visible effect once the image can
+            // overflow its box, i.e. under "cover" — harmless to always emit
+            // it, but only meaningfully cropping in that mode.
+            let pos_x = p.object_position_x.clamp(0.0, 100.0);
+            let pos_y = p.object_position_y.clamp(0.0, 100.0);
             match safe_logo(&p.image_data_uri) {
-                Some(src) => format!(r#"<img src="{src}" alt="" style="width:100%; height:100%; object-fit:{fit}; display:block;">"#),
+                Some(src) => format!(r#"<img src="{src}" alt="" style="width:100%; height:100%; object-fit:{fit}; object-position:{pos_x}% {pos_y}%; display:block;">"#),
                 None => r#"<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,0.3); font-family:sans-serif; font-size:14px;">No image</div>"#.to_string(),
             }
         }
@@ -2183,6 +2198,19 @@ mod tests {
         let (html, _) = render_primitive("image", &p);
         assert!(html.contains("data:image/png;base64,AAAA"));
         assert!(html.contains("object-fit:cover"));
+    }
+
+    #[test]
+    fn render_primitive_image_emits_clamped_object_position() {
+        let p = PrimitiveParams {
+            image_data_uri: Some("data:image/png;base64,AAAA".into()),
+            object_fit: "cover".into(),
+            object_position_x: 120.0,
+            object_position_y: -5.0,
+            ..Default::default()
+        };
+        let (html, _) = render_primitive("image", &p);
+        assert!(html.contains("object-position:100% 0%"));
     }
 
     #[test]

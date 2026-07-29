@@ -316,6 +316,36 @@ export default function PrimitiveFieldsEditor({
             ]}
             style={SELECT_COMPACT_STYLE}
           />
+          {params.objectFit === "cover" && (
+            <>
+              <div>
+                <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
+                  Crop — Horizontal ({Math.round(params.objectPositionX)}%)
+                </label>
+                <RangeSlider
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={params.objectPositionX}
+                  onChange={(v) => set("objectPositionX", v)}
+                  showValue={false}
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1.5 block">
+                  Crop — Vertical ({Math.round(params.objectPositionY)}%)
+                </label>
+                <RangeSlider
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={params.objectPositionY}
+                  onChange={(v) => set("objectPositionY", v)}
+                  showValue={false}
+                />
+              </div>
+            </>
+          )}
         </>
       )}
 

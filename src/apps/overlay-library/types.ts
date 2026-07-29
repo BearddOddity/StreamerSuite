@@ -306,6 +306,12 @@ export interface PrimitiveParams {
   /** Image kind only. */
   imageDataUri: string | null;
   objectFit: "contain" | "cover" | "fill";
+  /** Image kind only, and only meaningful when objectFit is "cover" (the
+   * only fit mode where the image can overflow its box) — 0-100%, CSS
+   * object-position's own percentage semantics: 50/50 is centered, 0/0
+   * pins the image's top-left corner to the box's top-left. */
+  objectPositionX: number;
+  objectPositionY: number;
 }
 
 export const DEFAULT_PRIMITIVE_PARAMS: PrimitiveParams = {
@@ -332,6 +338,8 @@ export const DEFAULT_PRIMITIVE_PARAMS: PrimitiveParams = {
   textAlign: "left",
   imageDataUri: null,
   objectFit: "contain",
+  objectPositionX: 50,
+  objectPositionY: 50,
 };
 
 /** One placed widget/shape inside a Canvas overlay — where it sits and how
