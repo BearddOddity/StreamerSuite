@@ -25,7 +25,10 @@ export type OverlayTemplateId =
   | "alert-banner"
   | "countdown"
   | "now-playing"
-  | "game-logo";
+  | "game-logo"
+  | "brb-screen"
+  | "chat-box"
+  | "follower-ticker";
 
 export interface TemplateDef {
   id: OverlayTemplateId;
@@ -155,6 +158,39 @@ export const TEMPLATES: TemplateDef[] = [
     icon: "🖼️",
     description: "Just the current game's logo art on a soft glow panel — live from StatusForge, replicates the original Logo overlay",
     positions: [],
+  },
+  {
+    id: "brb-screen",
+    label: "BRB / Starting Soon",
+    icon: "☕",
+    description: "Full-screen wash with a centered message — stream break, starting-soon, or ending screen, with an optional countdown",
+    positions: [],
+    hasCountdownTarget: true,
+  },
+  {
+    id: "chat-box",
+    label: "Chat Box",
+    icon: "💬",
+    description:
+      "Shows the latest chat message as a styled bubble (bind Subtitle to Latest Chat Message) — a single-message highlight, not a scrolling multi-message log",
+    positions: [
+      { value: "bottom-left", label: "Bottom Left" },
+      { value: "bottom-right", label: "Bottom Right" },
+      { value: "top-left", label: "Top Left" },
+      { value: "top-right", label: "Top Right" },
+    ],
+  },
+  {
+    id: "follower-ticker",
+    label: "Follower Ticker",
+    icon: "💜",
+    description:
+      "Scrolling activity bar themed for follows/subs/tips (bind Subtitle to Latest Alert) — shows the latest event, not a running history list",
+    positions: [
+      { value: "top", label: "Top" },
+      { value: "bottom", label: "Bottom" },
+    ],
+    hasSpeed: true,
   },
 ];
 

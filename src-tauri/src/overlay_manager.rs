@@ -1549,6 +1549,77 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
              .logo-img.offline-icon { max-width: 45%; max-height: 45%; opacity: 0.55; filter: drop-shadow(0 8px 20px rgba(0,0,0,0.4)); }"
                 .to_string(),
         ),
+        "brb-screen" => {
+            let target = escape_html(params.countdown_target.trim());
+            let countdown_html = if params.countdown_target.trim().is_empty() {
+                String::new()
+            } else {
+                format!(r#"<div class="countdown" id="sb-countdown" data-target="{target}">--d --:--:--</div>"#)
+            };
+            (
+                String::new(),
+                format!(
+                    r#"<div id="wash"></div><div id="card">{logo_html}{title_html}{subtitle_html}{countdown_html}</div>"#
+                ),
+                format!(
+                    "body {{ display: flex; align-items: center; justify-content: center; }}\n\
+                     #wash {{ position: fixed; inset: 0; background: radial-gradient(ellipse at center, {accent}22 0%, rgba(0, 0, 0, {bg_opacity}) 70%); }}\n\
+                     #card {{ position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; {card_animation} }}\n\
+                     .title {{ font-size: 56px; font-weight: 900; color: {text_color}; }}\n\
+                     .subtitle {{ font-size: 22px; color: {text_color}; opacity: 0.8; }}\n\
+                     .countdown {{ font-size: 34px; font-weight: 800; color: {accent}; font-variant-numeric: tabular-nums; margin-top: 8px; }}\n\
+                     .logo {{ height: 80px; width: auto; margin-bottom: 8px; }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
+        // A single-latest-message highlight, not a scrolling multi-message
+        // log — no StreamerSuite tool currently publishes a rolling list of
+        // recent chat messages (only "latest_chat", one value), so this
+        // reuses the same subtitle-bound-to-a-live-source mechanism every
+        // other template already has rather than inventing unbacked
+        // functionality.
+        "chat-box" => {
+            let corner_css = match params.position.as_str() {
+                "top-left" => "top: 30px; left: 30px;",
+                "top-right" => "top: 30px; right: 30px;",
+                "bottom-right" => "bottom: 30px; right: 30px;",
+                _ => "bottom: 30px; left: 30px;",
+            };
+            (
+                format!("position: fixed; {corner_css}"),
+                format!(r#"<div id="card"><div class="bubble-icon">💬</div><div class="text">{title_html}{subtitle_html}</div></div>"#),
+                format!(
+                    "#card {{ display: flex; align-items: flex-start; gap: 10px; padding: 12px 18px; max-width: 420px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid {accent}; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06); {card_animation} }}\n\
+                     .bubble-icon {{ font-size: 20px; line-height: 1; }}\n\
+                     .text {{ display: flex; flex-direction: column; gap: 2px; }}\n\
+                     .title {{ font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: {accent}; }}\n\
+                     .subtitle {{ font-size: 16px; font-weight: 500; color: {text_color}; word-break: break-word; }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
+        // Same "shows the latest event, not a running history" honesty as
+        // chat-box above — no tool publishes a list of recent follows, only
+        // the single latest_alert value, so this is the Ticker template's
+        // scroll mechanic re-themed for follow/sub/tip activity rather than
+        // a genuinely different data-backed widget.
+        "follower-ticker" => {
+            let side_css = if params.position == "top" { "top: 0;" } else { "bottom: 0;" };
+            let duration = params.speed_seconds.unwrap_or(14).clamp(4, 120);
+            (
+                format!("position: fixed; left: 0; right: 0; {side_css}"),
+                format!(r#"<div id="bar"><div id="track"><span class="heart">💜</span>{title_html}{subtitle_html}</div></div>"#),
+                format!(
+                    "#bar {{ width: 100%; overflow: hidden; padding: 8px 0; background: linear-gradient(90deg, {accent}33, rgba(5, 5, 5, {bg_opacity})); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: 2px solid {accent}; border-bottom: 2px solid {accent}; }}\n\
+                     #track {{ display: inline-flex; align-items: center; gap: 12px; white-space: nowrap; padding-left: 100%; animation: scroll {duration}s linear infinite; }}\n\
+                     .heart {{ font-size: 18px; }}\n\
+                     .title {{ font-size: 16px; font-weight: 800; color: {text_color}; }}\n\
+                     .subtitle {{ font-size: 16px; color: {accent}; font-weight: 700; }}\n\
+                     @keyframes scroll {{ from {{ transform: translateX(0); }} to {{ transform: translateX(-200%); }} }}"
+                ),
+            )
+        }
         other => return Err(format!("unknown template: {other}")),
     };
 
@@ -1557,7 +1628,7 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
     } else {
         String::new()
     };
-    if params.template == "countdown" {
+    if params.template == "countdown" || (params.template == "brb-screen" && !params.countdown_target.trim().is_empty()) {
         script.push_str(COUNTDOWN_SCRIPT);
     }
     if params.template == "now-playing" {
@@ -2181,6 +2252,7 @@ const HF_ROUTER_URL: &str = "https://router.huggingface.co/v1/chat/completions";
 
 const VALID_TEMPLATES: &[&str] = &[
     "lower-third", "corner-badge", "ticker", "text-box", "goal-bar", "cam-frame", "alert-banner", "countdown",
+    "brb-screen", "chat-box", "follower-ticker",
 ];
 
 #[derive(serde::Deserialize, Default)]
@@ -3412,7 +3484,7 @@ mod tests {
     fn renders_all_templates_and_escapes_text() {
         for t in [
             "lower-third", "corner-badge", "ticker", "text-box", "goal-bar", "cam-frame",
-            "alert-banner", "countdown",
+            "alert-banner", "countdown", "chat-box", "follower-ticker",
         ] {
             let html = render_template(&params(t)).unwrap();
             assert!(html.contains("Hello &lt;World&gt;"), "template {t} should escape title text");
@@ -3680,6 +3752,27 @@ mod tests {
         assert!(html.contains(".goal-fill.goal-complete"));
         assert!(html.contains("#card.goal-complete"));
         assert!(html.contains(r#"classList.toggle("goal-complete", reached)"#));
+    }
+
+    #[test]
+    fn brb_screen_without_countdown_target_renders_no_countdown_element_or_script() {
+        let mut p = params("brb-screen");
+        p.countdown_target = String::new();
+        let html = render_template(&p).unwrap();
+        assert!(!html.contains("sb-countdown"));
+        assert!(!html.contains("--d --:--:--"));
+        assert!(html.contains("Hello &lt;World&gt;"), "title should still render");
+    }
+
+    #[test]
+    fn brb_screen_with_countdown_target_renders_countdown_element_and_script() {
+        let mut p = params("brb-screen");
+        p.countdown_target = "2030-01-01T00:00:00Z".to_string();
+        let html = render_template(&p).unwrap();
+        assert!(html.contains(r#"id="sb-countdown""#));
+        assert!(html.contains(r#"data-target="2030-01-01T00:00:00Z""#));
+        assert!(html.contains("--d --:--:--"));
+        assert!(html.contains("getElementById(\"sb-countdown\")"), "the shared countdown script should be attached");
     }
 
     #[test]
