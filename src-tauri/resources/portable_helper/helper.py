@@ -4,8 +4,9 @@
 Runs entirely from the Python standard library (no `pip install` needed).
 Serves this folder's overlay.html (and any other overlay folder that
 registers with it — see "Shared helper" below), hosts a local setup page to
-connect your own Twitch/Kick accounts, and polls those platforms on your
-behalf so bound fields/alerts stay live.
+connect your own Twitch/Kick/YouTube/Chaturbate/Streamer.bot, and
+polls/relays those platforms on your behalf so bound fields/alerts stay
+live.
 
 Shared helper: if you've been given more than one StreamerSuite overlay,
 you only ever need ONE of these running at a time. When a second (or
@@ -13,11 +14,16 @@ third...) overlay's helper.py is launched, it notices one is already
 running, hands its own folder over to it, and exits — the already-running
 one then serves every overlay you've registered, at its own URL, off the
 same port, sharing one set of connected credentials. The registry pointer
-lives at ~/.streamersuite_portable_helper.json.
+lives at ~/.streamersuite_portable_helper.json. Alerts are scoped
+per-overlay (see push_alert) — an overlay only ever receives an alert from
+a platform its OWN manifest.json actually lists.
 
 Kick only exposes live viewer count/status through its public API — no
 follower/sub counts or a way to detect a fresh follow, so Kick alerts
-aren't implemented (see the setup page for status).
+aren't implemented (see the setup page for status). Joystick.tv isn't
+implemented at all — its realtime events need an OAuth PKCE login flow on
+top of the same WebSocket protocol Streamer.bot uses, and there's no real
+StreamerSuite reference to verify a hand-rolled client against.
 
 Streamer.bot relays your latest chat message (any platform Streamer.bot
 itself is connected to, including YouTube — StreamerSuite has no direct
@@ -76,6 +82,8 @@ STATE = {
     "chaturbate_status": "disconnected",
     "chaturbate_error": "",
     "chaturbate_next_url": None,
+    "streamerbot_status": "disconnected",
+    "streamerbot_error": "",
     "last_follower_id": None,
     # Absolute paths of every overlay folder currently being served —
     # always includes HERE (this folder), plus any other folder that
@@ -590,6 +598,92 @@ def chaturbate_loop():
             time.sleep(30)
 
 
+def streamerbot_sha256_b64(s):
+    return base64.b64encode(hashlib.sha256(s.encode("utf-8")).digest()).decode()
+
+
+def streamerbot_loop():
+    """Relays chat into live_data["latest_chat"] from a Streamer.bot
+    instance already running on the RECIPIENT's own machine (not something
+    this helper starts) — the same connect + salt/challenge auth algorithm
+    as StreamerSuite's own src/lib/streamerbot.ts, verified against a real
+    RFC 6455 server during development (see WSClient above). The
+    Subscribe request/event shape below is Streamer.bot's own public
+    WebSocket API — StreamerSuite's own code only ever calls DoAction, so
+    this specific part (subscribing to receive ChatMessage/Message events,
+    not just send actions) is best-effort against Streamer.bot's public
+    docs, not verified against StreamerSuite's own code the way the
+    connect+auth handshake is."""
+    while True:
+        if not any_platform("streamerbot"):
+            with STATE_LOCK:
+                STATE["streamerbot_status"] = "disconnected"
+            time.sleep(10)
+            continue
+        creds = load_credentials()
+        host = creds.get("streamerbotHost", "").strip() or "127.0.0.1"
+        port_str = creds.get("streamerbotPort", "").strip() or "8080"
+        password = creds.get("streamerbotPassword", "").strip()
+        try:
+            port = int(port_str)
+        except ValueError:
+            port = 8080
+        try:
+            with STATE_LOCK:
+                STATE["streamerbot_status"] = "connecting"
+            ws = ws_connect(host, port, "/", timeout=5)
+            try:
+                raw = ws.recv_message()
+                if raw is None:
+                    raise ConnectionError("Streamer.bot closed the connection during handshake")
+                msg = json.loads(raw)
+                auth = msg.get("authentication")
+                if auth and password:
+                    secret = streamerbot_sha256_b64(password + auth["salt"])
+                    authentication = streamerbot_sha256_b64(secret + auth["challenge"])
+                    ws.send_text(json.dumps({"request": "Authenticate", "authentication": authentication, "id": "connect"}))
+                    raw = ws.recv_message()
+                    if raw is None:
+                        raise ConnectionError("Streamer.bot closed the connection during authentication")
+                    ack = json.loads(raw)
+                    if ack.get("status") != "ok":
+                        raise ConnectionError(ack.get("error") or "authentication failed — check the Streamer.bot password")
+                # No password saved and the server didn't insist on one —
+                # matches streamerbot.ts's own behavior of proceeding
+                # unauthenticated in that case.
+
+                ws.send_text(json.dumps({
+                    "request": "Subscribe", "id": "streamersuite-portable",
+                    "events": {"General": ["Custom"], "Twitch": ["ChatMessage"], "YouTube": ["Message"], "Kick": ["ChatMessage"]},
+                }))
+
+                with STATE_LOCK:
+                    STATE["streamerbot_status"] = "connected"
+                    STATE["streamerbot_error"] = ""
+
+                while True:
+                    raw = ws.recv_message()
+                    if raw is None:
+                        raise ConnectionError("Streamer.bot connection closed")
+                    try:
+                        event = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    message_obj = (event.get("data") or {}).get("message") or {}
+                    text = message_obj.get("message")
+                    user = (message_obj.get("user") or {}).get("display") or (message_obj.get("user") or {}).get("name")
+                    if text:
+                        with STATE_LOCK:
+                            STATE["live_data"]["latest_chat"] = f"{user}: {text}" if user else text
+            finally:
+                ws.close()
+        except Exception as e:  # noqa: BLE001 - this loop must never die
+            with STATE_LOCK:
+                STATE["streamerbot_status"] = "error"
+                STATE["streamerbot_error"] = str(e)
+            time.sleep(10)
+
+
 SETUP_PAGE_SHELL = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -724,6 +818,21 @@ PLATFORM_CARDS = {
         '<button onclick="saveCredentials()">Save &amp; Connect</button>'
         '</div>'
     ),
+    "streamerbot": lambda creds: (
+        '<div class="card">'
+        '<h3>Streamer.bot <span id="streamerbot-status" class="status disconnected">checking…</span></h3>'
+        '<p class="muted">Streamer.bot must already be running on this machine with its WebSocket Server '
+        'enabled. Gives the latest chat message (any platform Streamer.bot itself is connected to, '
+        'including YouTube). Leave Host/Port at their defaults unless you changed them in Streamer.bot.</p>'
+        '<label>Host</label>'
+        f'<input type="text" id="streamerbotHost" value="{creds.get("streamerbotHost", "127.0.0.1")}">'
+        '<label>Port</label>'
+        f'<input type="text" id="streamerbotPort" value="{creds.get("streamerbotPort", "8080")}">'
+        '<label>Password (only if you set one in Streamer.bot)</label>'
+        f'<input type="password" id="streamerbotPassword" value="{creds.get("streamerbotPassword", "")}">'
+        '<button onclick="saveCredentials()">Save &amp; Connect</button>'
+        '</div>'
+    ),
 }
 
 PLATFORM_CREDENTIAL_FIELDS = {
@@ -735,6 +844,9 @@ PLATFORM_CREDENTIAL_FIELDS = {
                 'youtubeApiKey: document.getElementById("youtubeApiKey").value'],
     "chaturbate": ['chaturbateUsername: document.getElementById("chaturbateUsername").value',
                    'chaturbateToken: document.getElementById("chaturbateToken").value'],
+    "streamerbot": ['streamerbotHost: document.getElementById("streamerbotHost").value',
+                    'streamerbotPort: document.getElementById("streamerbotPort").value',
+                    'streamerbotPassword: document.getElementById("streamerbotPassword").value'],
 }
 
 PLATFORM_STATUS_IDS = {
@@ -742,6 +854,7 @@ PLATFORM_STATUS_IDS = {
     "kick": ("kick-status", "kickStatus"),
     "youtube": ("youtube-status", "youtubeStatus"),
     "chaturbate": ("chaturbate-status", "chaturbateStatus"),
+    "streamerbot": ("streamerbot-status", "streamerbotStatus"),
 }
 
 
@@ -768,7 +881,7 @@ def overlay_list_html(port):
 
 
 def setup_page_html(port, creds):
-    platforms = [p for p in ("twitch", "kick", "youtube", "chaturbate") if p in needed_platforms()]
+    platforms = [p for p in ("twitch", "kick", "youtube", "chaturbate", "streamerbot") if p in needed_platforms()]
     if not platforms:
         # No registered overlay declares ANY platform (a fully static
         # overlay, or none registered yet) — nothing to connect, so no
@@ -834,6 +947,8 @@ class Handler(BaseHTTPRequestHandler):
                     "youtubeError": STATE["youtube_error"],
                     "chaturbateStatus": STATE["chaturbate_status"],
                     "chaturbateError": STATE["chaturbate_error"],
+                    "streamerbotStatus": STATE["streamerbot_status"],
+                    "streamerbotError": STATE["streamerbot_error"],
                 })
         elif self.path in ("/setup", "/"):
             creds = load_credentials()
@@ -909,6 +1024,7 @@ def main():
 
     threading.Thread(target=poll_loop, daemon=True).start()
     threading.Thread(target=chaturbate_loop, daemon=True).start()
+    threading.Thread(target=streamerbot_loop, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"StreamerSuite standalone overlay helper running at http://127.0.0.1:{port}/setup")
     print("Open that URL to connect your accounts. Leave this window open while streaming.")

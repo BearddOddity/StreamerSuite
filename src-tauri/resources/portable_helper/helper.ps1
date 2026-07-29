@@ -3,9 +3,9 @@
 # Runs entirely on PowerShell + .NET, both already part of Windows -- no
 # separate install needed. Serves this folder's overlay.html (and any other
 # overlay folder that registers with it -- see "Shared helper" below), hosts
-# a local setup page to connect your own Twitch/Kick/YouTube/Chaturbate
-# accounts, and polls those platforms on your behalf so bound fields/alerts
-# stay live.
+# a local setup page to connect your own Twitch/Kick/YouTube/Chaturbate/
+# Streamer.bot, and polls/relays those platforms on your behalf so bound
+# fields/alerts stay live.
 #
 # Shared helper: if you've been given more than one StreamerSuite overlay,
 # you only ever need ONE of these running at a time. When a second (or
@@ -13,11 +13,16 @@
 # running, hands its own folder over to it, and exits -- the already-running
 # one then serves every overlay you've registered, at its own URL, off the
 # same port, sharing one set of connected credentials. The registry pointer
-# lives at %USERPROFILE%\.streamersuite_portable_helper.json.
+# lives at %USERPROFILE%\.streamersuite_portable_helper.json. Alerts are
+# scoped per-overlay (see Push-Alert) -- an overlay only ever receives an
+# alert from a platform its OWN manifest.json actually lists.
 #
 # Kick only exposes live viewer count/status through its public API -- no
 # follower/sub counts or a way to detect a fresh follow, so Kick alerts
-# aren't implemented (see the setup page for status).
+# aren't implemented (see the setup page for status). Joystick.tv isn't
+# implemented at all -- its realtime events need an OAuth PKCE login flow
+# on top of the same WebSocket protocol Streamer.bot uses, and there's no
+# real StreamerSuite reference to verify a hand-rolled client against.
 #
 # This is provided as-is by whoever gave you this overlay; troubleshooting
 # isn't guaranteed. See README.txt for setup steps.
@@ -52,6 +57,8 @@ $Global:YoutubeStatus = "disconnected"
 $Global:YoutubeError = ""
 $Global:ChaturbateStatus = "disconnected"
 $Global:ChaturbateError = ""
+$Global:StreamerbotStatus = "disconnected"
+$Global:StreamerbotError = ""
 $Global:LastFollowerId = $null
 $Global:LastYoutubeCycle = $null
 $Global:LastChaturbateStamp = $null
@@ -341,6 +348,135 @@ function Start-ChaturbateLoop {
     } -ArgumentList $CredentialsPath, (Join-Path $Here ".chaturbate-state.json") | Out-Null
 }
 
+function Start-StreamerbotLoop {
+    # Relays chat into liveData["latest_chat"] from a Streamer.bot instance
+    # already running on the RECIPIENT's own machine (not something this
+    # helper starts). Uses .NET's built-in System.Net.WebSockets.ClientWebSocket
+    # (handles the handshake and frame/fragment reassembly for us -- no
+    # hand-rolled client needed here the way helper.py's Python twin required,
+    # since Python's stdlib has no WebSocket client but .NET does). The
+    # connect + salt/challenge auth algorithm matches StreamerSuite's own
+    # src/lib/streamerbot.ts exactly; the Subscribe request/event shape is
+    # Streamer.bot's own public WebSocket API and is best-effort -- unlike
+    # the connect+auth handshake, StreamerSuite's own code never subscribes
+    # to receive events, only sends DoAction requests.
+    Start-Job -ScriptBlock {
+        param($CredentialsPath, $StatePath)
+        Add-Type -AssemblyName System.Net.WebSockets -ErrorAction SilentlyContinue
+
+        function Get-Sha256Base64($Text) {
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try {
+                $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text))
+                return [Convert]::ToBase64String($bytes)
+            } finally {
+                $sha.Dispose()
+            }
+        }
+
+        function Receive-WsMessage($Socket) {
+            $buffer = New-Object byte[] 8192
+            $segment = New-Object System.ArraySegment[byte] (, $buffer)
+            $ms = New-Object System.IO.MemoryStream
+            do {
+                $result = $Socket.ReceiveAsync($segment, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
+                if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { return $null }
+                $ms.Write($buffer, 0, $result.Count)
+            } while (-not $result.EndOfMessage)
+            return [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
+        }
+
+        function Send-WsMessage($Socket, $Text) {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+            $segment = New-Object System.ArraySegment[byte] (, $bytes)
+            $Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).Wait()
+        }
+
+        while ($true) {
+            $creds = @{}
+            if (Test-Path $CredentialsPath) {
+                try {
+                    $obj = Get-Content $CredentialsPath -Raw | ConvertFrom-Json
+                    $obj.PSObject.Properties | ForEach-Object { $creds[$_.Name] = $_.Value }
+                } catch { }
+            }
+            if (-not $creds.ContainsKey("streamerbotHost")) {
+                # Never touched the Streamer.bot card (no Save click yet) --
+                # skip instead of connecting to the 127.0.0.1:8080 default
+                # unasked, same as Twitch/Chaturbate skip without saved
+                # credentials.
+                $skipState = @{ streamerbotStatus = "disconnected"; streamerbotError = ""; latestChat = $null }
+                ($skipState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+                Start-Sleep -Seconds 10
+                continue
+            }
+            $sbHost = $creds["streamerbotHost"]; if (-not $sbHost) { $sbHost = "127.0.0.1" }
+            $sbPort = $creds["streamerbotPort"]; if (-not $sbPort) { $sbPort = "8080" }
+            $sbPassword = $creds["streamerbotPassword"]
+
+            $state = @{ streamerbotStatus = "connecting"; streamerbotError = ""; latestChat = $null }
+            ($state | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+
+            $socket = New-Object System.Net.WebSockets.ClientWebSocket
+            try {
+                $uri = New-Object System.Uri("ws://$($sbHost):$($sbPort)/")
+                $socket.ConnectAsync($uri, [System.Threading.CancellationToken]::None).Wait()
+
+                $raw = Receive-WsMessage $socket
+                if ($null -eq $raw) { throw "Streamer.bot closed the connection during handshake" }
+                $msg = $raw | ConvertFrom-Json
+                if ($msg.authentication -and $sbPassword) {
+                    $secret = Get-Sha256Base64($sbPassword + $msg.authentication.salt)
+                    $authentication = Get-Sha256Base64($secret + $msg.authentication.challenge)
+                    Send-WsMessage $socket (@{ request = "Authenticate"; authentication = $authentication; id = "connect" } | ConvertTo-Json -Compress)
+                    $raw = Receive-WsMessage $socket
+                    if ($null -eq $raw) { throw "Streamer.bot closed the connection during authentication" }
+                    $ack = $raw | ConvertFrom-Json
+                    if ($ack.status -ne "ok") { throw ($ack.error, "authentication failed -- check the Streamer.bot password" | Where-Object { $_ } | Select-Object -First 1) }
+                }
+                # No password saved and the server didn't insist on one --
+                # matches streamerbot.ts's own behavior of proceeding
+                # unauthenticated in that case.
+
+                $subscribeBody = @{
+                    request = "Subscribe"; id = "streamersuite-portable"
+                    events = @{ General = @("Custom"); Twitch = @("ChatMessage"); YouTube = @("Message"); Kick = @("ChatMessage") }
+                } | ConvertTo-Json -Compress -Depth 5
+                Send-WsMessage $socket $subscribeBody
+
+                $state.streamerbotStatus = "connected"
+                ($state | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+
+                while ($true) {
+                    $raw = Receive-WsMessage $socket
+                    if ($null -eq $raw) { throw "Streamer.bot connection closed" }
+                    try {
+                        $event = $raw | ConvertFrom-Json
+                    } catch {
+                        continue
+                    }
+                    $messageObj = $event.data.message
+                    if ($messageObj -and $messageObj.message) {
+                        $user = $messageObj.user.display
+                        if (-not $user) { $user = $messageObj.user.name }
+                        $chatState = @{
+                            streamerbotStatus = "connected"; streamerbotError = ""
+                            latestChat = if ($user) { "$($user): $($messageObj.message)" } else { $messageObj.message }
+                        }
+                        ($chatState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+                    }
+                }
+            } catch {
+                $errState = @{ streamerbotStatus = "error"; streamerbotError = $_.Exception.Message; latestChat = $null }
+                ($errState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+            } finally {
+                try { $socket.Dispose() } catch { }
+            }
+            Start-Sleep -Seconds 10
+        }
+    } -ArgumentList $CredentialsPath, (Join-Path $Here ".streamerbot-state.json") | Out-Null
+}
+
 function Apply-PollState {
     $statePath = Join-Path $Here ".poll-state.json"
     if (Test-Path $statePath) {
@@ -389,6 +525,16 @@ function Apply-PollState {
             }
         } catch { }
     }
+
+    $sbStatePath = Join-Path $Here ".streamerbot-state.json"
+    if (Test-Path $sbStatePath) {
+        try {
+            $s = Get-Content $sbStatePath -Raw | ConvertFrom-Json
+            $Global:StreamerbotStatus = $s.streamerbotStatus
+            $Global:StreamerbotError = $s.streamerbotError
+            if ($s.latestChat) { $Global:LiveData["latest_chat"] = $s.latestChat }
+        } catch { }
+    }
 }
 
 function Get-OverlayListHtml {
@@ -402,17 +548,151 @@ function Get-OverlayListHtml {
     return $items
 }
 
+# One entry per platform this helper knows how to poll/relay. Which of
+# these actually appear on the setup page is driven entirely by
+# Get-NeededPlatforms below (the union of "platforms" declared across
+# currently-registered overlays' own manifest.json files) -- an overlay
+# the wizard was only told needs Twitch never shows a Kick/YouTube/
+# Chaturbate/Streamer.bot card, matching helper.py's own behavior exactly.
+$Script:PlatformCards = @{
+    twitch = {
+        param($Creds)
+        $clientId = if ($Creds["twitchClientId"]) { $Creds["twitchClientId"] } else { "" }
+        $token = if ($Creds["twitchToken"]) { $Creds["twitchToken"] } else { "" }
+        return @"
+  <div class="card">
+    <h3>Twitch <span id="twitch-status" class="status disconnected">checking...</span></h3>
+    <p class="muted">Paste a Client ID + Access Token from your own Twitch application
+      (not the overlay creator's). Needs the <code>moderator:read:followers</code> and
+      <code>channel:read:subscriptions</code> scopes for follower/sub counts.</p>
+    <label>Client ID</label>
+    <input type="text" id="twitchClientId" value="$clientId">
+    <label>Access Token</label>
+    <input type="password" id="twitchToken" value="$token">
+    <button onclick="saveCredentials()">Save &amp; Connect</button>
+    <button class="secondary" onclick="sendTestAlert()">Send Test Alert</button>
+  </div>
+"@
+    }
+    kick = {
+        param($Creds)
+        $slug = if ($Creds["kickSlug"]) { $Creds["kickSlug"] } else { "" }
+        $token = if ($Creds["kickToken"]) { $Creds["kickToken"] } else { "" }
+        return @"
+  <div class="card">
+    <h3>Kick <span id="kick-status" class="status disconnected">checking...</span></h3>
+    <p class="muted">Paste your own access token and channel slug (the name in your Kick URL).
+      Kick's API only exposes live viewer count/status this way -- no follower/sub totals,
+      and no live "follow" alerts.</p>
+    <label>Channel Slug</label>
+    <input type="text" id="kickSlug" value="$slug">
+    <label>Access Token</label>
+    <input type="password" id="kickToken" value="$token">
+    <button onclick="saveCredentials()">Save &amp; Connect</button>
+  </div>
+"@
+    }
+    youtube = {
+        param($Creds)
+        $channelId = if ($Creds["youtubeChannelId"]) { $Creds["youtubeChannelId"] } else { "" }
+        $apiKey = if ($Creds["youtubeApiKey"]) { $Creds["youtubeApiKey"] } else { "" }
+        return @"
+  <div class="card">
+    <h3>YouTube <span id="youtube-status" class="status disconnected">checking...</span></h3>
+    <p class="muted">Paste your own YouTube Data API v3 key (free from Google Cloud Console -- no OAuth
+      app needed) and your channel ID. Only works while you have an active live broadcast; gives
+      viewer count plus Super Chat / new membership alerts. Regular chat isn't surfaced.</p>
+    <label>Channel ID</label>
+    <input type="text" id="youtubeChannelId" value="$channelId">
+    <label>API Key</label>
+    <input type="password" id="youtubeApiKey" value="$apiKey">
+    <button onclick="saveCredentials()">Save &amp; Connect</button>
+  </div>
+"@
+    }
+    chaturbate = {
+        param($Creds)
+        $username = if ($Creds["chaturbateUsername"]) { $Creds["chaturbateUsername"] } else { "" }
+        $token = if ($Creds["chaturbateToken"]) { $Creds["chaturbateToken"] } else { "" }
+        return @"
+  <div class="card">
+    <h3>Chaturbate <span id="chaturbate-status" class="status disconnected">checking...</span></h3>
+    <p class="muted">Paste your own username and Events API token (generate one at
+      chaturbate.com/statsapi/authtoken/). Gives real tip and follow alerts.</p>
+    <label>Username</label>
+    <input type="text" id="chaturbateUsername" value="$username">
+    <label>Events API Token</label>
+    <input type="password" id="chaturbateToken" value="$token">
+    <button onclick="saveCredentials()">Save &amp; Connect</button>
+  </div>
+"@
+    }
+    streamerbot = {
+        param($Creds)
+        $sbHost = if ($Creds["streamerbotHost"]) { $Creds["streamerbotHost"] } else { "127.0.0.1" }
+        $sbPort = if ($Creds["streamerbotPort"]) { $Creds["streamerbotPort"] } else { "8080" }
+        $sbPassword = if ($Creds["streamerbotPassword"]) { $Creds["streamerbotPassword"] } else { "" }
+        return @"
+  <div class="card">
+    <h3>Streamer.bot <span id="streamerbot-status" class="status disconnected">checking...</span></h3>
+    <p class="muted">Streamer.bot must already be running on this machine with its WebSocket Server
+      enabled. Gives the latest chat message (any platform Streamer.bot itself is connected to,
+      including YouTube). Leave Host/Port at their defaults unless you changed them in Streamer.bot.</p>
+    <label>Host</label>
+    <input type="text" id="streamerbotHost" value="$sbHost">
+    <label>Port</label>
+    <input type="text" id="streamerbotPort" value="$sbPort">
+    <label>Password (only if you set one in Streamer.bot)</label>
+    <input type="password" id="streamerbotPassword" value="$sbPassword">
+    <button onclick="saveCredentials()">Save &amp; Connect</button>
+  </div>
+"@
+    }
+}
+
+$Script:PlatformCredentialFields = @{
+    twitch      = @('twitchClientId: document.getElementById("twitchClientId").value', 'twitchToken: document.getElementById("twitchToken").value')
+    kick        = @('kickSlug: document.getElementById("kickSlug").value', 'kickToken: document.getElementById("kickToken").value')
+    youtube     = @('youtubeChannelId: document.getElementById("youtubeChannelId").value', 'youtubeApiKey: document.getElementById("youtubeApiKey").value')
+    chaturbate  = @('chaturbateUsername: document.getElementById("chaturbateUsername").value', 'chaturbateToken: document.getElementById("chaturbateToken").value')
+    streamerbot = @('streamerbotHost: document.getElementById("streamerbotHost").value', 'streamerbotPort: document.getElementById("streamerbotPort").value', 'streamerbotPassword: document.getElementById("streamerbotPassword").value')
+}
+
+$Script:PlatformStatusIds = @{
+    twitch      = @("twitch-status", "twitchStatus")
+    kick        = @("kick-status", "kickStatus")
+    youtube     = @("youtube-status", "youtubeStatus")
+    chaturbate  = @("chaturbate-status", "chaturbateStatus")
+    streamerbot = @("streamerbot-status", "streamerbotStatus")
+}
+
+function Get-NeededPlatforms {
+    $needed = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($entry in (Get-RegisteredManifests).Values) {
+        foreach ($p in $entry.manifest.platforms) { $needed.Add($p) | Out-Null }
+    }
+    return $needed
+}
+
 function Get-SetupPageHtml {
     $creds = Load-Credentials
-    $twitchClientId = if ($creds["twitchClientId"]) { $creds["twitchClientId"] } else { "" }
-    $twitchToken = if ($creds["twitchToken"]) { $creds["twitchToken"] } else { "" }
-    $kickSlug = if ($creds["kickSlug"]) { $creds["kickSlug"] } else { "" }
-    $kickToken = if ($creds["kickToken"]) { $creds["kickToken"] } else { "" }
-    $youtubeChannelId = if ($creds["youtubeChannelId"]) { $creds["youtubeChannelId"] } else { "" }
-    $youtubeApiKey = if ($creds["youtubeApiKey"]) { $creds["youtubeApiKey"] } else { "" }
-    $chaturbateUsername = if ($creds["chaturbateUsername"]) { $creds["chaturbateUsername"] } else { "" }
-    $chaturbateToken = if ($creds["chaturbateToken"]) { $creds["chaturbateToken"] } else { "" }
     $overlayListHtml = Get-OverlayListHtml
+    $needed = Get-NeededPlatforms
+    $platformOrder = @("twitch", "kick", "youtube", "chaturbate", "streamerbot") | Where-Object { $needed.Contains($_) }
+
+    if ($platformOrder.Count -eq 0) {
+        $cardsHtml = '<div class="card"><p class="muted">This overlay doesn''t use any live platform data -- nothing to connect.</p></div>'
+        $credentialFields = ""
+        $statusRefresh = ""
+    } else {
+        $cardsHtml = ($platformOrder | ForEach-Object { & $Script:PlatformCards[$_] $creds }) -join "`n"
+        $credentialFields = (($platformOrder | ForEach-Object { $Script:PlatformCredentialFields[$_] } | ForEach-Object { "      $_" }) -join ",`n")
+        $statusRefresh = (($platformOrder | ForEach-Object {
+            $ids = $Script:PlatformStatusIds[$_]
+            "    setStatus(`"$($ids[0])`", s.$($ids[1]));"
+        }) -join "`n")
+    }
+
     return @"
 <!DOCTYPE html>
 <html lang="en">
@@ -448,53 +728,7 @@ function Get-SetupPageHtml {
     <ul>$overlayListHtml</ul>
   </div>
 
-  <div class="card">
-    <h3>Twitch <span id="twitch-status" class="status disconnected">checking...</span></h3>
-    <p class="muted">Paste a Client ID + Access Token from your own Twitch application
-      (not the overlay creator's). Needs the <code>moderator:read:followers</code> and
-      <code>channel:read:subscriptions</code> scopes for follower/sub counts.</p>
-    <label>Client ID</label>
-    <input type="text" id="twitchClientId" value="$twitchClientId">
-    <label>Access Token</label>
-    <input type="password" id="twitchToken" value="$twitchToken">
-    <button onclick="saveCredentials()">Save &amp; Connect</button>
-    <button class="secondary" onclick="sendTestAlert()">Send Test Alert</button>
-  </div>
-
-  <div class="card">
-    <h3>Kick <span id="kick-status" class="status disconnected">checking...</span></h3>
-    <p class="muted">Paste your own access token and channel slug (the name in your Kick URL).
-      Kick's API only exposes live viewer count/status this way -- no follower/sub totals,
-      and no live "follow" alerts.</p>
-    <label>Channel Slug</label>
-    <input type="text" id="kickSlug" value="$kickSlug">
-    <label>Access Token</label>
-    <input type="password" id="kickToken" value="$kickToken">
-    <button onclick="saveCredentials()">Save &amp; Connect</button>
-  </div>
-
-  <div class="card">
-    <h3>YouTube <span id="youtube-status" class="status disconnected">checking...</span></h3>
-    <p class="muted">Paste your own YouTube Data API v3 key (free from Google Cloud Console -- no OAuth
-      app needed) and your channel ID. Only works while you have an active live broadcast; gives
-      viewer count plus Super Chat / new membership alerts. Regular chat isn't surfaced.</p>
-    <label>Channel ID</label>
-    <input type="text" id="youtubeChannelId" value="$youtubeChannelId">
-    <label>API Key</label>
-    <input type="password" id="youtubeApiKey" value="$youtubeApiKey">
-    <button onclick="saveCredentials()">Save &amp; Connect</button>
-  </div>
-
-  <div class="card">
-    <h3>Chaturbate <span id="chaturbate-status" class="status disconnected">checking...</span></h3>
-    <p class="muted">Paste your own username and Events API token (generate one at
-      chaturbate.com/statsapi/authtoken/). Gives real tip and follow alerts.</p>
-    <label>Username</label>
-    <input type="text" id="chaturbateUsername" value="$chaturbateUsername">
-    <label>Events API Token</label>
-    <input type="password" id="chaturbateToken" value="$chaturbateToken">
-    <button onclick="saveCredentials()">Save &amp; Connect</button>
-  </div>
+$cardsHtml
 
   <div class="card">
     <h3>Advanced</h3>
@@ -508,14 +742,7 @@ function saveCredentials() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      twitchClientId: document.getElementById("twitchClientId").value,
-      twitchToken: document.getElementById("twitchToken").value,
-      kickSlug: document.getElementById("kickSlug").value,
-      kickToken: document.getElementById("kickToken").value,
-      youtubeChannelId: document.getElementById("youtubeChannelId").value,
-      youtubeApiKey: document.getElementById("youtubeApiKey").value,
-      chaturbateUsername: document.getElementById("chaturbateUsername").value,
-      chaturbateToken: document.getElementById("chaturbateToken").value,
+$credentialFields
     }),
   }).then(refreshStatus);
 }
@@ -529,10 +756,7 @@ function setStatus(id, value) {
 }
 function refreshStatus() {
   fetch("/status").then(function(r) { return r.json(); }).then(function(s) {
-    setStatus("twitch-status", s.twitchStatus);
-    setStatus("kick-status", s.kickStatus);
-    setStatus("youtube-status", s.youtubeStatus);
-    setStatus("chaturbate-status", s.chaturbateStatus);
+$statusRefresh
   }).catch(function() {});
 }
 refreshStatus();
@@ -584,6 +808,7 @@ Persist-RegisteredDirs
 
 Start-PollLoop
 Start-ChaturbateLoop
+Start-StreamerbotLoop
 
 $Listener = New-Object System.Net.HttpListener
 $Listener.Prefixes.Add("http://127.0.0.1:$Port/")
@@ -620,6 +845,7 @@ try {
                     kickStatus = $Global:KickStatus; kickError = $Global:KickError
                     youtubeStatus = $Global:YoutubeStatus; youtubeError = $Global:YoutubeError
                     chaturbateStatus = $Global:ChaturbateStatus; chaturbateError = $Global:ChaturbateError
+                    streamerbotStatus = $Global:StreamerbotStatus; streamerbotError = $Global:StreamerbotError
                 }
                 break
             }
@@ -666,6 +892,9 @@ try {
                 if ($body.youtubeApiKey) { $creds["youtubeApiKey"] = $body.youtubeApiKey }
                 if ($body.chaturbateUsername) { $creds["chaturbateUsername"] = $body.chaturbateUsername }
                 if ($body.chaturbateToken) { $creds["chaturbateToken"] = $body.chaturbateToken }
+                if ($body.streamerbotHost) { $creds["streamerbotHost"] = $body.streamerbotHost }
+                if ($body.streamerbotPort) { $creds["streamerbotPort"] = $body.streamerbotPort }
+                if ($body.streamerbotPassword) { $creds["streamerbotPassword"] = $body.streamerbotPassword }
                 Save-Credentials $creds
                 Send-JsonResponse $response @{ ok = $true }
                 break
