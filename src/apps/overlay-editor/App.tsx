@@ -13,7 +13,13 @@ import "../../design-system/styles.css";
 import { Button, Card, SectionHead } from "../../design-system/components/core";
 
 type MakerState = { mode: "create" | "edit"; editFile?: string; initialParams?: TemplateParams };
-type CanvasMakerState = { mode: "create" | "edit"; editFile?: string; initialElements?: CanvasElementT[] };
+type CanvasMakerState = {
+  mode: "create" | "edit";
+  editFile?: string;
+  initialElements?: CanvasElementT[];
+  initialWidth?: number;
+  initialHeight?: number;
+};
 
 export default function OverlayEditorApp() {
   const [maker, setMaker] = useState<MakerState | null>(null);
@@ -28,14 +34,11 @@ export default function OverlayEditorApp() {
   const openWithSavedParams = async (file: string, mode: "create" | "edit", kind: "template" | "canvas") => {
     try {
       if (kind === "canvas") {
-        const canvasParams = await invoke<{ elements: CanvasElementT[] } | null>("overlay_get_canvas_params", { file });
+        const canvasParams = await invoke<{ elements: CanvasElementT[]; width?: number; height?: number } | null>("overlay_get_canvas_params", { file });
         if (!canvasParams) return;
         setLoadError("");
-        setCanvasMaker(
-          mode === "edit"
-            ? { mode: "edit", editFile: file, initialElements: canvasParams.elements }
-            : { mode: "create", initialElements: canvasParams.elements }
-        );
+        const shared = { initialElements: canvasParams.elements, initialWidth: canvasParams.width, initialHeight: canvasParams.height };
+        setCanvasMaker(mode === "edit" ? { mode: "edit", editFile: file, ...shared } : { mode: "create", ...shared });
         return;
       }
       const params = await invoke<TemplateParams | null>("overlay_get_template_params", { file });
@@ -108,6 +111,8 @@ export default function OverlayEditorApp() {
           mode={canvasMaker.mode}
           editFile={canvasMaker.editFile}
           initialElements={canvasMaker.initialElements}
+          initialWidth={canvasMaker.initialWidth}
+          initialHeight={canvasMaker.initialHeight}
           onClose={() => setCanvasMaker(null)}
           onSaved={() => setCanvasMaker(null)}
         />

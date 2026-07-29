@@ -57,13 +57,18 @@ function NumberField({ label, value, onChange, min, max }: { label: string; valu
 }
 
 const SNAP_THRESHOLD_PCT = 1.5;
-/** The underlying preview iframe renders at this true pixel size and gets
- * CSS-scaled down to fit the canvas box — same idea as ScaledPreview's
- * "Actual Size" mode, always on here since there's no scenario where you'd
- * want the drag surface showing misleading (non-real-resolution) proportions
- * while placing elements. */
-const NATIVE_W = 1920;
-const NATIVE_H = 1080;
+const DEFAULT_CANVAS_W = 1920;
+const DEFAULT_CANVAS_H = 1080;
+/** Common target resolutions — 16:9 landscape (the long-standing default),
+ * 9:16 vertical (TikTok/Shorts-style stream layouts), and 1:1 square, plus
+ * an always-available Custom option for anything else. Every element's own
+ * placement stays percent-based regardless of which is picked, so switching
+ * canvas size never needs to touch existing elements' xPct/yPct/etc. */
+const CANVAS_SIZE_PRESETS: { id: string; label: string; w: number; h: number }[] = [
+  { id: "16:9", label: "16:9 Landscape", w: 1920, h: 1080 },
+  { id: "9:16", label: "9:16 Vertical", w: 1080, h: 1920 },
+  { id: "1:1", label: "1:1 Square", w: 1080, h: 1080 },
+];
 
 /** Canvas center/edges plus every other element's left/center/right (x) or
  * top/center/bottom (y) edge — what a dragged/resized element can snap to,
@@ -152,18 +157,26 @@ export default function CanvasMaker({
   mode = "create",
   editFile,
   initialElements,
+  initialWidth,
+  initialHeight,
 }: {
   onSaved: () => void;
   onClose: () => void;
   mode?: "create" | "edit";
   editFile?: string;
   initialElements?: CanvasElementT[];
+  initialWidth?: number;
+  initialHeight?: number;
 }) {
   const [elements, setElements] = useState<CanvasElementT[]>(initialElements ?? []);
+  const [canvasW, setCanvasW] = useState(initialWidth ?? DEFAULT_CANVAS_W);
+  const [canvasH, setCanvasH] = useState(initialHeight ?? DEFAULT_CANVAS_H);
   const [selectedId, setSelectedId] = useState<string | null>(initialElements?.[0]?.id ?? null);
   const [multiSelected, setMultiSelected] = useState<Set<string>>(new Set());
   const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
-  const initialSnapshotRef = useRef(JSON.stringify(initialElements ?? []));
+  const initialSnapshotRef = useRef(
+    JSON.stringify({ elements: initialElements ?? [], w: initialWidth ?? DEFAULT_CANVAS_W, h: initialHeight ?? DEFAULT_CANVAS_H })
+  );
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
@@ -179,8 +192,15 @@ export default function CanvasMaker({
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; elId: string } | null>(null);
-  const [canvasScale, setCanvasScale] = useState(1);
+  /** The drag surface's actual on-screen pixel size — computed in JS (best
+   * fit within the wrap container honoring canvasW/canvasH's aspect ratio)
+   * rather than left to CSS `aspect-ratio`, which fights `max-height` for
+   * a square/wide canvas (max-height alone constrains height without
+   * proportionally shrinking a width:100% box, breaking the ratio). */
+  const [boxSize, setBoxSize] = useState({ w: DEFAULT_CANVAS_W, h: DEFAULT_CANVAS_H });
+  const canvasScale = canvasW > 0 ? boxSize.w / canvasW : 1;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const rotateRef = useRef<RotateState | null>(null);
@@ -204,7 +224,7 @@ export default function CanvasMaker({
   // multi-select set from Ctrl/Shift-clicking Layers rows when there is
   // one, otherwise just the single primary selection.
   const effectiveSelection = multiSelected.size > 0 ? multiSelected : selectedId ? new Set([selectedId]) : new Set<string>();
-  const isDirty = JSON.stringify(elements) !== initialSnapshotRef.current;
+  const isDirty = JSON.stringify({ elements, w: canvasW, h: canvasH }) !== initialSnapshotRef.current;
 
   const requestClose = () => {
     if (isDirty) {
@@ -622,15 +642,30 @@ export default function CanvasMaker({
     setMarqueeBox({ left: e.clientX - rect.left, top: e.clientY - rect.top, width: 0, height: 0 });
   };
 
+  // Best-fit the canvas box inside whatever space the wrap container has
+  // (fills available width, or available height for a taller-than-wide
+  // canvas — whichever binds first), preserving canvasW/canvasH's exact
+  // ratio regardless of orientation.
   useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    const update = () => setCanvasScale(el.clientWidth / NATIVE_W);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
+    const wrap = canvasWrapRef.current;
+    if (!wrap) return;
+    const recompute = () => {
+      const availW = wrap.clientWidth;
+      const availH = wrap.clientHeight;
+      if (availW <= 0 || availH <= 0) return;
+      let w = availW;
+      let h = (w * canvasH) / canvasW;
+      if (h > availH) {
+        h = availH;
+        w = (h * canvasW) / canvasH;
+      }
+      setBoxSize({ w: Math.max(1, Math.floor(w)), h: Math.max(1, Math.floor(h)) });
+    };
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    ro.observe(wrap);
     return () => ro.disconnect();
-  }, []);
+  }, [canvasW, canvasH]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -935,9 +970,9 @@ export default function CanvasMaker({
     setSaving(true);
     try {
       if (which === "update" && editFile) {
-        await invoke("overlay_update_canvas", { file: editFile, elements });
+        await invoke("overlay_update_canvas", { file: editFile, elements, canvasWidth: canvasW, canvasHeight: canvasH });
       } else {
-        await invoke("overlay_create_from_canvas", { elements });
+        await invoke("overlay_create_from_canvas", { elements, canvasWidth: canvasW, canvasHeight: canvasH });
       }
       onSaved();
     } catch (e) {
@@ -1262,18 +1297,60 @@ export default function CanvasMaker({
               to resize, both snapping to the canvas center/edges and other
               elements' edges (thin purple guide lines while snapped). */}
           <Card padding={16} className="flex-1 min-w-0 space-y-2">
-            <label className="text-[10px] text-white/40 uppercase tracking-wide block">Canvas</label>
-            <div
-              ref={canvasRef}
-              className="relative rounded-xl overflow-hidden border border-white/[0.06] bg-[repeating-conic-gradient(#111_0%_25%,#0a0a0a_0%_50%)] bg-[length:20px_20px] aspect-video select-none"
-              onMouseDown={startMarquee}
-            >
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <label className="text-[10px] text-white/40 uppercase tracking-wide block">Canvas</label>
+              <div className="flex items-center gap-1">
+                {CANVAS_SIZE_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => {
+                      setCanvasW(p.w);
+                      setCanvasH(p.h);
+                    }}
+                    title={`${p.label} (${p.w}×${p.h})`}
+                    className={`px-2 py-1 rounded-md text-[10px] border ${
+                      canvasW === p.w && canvasH === p.h
+                        ? "bg-purple-500/15 border-purple-500/40 text-white"
+                        : "bg-white/[0.03] border-white/[0.06] text-white/50 hover:border-white/20"
+                    }`}
+                  >
+                    {p.id}
+                  </button>
+                ))}
+                <input
+                  type="number"
+                  min={64}
+                  max={8000}
+                  value={canvasW}
+                  onChange={(e) => setCanvasW(Math.max(64, Math.min(8000, Number(e.target.value) || DEFAULT_CANVAS_W)))}
+                  className="w-16 input-glass text-[10px] px-1.5 py-1"
+                  title="Custom width (px)"
+                />
+                <span className="text-white/20 text-[10px]">×</span>
+                <input
+                  type="number"
+                  min={64}
+                  max={8000}
+                  value={canvasH}
+                  onChange={(e) => setCanvasH(Math.max(64, Math.min(8000, Number(e.target.value) || DEFAULT_CANVAS_H)))}
+                  className="w-16 input-glass text-[10px] px-1.5 py-1"
+                  title="Custom height (px)"
+                />
+              </div>
+            </div>
+            <div ref={canvasWrapRef} className="flex items-center justify-center" style={{ height: "70vh" }}>
+              <div
+                ref={canvasRef}
+                className="relative rounded-xl overflow-hidden border border-white/[0.06] bg-[repeating-conic-gradient(#111_0%_25%,#0a0a0a_0%_50%)] bg-[length:20px_20px] select-none"
+                style={{ width: boxSize.w, height: boxSize.h }}
+                onMouseDown={startMarquee}
+              >
               {preview && (
                 <iframe
                   title="canvas-preview"
                   srcDoc={preview}
                   className="absolute top-0 left-0 pointer-events-none"
-                  style={{ width: NATIVE_W, height: NATIVE_H, transform: `scale(${canvasScale})`, transformOrigin: "top left", border: 0 }}
+                  style={{ width: canvasW, height: canvasH, transform: `scale(${canvasScale})`, transformOrigin: "top left", border: 0 }}
                 />
               )}
 
@@ -1357,6 +1434,7 @@ export default function CanvasMaker({
                   style={{ left: marqueeBox.left, top: marqueeBox.top, width: marqueeBox.width, height: marqueeBox.height }}
                 />
               )}
+              </div>
             </div>
             <p className="text-[10px] text-white/25">
               Drag an element to move it, any of its 8 handles to resize (hold Shift on a corner to keep its

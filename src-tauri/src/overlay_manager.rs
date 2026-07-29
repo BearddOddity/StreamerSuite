@@ -445,11 +445,34 @@ fn default_object_fit() -> String {
     "contain".into()
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+/// Editor-only sizing hint — render_canvas itself is fully percent-based and
+/// doesn't care about absolute pixel dimensions at all (an OBS Browser
+/// Source can be any resolution regardless of what's saved here). This just
+/// lets the Canvas Maker remember and restore the aspect ratio a canvas was
+/// designed for (16:9, vertical 9:16, square, or a custom size) instead of
+/// always assuming 1920x1080.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CanvasParams {
     #[serde(default)]
     elements: Vec<CanvasElement>,
+    #[serde(default = "default_canvas_width")]
+    width: u32,
+    #[serde(default = "default_canvas_height")]
+    height: u32,
+}
+
+impl Default for CanvasParams {
+    fn default() -> Self {
+        CanvasParams { elements: Vec::new(), width: default_canvas_width(), height: default_canvas_height() }
+    }
+}
+
+fn default_canvas_width() -> u32 {
+    1920
+}
+fn default_canvas_height() -> u32 {
+    1080
 }
 
 fn default_x_pct() -> f32 {
@@ -1630,7 +1653,7 @@ pub(crate) async fn overlay_generate_canvas_from_prompt(prompt: String, model: S
         return Err("The model didn't return any usable elements — try again or rephrase".into());
     }
 
-    Ok(CanvasParams { elements })
+    Ok(CanvasParams { elements, width: default_canvas_width(), height: default_canvas_height() })
 }
 
 #[tauri::command]
@@ -1814,7 +1837,11 @@ fn write_canvas_sidecar(dir: &std::path::Path, html_file: &str, canvas: &CanvasP
 /// `overlay_create_from_template`. Named after its first element's title,
 /// falling back to "canvas" for an empty/all-static canvas.
 #[tauri::command]
-pub(crate) fn overlay_create_from_canvas(elements: Vec<CanvasElement>) -> Result<String, String> {
+pub(crate) fn overlay_create_from_canvas(
+    elements: Vec<CanvasElement>,
+    canvas_width: Option<u32>,
+    canvas_height: Option<u32>,
+) -> Result<String, String> {
     let html = render_canvas(&elements)?;
     let dir = custom_overlays_dir()?;
     let title = elements.first().map(|e| e.params.title.text.clone()).unwrap_or_default();
@@ -1823,7 +1850,9 @@ pub(crate) fn overlay_create_from_canvas(elements: Vec<CanvasElement>) -> Result
     let dest = dir.join(&file_name);
     crate::assert_path_in_base(&dest, &dir)?;
     std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
-    write_canvas_sidecar(&dir, &file_name, &CanvasParams { elements })?;
+    let width = canvas_width.unwrap_or_else(default_canvas_width).clamp(64, 8000);
+    let height = canvas_height.unwrap_or_else(default_canvas_height).clamp(64, 8000);
+    write_canvas_sidecar(&dir, &file_name, &CanvasParams { elements, width, height })?;
     Ok(file_name)
 }
 
@@ -1851,7 +1880,12 @@ pub(crate) fn overlay_get_canvas_params(file: String) -> Result<Option<CanvasPar
 /// file — same "can only ever touch the file it was opened from" guarantee
 /// as `overlay_update_template`.
 #[tauri::command]
-pub(crate) fn overlay_update_canvas(file: String, elements: Vec<CanvasElement>) -> Result<(), String> {
+pub(crate) fn overlay_update_canvas(
+    file: String,
+    elements: Vec<CanvasElement>,
+    canvas_width: Option<u32>,
+    canvas_height: Option<u32>,
+) -> Result<(), String> {
     if file.contains('/') || file.contains('\\') || file.contains("..") {
         return Err("invalid file name".into());
     }
@@ -1864,7 +1898,9 @@ pub(crate) fn overlay_update_canvas(file: String, elements: Vec<CanvasElement>) 
     let _ = save_version_internal(&dir, &file, "Auto-save");
     let html = render_canvas(&elements)?;
     std::fs::write(&dest, html).map_err(|e| format!("couldn't write overlay: {e}"))?;
-    write_canvas_sidecar(&dir, &file, &CanvasParams { elements })
+    let width = canvas_width.unwrap_or_else(default_canvas_width).clamp(64, 8000);
+    let height = canvas_height.unwrap_or_else(default_canvas_height).clamp(64, 8000);
+    write_canvas_sidecar(&dir, &file, &CanvasParams { elements, width, height })
 }
 
 fn slugify(title: &str, template: &str) -> String {
@@ -2201,7 +2237,7 @@ mod tests {
         let html = render_canvas(&elements).unwrap();
         let file_name = "canvas-test.html";
         std::fs::write(dir.join(file_name), html).unwrap();
-        write_canvas_sidecar(&dir, file_name, &CanvasParams { elements: elements.clone() }).unwrap();
+        write_canvas_sidecar(&dir, file_name, &CanvasParams { elements: elements.clone(), width: default_canvas_width(), height: default_canvas_height() }).unwrap();
 
         let sidecar = canvas_sidecar_path(&dir, file_name);
         assert!(sidecar.exists());
@@ -2215,6 +2251,41 @@ mod tests {
         // themselves must be distinct).
         assert_ne!(canvas_sidecar_path(&dir, file_name), params_sidecar_path(&dir, file_name));
 
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn canvas_params_missing_width_height_deserializes_as_1920x1080() {
+        // A sidecar saved before custom canvas sizes existed has neither
+        // field at all — must still parse and default to the old-and-only
+        // size rather than failing or coming back as 0x0.
+        let old_json = r#"{"elements":[]}"#;
+        let parsed: CanvasParams = serde_json::from_str(old_json).unwrap();
+        assert_eq!(parsed.width, 1920);
+        assert_eq!(parsed.height, 1080);
+    }
+
+    #[test]
+    fn canvas_params_custom_width_height_round_trips_through_json() {
+        let params = CanvasParams { elements: vec![], width: 1080, height: 1920 };
+        let json = serde_json::to_string(&params).unwrap();
+        let back: CanvasParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.width, 1080);
+        assert_eq!(back.height, 1920);
+    }
+
+    #[test]
+    fn canvas_sidecar_round_trips_a_custom_vertical_canvas_size() {
+        let dir = std::env::temp_dir().join(format!("sf-canvas-size-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let elements = vec![canvas_element("a", "lower-third", 5.0, 10.0, 1)];
+        let html = render_canvas(&elements).unwrap();
+        let file_name = "canvas-size-test.html";
+        std::fs::write(dir.join(file_name), html).unwrap();
+        write_canvas_sidecar(&dir, file_name, &CanvasParams { elements, width: 1080, height: 1920 }).unwrap();
+        let loaded: CanvasParams = serde_json::from_str(&std::fs::read_to_string(canvas_sidecar_path(&dir, file_name)).unwrap()).unwrap();
+        assert_eq!(loaded.width, 1080);
+        assert_eq!(loaded.height, 1920);
         std::fs::remove_dir_all(&dir).ok();
     }
 
