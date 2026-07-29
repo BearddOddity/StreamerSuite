@@ -427,6 +427,17 @@ pub(crate) struct PrimitiveParams {
     text_color: String,
     #[serde(default = "default_text_align")]
     text_align: String,
+    #[serde(default)]
+    letter_spacing: f32,
+    #[serde(default = "default_line_height")]
+    line_height: f32,
+    /// An outline, independent of the shared drop shadow.
+    #[serde(default)]
+    text_stroke: bool,
+    #[serde(default = "default_shadow_color")]
+    text_stroke_color: String,
+    #[serde(default = "default_text_stroke_width")]
+    text_stroke_width: f32,
     /// Image kind only.
     #[serde(default)]
     image_data_uri: Option<String>,
@@ -475,6 +486,11 @@ impl Default for PrimitiveParams {
             font_weight: default_font_weight(),
             text_color: default_text_color(),
             text_align: default_text_align(),
+            letter_spacing: 0.0,
+            line_height: default_line_height(),
+            text_stroke: false,
+            text_stroke_color: default_shadow_color(),
+            text_stroke_width: default_text_stroke_width(),
             image_data_uri: None,
             object_fit: default_object_fit(),
             object_position_x: default_object_position(),
@@ -531,6 +547,12 @@ fn default_font_weight() -> u32 {
 }
 fn default_text_align() -> String {
     "left".into()
+}
+fn default_line_height() -> f32 {
+    1.2
+}
+fn default_text_stroke_width() -> f32 {
+    2.0
 }
 fn default_object_fit() -> String {
     "contain".into()
@@ -1622,9 +1644,18 @@ fn render_primitive(kind: &str, p: &PrimitiveParams) -> (String, Option<String>)
             });
             let font_size = p.font_size.clamp(4.0, 400.0);
             let font_weight = p.font_weight.clamp(100, 900);
+            let letter_spacing = p.letter_spacing.clamp(-10.0, 100.0);
+            let line_height = p.line_height.clamp(0.5, 4.0);
+            let stroke_css = if p.text_stroke {
+                let color = safe_color(&p.text_stroke_color, "#000000");
+                let width = p.text_stroke_width.clamp(0.5, 20.0);
+                format!("-webkit-text-stroke: {width}px {color}; text-stroke: {width}px {color};")
+            } else {
+                String::new()
+            };
             let text = escape_html(&p.text).replace('\n', "<br>");
             format!(
-                r#"<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:{justify}; text-align:{text_align}; color:{text_color}; font-family:{font_family}; font-size:{font_size}px; font-weight:{font_weight}; white-space:pre-wrap; word-break:break-word; overflow:hidden;">{text}</div>"#
+                r#"<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:{justify}; text-align:{text_align}; color:{text_color}; font-family:{font_family}; font-size:{font_size}px; font-weight:{font_weight}; letter-spacing:{letter_spacing}px; line-height:{line_height}; {stroke_css} white-space:pre-wrap; word-break:break-word; overflow:hidden;">{text}</div>"#
             )
         }
         "image" => {
@@ -2657,6 +2688,34 @@ mod tests {
         assert!(html.contains("font-size:60px"));
         assert!(html.contains("font-weight:900"));
         assert!(html.contains("justify-content:center"));
+    }
+
+    #[test]
+    fn render_primitive_text_applies_letter_spacing_and_line_height() {
+        let p = PrimitiveParams { letter_spacing: 4.0, line_height: 1.6, ..Default::default() };
+        let (html, _) = render_primitive("text", &p);
+        assert!(html.contains("letter-spacing:4px"));
+        assert!(html.contains("line-height:1.6"));
+    }
+
+    #[test]
+    fn render_primitive_text_stroke_applied_only_when_enabled() {
+        let mut p = PrimitiveParams { text_stroke: false, ..Default::default() };
+        assert!(!render_primitive("text", &p).0.contains("text-stroke"));
+        p.text_stroke = true;
+        p.text_stroke_color = "#00ff00".into();
+        p.text_stroke_width = 3.0;
+        let (html, _) = render_primitive("text", &p);
+        assert!(html.contains("-webkit-text-stroke: 3px #00ff00;"));
+    }
+
+    #[test]
+    fn render_primitive_text_letter_spacing_and_stroke_width_are_clamped() {
+        let p = PrimitiveParams { letter_spacing: 999.0, line_height: 99.0, text_stroke: true, text_stroke_width: 999.0, ..Default::default() };
+        let (html, _) = render_primitive("text", &p);
+        assert!(html.contains("letter-spacing:100px"));
+        assert!(html.contains("line-height:4"));
+        assert!(html.contains("-webkit-text-stroke: 20px"));
     }
 
     #[test]

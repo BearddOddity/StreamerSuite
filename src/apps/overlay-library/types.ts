@@ -358,6 +358,13 @@ export interface PrimitiveParams {
   fontWeight: number;
   textColor: string;
   textAlign: "left" | "center" | "right";
+  /** Text kind only. Pixels; 0 = font's own default spacing/line-height. */
+  letterSpacing: number;
+  lineHeight: number;
+  /** Text kind only — an outline, independent of the shared Drop Shadow. */
+  textStroke: boolean;
+  textStrokeColor: string;
+  textStrokeWidth: number;
   /** Image kind only. */
   imageDataUri: string | null;
   objectFit: "contain" | "cover" | "fill";
@@ -403,6 +410,11 @@ export const DEFAULT_PRIMITIVE_PARAMS: PrimitiveParams = {
   fontWeight: 700,
   textColor: "#ffffff",
   textAlign: "left",
+  letterSpacing: 0,
+  lineHeight: 1.2,
+  textStroke: false,
+  textStrokeColor: "#000000",
+  textStrokeWidth: 2,
   imageDataUri: null,
   objectFit: "contain",
   objectPositionX: 50,

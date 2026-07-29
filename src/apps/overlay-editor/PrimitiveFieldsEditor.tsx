@@ -272,6 +272,45 @@ export default function PrimitiveFieldsEditor({
               ))}
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <NumberField
+              label="Letter Spacing (px)"
+              value={params.letterSpacing}
+              min={-10}
+              max={100}
+              onChange={(v) => set("letterSpacing", v)}
+            />
+            <div>
+              <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1 block">Line Height</label>
+              <input
+                type="number"
+                min={0.5}
+                max={4}
+                step={0.05}
+                value={params.lineHeight}
+                onChange={(e) => set("lineHeight", Number(e.target.value) || 1.2)}
+                className="w-full input-glass text-[11px]"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="flex items-center gap-1.5 text-[10px] text-white/50">
+              <input type="checkbox" checked={params.textStroke} onChange={(e) => set("textStroke", e.target.checked)} />
+              Text Outline
+            </label>
+            {params.textStroke && (
+              <>
+                <ColorField label="Outline Color" value={params.textStrokeColor} onChange={(v) => set("textStrokeColor", v)} />
+                <NumberField
+                  label="Outline Width (px)"
+                  value={params.textStrokeWidth}
+                  min={0.5}
+                  max={20}
+                  onChange={(v) => set("textStrokeWidth", v)}
+                />
+              </>
+            )}
+          </div>
         </>
       )}
 
