@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useOverlays } from "./useOverlays";
 import { openAppInNewWindow } from "../../shell/popout";
 import { DeleteConfirmDialog } from "../overlay-editor/ConfirmDialogs";
+import { ExportWizard } from "./ExportWizard";
 import "../../design-system/styles.css";
 import { Button, Card, SectionHead, Badge, CopyButton } from "../../design-system/components/core";
 import { Tooltip } from "../../design-system/components/overlay";
@@ -28,6 +29,7 @@ export default function OverlayLibraryApp() {
   const [renaming, setRenaming] = useState<{ file: string; value: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ file: string; name: string } | null>(null);
   const [renameError, setRenameError] = useState("");
+  const [exportTarget, setExportTarget] = useState<{ file: string; kind: "template" | "canvas"; name: string } | null>(null);
 
   const visibleCustom = custom.filter((o) => o.name.toLowerCase().includes(search.trim().toLowerCase()));
 
@@ -160,6 +162,9 @@ export default function OverlayLibraryApp() {
                       <Button variant="ghost" size="sm" onClick={() => editInEditor(o.file, o.kind!, "create")}>
                         ⎘ Duplicate
                       </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setExportTarget({ file: o.file, kind: o.kind!, name: o.name })}>
+                        📦 Export
+                      </Button>
                     </>
                   )}
 
@@ -186,6 +191,15 @@ export default function OverlayLibraryApp() {
             setDeleteTarget(null);
           }}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {exportTarget && (
+        <ExportWizard
+          file={exportTarget.file}
+          kind={exportTarget.kind}
+          name={exportTarget.name}
+          onClose={() => setExportTarget(null)}
         />
       )}
     </div>
