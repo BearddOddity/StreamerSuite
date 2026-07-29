@@ -100,7 +100,10 @@ interface RotateState {
   centerY: number;
 }
 
-type DragMode = "move" | "resize";
+/** 8-way resize, named by which edges move — "se" means the bottom-right
+ * corner is being dragged (south + east edges move, north/west stay put). */
+type ResizeHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+type DragMode = "move" | ResizeHandle;
 interface DragState {
   id: string;
   mode: DragMode;
@@ -112,11 +115,35 @@ interface DragState {
   startH: number;
   rectW: number;
   rectH: number;
-  /** Other elements sharing this element's groupId, and where they started —
-   * a move drag applies the anchor's own (post-snap) delta to each of these
-   * so the whole group slides together. Empty for an ungrouped element or a
-   * resize (resizing only ever affects the one element being resized). */
+  /** Other elements sharing this element's groupId, OR — for a true
+   * multi-select drag — every other currently multi-selected element,
+   * and where they started. A move drag applies the anchor's own
+   * (post-snap) delta to each of these so the whole set slides together.
+   * Empty for a lone ungrouped/unselected element or any resize (resizing
+   * only ever affects the one element whose handle was grabbed). */
   groupStarts: { id: string; startX: number; startY: number }[];
+}
+
+interface MarqueeState {
+  startClientX: number;
+  startClientY: number;
+  rectLeft: number;
+  rectTop: number;
+  rectW: number;
+  rectH: number;
+}
+
+/** Rotates a screen-space delta into an element's own local (unrotated)
+ * coordinate frame — needed so resize handles on a rotated shape drag the
+ * edge that visually looks grabbed, not whichever edge happens to align
+ * with the screen's x/y axes. A move drag doesn't need this (dragging
+ * "right" should always mean canvas-right, regardless of the shape's own
+ * rotation), only resize does. */
+function rotateDeltaIntoLocalSpace(dxPct: number, dyPct: number, rotationDeg: number): { dx: number; dy: number } {
+  const rad = (-rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return { dx: dxPct * cos - dyPct * sin, dy: dxPct * sin + dyPct * cos };
 }
 
 export default function CanvasMaker({
@@ -157,9 +184,19 @@ export default function CanvasMaker({
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const rotateRef = useRef<RotateState | null>(null);
+  const marqueeRef = useRef<MarqueeState | null>(null);
+  const [marqueeBox, setMarqueeBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const pendingBeforeRef = useRef<CanvasElementT[] | null>(null);
   const historyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const clipboardRef = useRef<CanvasElementT[] | null>(null);
+  // Kept in sync so the marquee's mouseup handler (inside a `[]`-deps
+  // effect, so its own closure over `elements` would otherwise be frozen
+  // at whatever it was on mount) can read the current element list.
+  const elementsRef = useRef<CanvasElementT[]>(elements);
+  useEffect(() => {
+    elementsRef.current = elements;
+  }, [elements]);
 
   const liveSources = useLiveSources();
   const selected = elements.find((e) => e.id === selectedId) ?? null;
@@ -302,6 +339,16 @@ export default function CanvasMaker({
         duplicateSelected();
         return;
       }
+      if (mod && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        copySelected();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        void pasteClipboard();
+        return;
+      }
       if (!selected) return;
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
@@ -327,7 +374,7 @@ export default function CanvasMaker({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [past, future, elements, selected]);
+  }, [past, future, elements, selected, multiSelected]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -340,11 +387,22 @@ export default function CanvasMaker({
     };
   }, [contextMenu]);
 
-  // Mouse-driven drag-to-move / handle-drag-to-resize with Canva-style
-  // snapping to the canvas center/edges and other elements' edges — the
-  // direct-manipulation interaction the number inputs alone don't give you.
+  // Mouse-driven drag-to-move / handle-drag-to-resize (8-way, Shift for
+  // aspect lock on a corner) / drag-to-rotate / marquee-select, all off the
+  // same pair of window listeners since only one of the four refs is ever
+  // active at once. Canva-style snapping to the canvas center/edges and
+  // other elements' edges applies to move and axis-aligned resize.
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
+      const m = marqueeRef.current;
+      if (m) {
+        const x0 = m.startClientX - m.rectLeft;
+        const y0 = m.startClientY - m.rectTop;
+        const x1 = e.clientX - m.rectLeft;
+        const y1 = e.clientY - m.rectTop;
+        setMarqueeBox({ left: Math.min(x0, x1), top: Math.min(y0, y1), width: Math.abs(x1 - x0), height: Math.abs(y1 - y0) });
+        return;
+      }
       const r = rotateRef.current;
       if (r) {
         const angle = Math.round(angleFromCenter(r.centerX, r.centerY, e.clientX, e.clientY));
@@ -374,9 +432,9 @@ export default function CanvasMaker({
           hitX = sx.hit;
           hitY = sy.hit;
           patch = { xPct: sx.value, yPct: sy.value };
-          // Group members ride along with the dragged element's own
-          // (post-snap) delta, each measured from where it started —
-          // the delta never accumulates across mousemoves.
+          // Group/multi-select members ride along with the dragged
+          // element's own (post-snap) delta, each measured from where it
+          // started — the delta never accumulates across mousemoves.
           if (d.groupStarts.length > 0) {
             const groupDx = sx.value - d.startX;
             const groupDy = sy.value - d.startY;
@@ -389,13 +447,73 @@ export default function CanvasMaker({
             });
           }
         } else {
-          const rawW = Math.min(100 - d.startX, Math.max(4, d.startW + dxPct));
-          const rawH = Math.min(100 - d.startY, Math.max(4, d.startH + dyPct));
-          const sw = snap(d.startX + rawW, xs);
-          const sh = snap(d.startY + rawH, ys);
-          hitX = sw.hit;
-          hitY = sh.hit;
-          patch = { widthPct: sw.hit != null ? sw.value - d.startX : rawW, heightPct: sh.hit != null ? sh.value - d.startY : rawH };
+          // Resize — project the screen-space delta into the element's own
+          // (unrotated) local frame first, so dragging what looks like the
+          // "right" handle on a rotated shape actually grows its own right
+          // edge, not whichever edge happens to line up with the screen.
+          const { dx: localDx, dy: localDy } = rotateDeltaIntoLocalSpace(dxPct, dyPct, el.rotation ?? 0);
+          const handle = d.mode;
+          const hasN = handle.includes("n");
+          const hasS = handle.includes("s");
+          const hasE = handle.includes("e");
+          const hasW = handle.includes("w");
+          const isCorner = (hasN || hasS) && (hasE || hasW);
+          const startLeft = d.startX;
+          const startTop = d.startY;
+          const startRight = d.startX + d.startW;
+          const startBottom = d.startY + d.startH;
+          let newLeft = startLeft;
+          let newRight = startRight;
+          let newTop = startTop;
+          let newBottom = startBottom;
+          if (isCorner && e.shiftKey) {
+            // Aspect-locked corner resize — scale both dimensions together
+            // off the local-space delta, anchored at the opposite corner.
+            // Skips snapping (locking the ratio and snapping independent
+            // edges would fight each other).
+            const drivingDelta = hasE ? localDx : -localDx;
+            const scale = Math.max(0.05, 1 + drivingDelta / (d.startW || 1));
+            const newW = Math.min(100, Math.max(4, d.startW * scale));
+            const newH = Math.min(100, Math.max(4, d.startH * scale));
+            newLeft = hasW ? startRight - newW : startLeft;
+            newRight = hasW ? startRight : startLeft + newW;
+            newTop = hasN ? startBottom - newH : startTop;
+            newBottom = hasN ? startBottom : startTop + newH;
+          } else {
+            if (hasW) newLeft = Math.min(startRight - 4, Math.max(0, startLeft + localDx));
+            if (hasE) newRight = Math.max(startLeft + 4, Math.min(100, startRight + localDx));
+            if (hasN) newTop = Math.min(startBottom - 4, Math.max(0, startTop + localDy));
+            if (hasS) newBottom = Math.max(startTop + 4, Math.min(100, startBottom + localDy));
+            if (hasW) {
+              const s = snap(newLeft, xs);
+              if (s.hit != null) {
+                newLeft = s.value;
+                hitX = s.hit;
+              }
+            }
+            if (hasE) {
+              const s = snap(newRight, xs);
+              if (s.hit != null) {
+                newRight = s.value;
+                hitX = s.hit;
+              }
+            }
+            if (hasN) {
+              const s = snap(newTop, ys);
+              if (s.hit != null) {
+                newTop = s.value;
+                hitY = s.hit;
+              }
+            }
+            if (hasS) {
+              const s = snap(newBottom, ys);
+              if (s.hit != null) {
+                newBottom = s.value;
+                hitY = s.hit;
+              }
+            }
+          }
+          patch = { xPct: newLeft, yPct: newTop, widthPct: newRight - newLeft, heightPct: newBottom - newTop };
         }
         setGuideX(hitX);
         setGuideY(hitY);
@@ -403,6 +521,26 @@ export default function CanvasMaker({
       });
     };
     const onUp = () => {
+      const m = marqueeRef.current;
+      if (m) {
+        marqueeRef.current = null;
+        setMarqueeBox((box) => {
+          if (box && (box.width > 3 || box.height > 3)) {
+            const x0Pct = (box.left / m.rectW) * 100;
+            const y0Pct = (box.top / m.rectH) * 100;
+            const x1Pct = ((box.left + box.width) / m.rectW) * 100;
+            const y1Pct = ((box.top + box.height) / m.rectH) * 100;
+            const hits = elementsRef.current
+              .filter((el) => el.xPct < x1Pct && el.xPct + el.widthPct > x0Pct && el.yPct < y1Pct && el.yPct + el.heightPct > y0Pct)
+              .map((el) => el.id);
+            if (hits.length > 0) {
+              setMultiSelected(new Set(hits));
+              setSelectedId(hits[hits.length - 1] ?? null);
+            }
+          }
+          return null;
+        });
+      }
       dragRef.current = null;
       rotateRef.current = null;
       setGuideX(null);
@@ -419,14 +557,26 @@ export default function CanvasMaker({
   const startDrag = (e: React.MouseEvent, el: CanvasElementT, mode: DragMode) => {
     e.preventDefault();
     e.stopPropagation();
+    // Grabbing an element that's already part of a multi-selection keeps
+    // the whole selection (so the drag below can move all of them
+    // together); grabbing anything else replaces the selection with just
+    // that one element, same as before.
+    const keepMultiSelect = mode === "move" && multiSelected.has(el.id);
     setSelectedId(el.id);
-    setMultiSelected(new Set());
+    if (!keepMultiSelect) setMultiSelected(new Set());
     if (el.locked) return; // still selectable (to unlock/inspect it), just not draggable
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const groupStarts =
-      mode === "move" && el.groupId
-        ? elements.filter((e2) => e2.groupId === el.groupId && e2.id !== el.id && !e2.locked).map((e2) => ({ id: e2.id, startX: e2.xPct, startY: e2.yPct }))
+      mode === "move"
+        ? elements
+            .filter((e2) => {
+              if (e2.id === el.id || e2.locked) return false;
+              if (el.groupId && e2.groupId === el.groupId) return true;
+              if (keepMultiSelect && multiSelected.has(e2.id)) return true;
+              return false;
+            })
+            .map((e2) => ({ id: e2.id, startX: e2.xPct, startY: e2.yPct }))
         : [];
     dragRef.current = {
       id: el.id,
@@ -456,6 +606,20 @@ export default function CanvasMaker({
       centerX: rect.left + ((el.xPct + el.widthPct / 2) / 100) * rect.width,
       centerY: rect.top + ((el.yPct + el.heightPct / 2) / 100) * rect.height,
     };
+  };
+
+  /** Mousedown on empty canvas background — starts a rubber-band selection
+   * rectangle instead of just deselecting. Never fires from a click that
+   * started on an element, since startDrag/startRotate always stop
+   * propagation. */
+  const startMarquee = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setSelectedId(null);
+    setMultiSelected(new Set());
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    marqueeRef.current = { startClientX: e.clientX, startClientY: e.clientY, rectLeft: rect.left, rectTop: rect.top, rectW: rect.width, rectH: rect.height };
+    setMarqueeBox({ left: e.clientX - rect.left, top: e.clientY - rect.top, width: 0, height: 0 });
   };
 
   useEffect(() => {
@@ -574,6 +738,102 @@ export default function CanvasMaker({
                 ? { yPct: Math.max(0, (100 - selected.heightPct) / 2) }
                 : { yPct: Math.max(0, 100 - selected.heightPct) };
     setElements((prev) => prev.map((e) => (e.id === selected.id ? { ...e, ...patch } : e)));
+  };
+
+  /** Aligns every element in the current multi-selection to the bounding
+   * box of the selection itself (not the canvas) — Figma/Canva's
+   * "align selection" behavior, distinct from alignSelected's single-
+   * element align-to-canvas above. */
+  const alignMultiSelected = (align: AlignTo) => {
+    if (effectiveSelection.size < 2) return;
+    const selEls = elements.filter((e) => effectiveSelection.has(e.id) && !e.locked);
+    if (selEls.length < 2) return;
+    recordBeforeChange(elements);
+    const minX = Math.min(...selEls.map((e) => e.xPct));
+    const maxX = Math.max(...selEls.map((e) => e.xPct + e.widthPct));
+    const minY = Math.min(...selEls.map((e) => e.yPct));
+    const maxY = Math.max(...selEls.map((e) => e.yPct + e.heightPct));
+    setElements((prev) =>
+      prev.map((e) => {
+        if (!effectiveSelection.has(e.id) || e.locked) return e;
+        switch (align) {
+          case "left":
+            return { ...e, xPct: minX };
+          case "right":
+            return { ...e, xPct: maxX - e.widthPct };
+          case "centerH":
+            return { ...e, xPct: (minX + maxX) / 2 - e.widthPct / 2 };
+          case "top":
+            return { ...e, yPct: minY };
+          case "bottom":
+            return { ...e, yPct: maxY - e.heightPct };
+          case "centerV":
+            return { ...e, yPct: (minY + maxY) / 2 - e.heightPct / 2 };
+        }
+      })
+    );
+  };
+
+  /** Evenly spaces 3+ selected elements' centers between the two outermost
+   * ones along one axis — the two ends stay put, everything between them
+   * redistributes to equal gaps. */
+  const distributeSelected = (axis: "h" | "v") => {
+    const selEls = elements.filter((e) => effectiveSelection.has(e.id) && !e.locked);
+    if (selEls.length < 3) return;
+    recordBeforeChange(elements);
+    const sorted = [...selEls].sort((a, b) => (axis === "h" ? a.xPct - b.xPct : a.yPct - b.yPct));
+    const first = sorted[0]!;
+    const last = sorted[sorted.length - 1]!;
+    const firstCenter = axis === "h" ? first.xPct + first.widthPct / 2 : first.yPct + first.heightPct / 2;
+    const lastCenter = axis === "h" ? last.xPct + last.widthPct / 2 : last.yPct + last.heightPct / 2;
+    const step = (lastCenter - firstCenter) / (sorted.length - 1);
+    const patches = new Map(
+      sorted.map((e, i) => {
+        const center = firstCenter + step * i;
+        return [e.id, axis === "h" ? { xPct: center - e.widthPct / 2 } : { yPct: center - e.heightPct / 2 }];
+      })
+    );
+    setElements((prev) => prev.map((e) => (patches.has(e.id) ? { ...e, ...patches.get(e.id) } : e)));
+  };
+
+  /** Copies the current selection to both the OS clipboard (as JSON tagged
+   * with a recognizable marker, so paste can tell a real canvas-clip apart
+   * from arbitrary copied text) and an in-memory fallback, since the
+   * Clipboard API can be unavailable (permissions, non-secure context) —
+   * paste degrades to same-session-only rather than failing outright. */
+  const copySelected = () => {
+    const selEls = elements.filter((e) => effectiveSelection.has(e.id));
+    if (selEls.length === 0) return;
+    clipboardRef.current = selEls;
+    navigator.clipboard?.writeText(JSON.stringify({ streamerSuiteCanvasClip: selEls })).catch(() => {});
+  };
+
+  const pasteClipboard = async () => {
+    let items: CanvasElementT[] | null = null;
+    try {
+      const text = await navigator.clipboard?.readText();
+      const parsed = text ? JSON.parse(text) : null;
+      if (parsed && Array.isArray(parsed.streamerSuiteCanvasClip)) items = parsed.streamerSuiteCanvasClip;
+    } catch {
+      // Clipboard unavailable/denied/not JSON — fall through to the in-memory copy.
+    }
+    if (!items) items = clipboardRef.current;
+    if (!items || items.length === 0) return;
+    recordBeforeChange(elements);
+    const pasteTag = Date.now();
+    const pasted = items.map((it, i) => ({
+      ...it,
+      id: `el-${pasteTag}-${i}`,
+      params: { ...it.params },
+      primitive: it.primitive ? { ...it.primitive } : undefined,
+      xPct: Math.min(96, it.xPct + 3),
+      yPct: Math.min(96, it.yPct + 3),
+      zIndex: elements.length + i,
+      groupId: it.groupId ? `${it.groupId}-paste-${pasteTag}` : null,
+    }));
+    setElements((prev) => [...prev, ...pasted]);
+    setMultiSelected(new Set(pasted.map((p) => p.id)));
+    setSelectedId(pasted[pasted.length - 1]?.id ?? null);
   };
 
   const bringToFront = (id: string) => {
@@ -806,6 +1066,11 @@ export default function CanvasMaker({
               <Button variant="ghost" size="sm" onClick={() => importInputRef.current?.click()} className="flex-1">
                 ⬆ Import
               </Button>
+              <Tooltip label="Paste elements copied with Ctrl+C (Ctrl+V also works anywhere)">
+                <Button variant="ghost" size="sm" onClick={() => void pasteClipboard()} className="flex-1">
+                  📋 Paste
+                </Button>
+              </Tooltip>
               <input
                 ref={importInputRef}
                 type="file"
@@ -889,6 +1154,49 @@ export default function CanvasMaker({
 
           {/* Selected element's fields */}
           <Card padding={16} className="xl:w-[340px] shrink-0 xl:overflow-y-auto">
+            {effectiveSelection.size >= 2 && (
+              <div className="space-y-2 pb-4 mb-4 border-b border-white/[0.06]">
+                <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1 block">
+                  Align Selection ({effectiveSelection.size})
+                </label>
+                <div className="flex gap-1">
+                  {([
+                    ["left", "⇤"],
+                    ["centerH", "↔"],
+                    ["right", "⇥"],
+                    ["top", "⇧"],
+                    ["centerV", "↕"],
+                    ["bottom", "⇩"],
+                  ] as [AlignTo, string][]).map(([align, icon]) => (
+                    <button
+                      key={align}
+                      onClick={() => alignMultiSelected(align)}
+                      className="flex-1 py-1.5 rounded-lg text-[12px] bg-white/[0.03] border border-white/[0.06] text-white/60 hover:border-white/20 hover:text-white/90"
+                    >
+                      {icon}
+                    </button>
+                  ))}
+                </div>
+                {effectiveSelection.size >= 3 && (
+                  <div className="flex gap-1.5 pt-1">
+                    <Button variant="ghost" size="sm" onClick={() => distributeSelected("h")} className="flex-1">
+                      ↔ Distribute
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => distributeSelected("v")} className="flex-1">
+                      ↕ Distribute
+                    </Button>
+                  </div>
+                )}
+                <div className="flex gap-1.5 pt-1">
+                  <Button variant="ghost" size="sm" onClick={copySelected} className="flex-1">
+                    ⎘ Copy
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => void pasteClipboard()} className="flex-1">
+                    📋 Paste
+                  </Button>
+                </div>
+              </div>
+            )}
             {selected ? (
               <div className="space-y-4">
                 <div>
@@ -958,7 +1266,7 @@ export default function CanvasMaker({
             <div
               ref={canvasRef}
               className="relative rounded-xl overflow-hidden border border-white/[0.06] bg-[repeating-conic-gradient(#111_0%_25%,#0a0a0a_0%_50%)] bg-[length:20px_20px] aspect-video select-none"
-              onMouseDown={() => setSelectedId(null)}
+              onMouseDown={startMarquee}
             >
               {preview && (
                 <iframe
@@ -1000,22 +1308,37 @@ export default function CanvasMaker({
                       {el.locked && "🔒 "}
                       {icon} {label}
                     </span>
-                    {!el.locked && (
+                    {!el.locked && !isSelected && (
+                      // Minimal affordance on an unselected-but-hoverable element —
+                      // full 8-way handles only appear once it's actually selected.
+                      <div onMouseDown={(e) => startDrag(e, el, "se")} className="absolute -right-1.5 -bottom-1.5 w-3 h-3 rounded-sm cursor-nwse-resize bg-white/30" />
+                    )}
+                    {!el.locked && isSelected && (
                       <>
-                        <div
-                          onMouseDown={(e) => startDrag(e, el, "resize")}
-                          className={`absolute -right-1.5 -bottom-1.5 w-3 h-3 rounded-sm cursor-nwse-resize ${
-                            isSelected ? "bg-purple-400" : "bg-white/30"
-                          }`}
-                        />
-                        {isSelected && (
-                          <Tooltip label="Drag to rotate">
-                            <div
-                              onMouseDown={(e) => startRotate(e, el)}
-                              className="absolute -top-6 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-purple-400 cursor-grab active:cursor-grabbing border border-white/40"
-                            />
-                          </Tooltip>
-                        )}
+                        {(
+                          [
+                            ["nw", "-left-1.5 -top-1.5", "cursor-nwse-resize"],
+                            ["n", "left-1/2 -translate-x-1/2 -top-1.5", "cursor-ns-resize"],
+                            ["ne", "-right-1.5 -top-1.5", "cursor-nesw-resize"],
+                            ["e", "-right-1.5 top-1/2 -translate-y-1/2", "cursor-ew-resize"],
+                            ["se", "-right-1.5 -bottom-1.5", "cursor-nwse-resize"],
+                            ["s", "left-1/2 -translate-x-1/2 -bottom-1.5", "cursor-ns-resize"],
+                            ["sw", "-left-1.5 -bottom-1.5", "cursor-nesw-resize"],
+                            ["w", "-left-1.5 top-1/2 -translate-y-1/2", "cursor-ew-resize"],
+                          ] as [ResizeHandle, string, string][]
+                        ).map(([handle, pos, cursor]) => (
+                          <div
+                            key={handle}
+                            onMouseDown={(e) => startDrag(e, el, handle)}
+                            className={`absolute ${pos} w-3 h-3 rounded-sm bg-purple-400 ${cursor}`}
+                          />
+                        ))}
+                        <Tooltip label="Drag to rotate (hold Shift on a corner handle to resize proportionally)">
+                          <div
+                            onMouseDown={(e) => startRotate(e, el)}
+                            className="absolute -top-6 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-purple-400 cursor-grab active:cursor-grabbing border border-white/40"
+                          />
+                        </Tooltip>
                       </>
                     )}
                   </div>
@@ -1028,14 +1351,22 @@ export default function CanvasMaker({
               {guideY != null && (
                 <div className="absolute left-0 right-0 h-px bg-purple-400/80 pointer-events-none" style={{ top: `${guideY}%` }} />
               )}
+              {marqueeBox && (
+                <div
+                  className="absolute border border-purple-400 bg-purple-400/10 pointer-events-none"
+                  style={{ left: marqueeBox.left, top: marqueeBox.top, width: marqueeBox.width, height: marqueeBox.height }}
+                />
+              )}
             </div>
             <p className="text-[10px] text-white/25">
-              Drag an element to move it, or its corner handle to resize — snaps to the canvas center/edges and
-              other elements. Position/size are percent-based, so this holds up at any OBS Browser Source resolution.
+              Drag an element to move it, any of its 8 handles to resize (hold Shift on a corner to keep its
+              aspect ratio), or its top handle to rotate — snaps to the canvas center/edges and other elements.
+              Drag on empty canvas for a rubber-band multi-select; Ctrl/Shift-click a Layers row works too, and
+              dragging any selected element then moves the whole selection together.
             </p>
             <p className="text-[10px] text-white/20">
-              With an element selected: arrow keys nudge (Shift for bigger steps), Ctrl+D duplicates, Delete
-              removes, right-click for more. Ctrl+Z / Ctrl+Shift+Z undo/redo anywhere.
+              With an element (or selection) active: arrow keys nudge (Shift for bigger steps), Ctrl+D duplicates,
+              Ctrl+C/Ctrl+V copy-paste, Delete removes, right-click for more. Ctrl+Z / Ctrl+Shift+Z undo/redo anywhere.
             </p>
           </Card>
         </div>
@@ -1061,6 +1392,24 @@ export default function CanvasMaker({
               className="w-full text-left px-3 py-1.5 text-white/70 hover:bg-white/10"
             >
               ⎘ Duplicate
+            </button>
+            <button
+              onClick={() => {
+                copySelected();
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-3 py-1.5 text-white/70 hover:bg-white/10"
+            >
+              📄 Copy
+            </button>
+            <button
+              onClick={() => {
+                void pasteClipboard();
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-3 py-1.5 text-white/70 hover:bg-white/10"
+            >
+              📋 Paste
             </button>
             <button
               onClick={() => {
