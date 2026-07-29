@@ -54,10 +54,18 @@ CREDENTIALS_PATH = os.path.join(os.path.expanduser("~"), ".streamersuite_portabl
 with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
     MANIFEST = json.load(f)
 
-STATE_LOCK = threading.Lock()
+# RLock, not Lock: push_alert() is always called from inside an existing
+# "with STATE_LOCK:" block, and it calls registered_manifests(), which
+# itself acquires STATE_LOCK — a plain Lock would deadlock the same thread
+# trying to acquire it twice.
+STATE_LOCK = threading.RLock()
 STATE = {
     "live_data": {},
-    "alert_queue": [],
+    # overlayId -> list of queued alerts, NOT one shared queue — an alert
+    # only ever reaches an overlay whose own manifest.json actually lists
+    # the platform it came from (see push_alert below), so a YouTube Super
+    # Chat never pops up on an overlay that only asked for Twitch.
+    "alert_queues": {},
     "twitch_status": "disconnected",  # disconnected | connecting | connected | error
     "twitch_error": "",
     "kick_status": "disconnected",
@@ -130,6 +138,16 @@ def registered_manifests():
 
 def any_platform(platform):
     return any(platform in (m.get("platforms") or []) for _, m in registered_manifests().values())
+
+
+def push_alert(platform, alert):
+    """Queues `alert` (came from `platform`) onto every currently-registered
+    overlay whose OWN manifest.json lists that platform — never a single
+    shared queue. Call sites must hold STATE_LOCK already (matches every
+    other STATE mutation in this file)."""
+    for overlay_id, (_, m) in registered_manifests().items():
+        if platform in (m.get("platforms") or []):
+            STATE["alert_queues"].setdefault(overlay_id, []).append(alert)
 
 
 # --- Minimal hand-rolled RFC 6455 WebSocket client, stdlib-only ---
@@ -339,7 +357,7 @@ def twitch_poll_once():
             latest_id = latest.get("user_id")
             with STATE_LOCK:
                 if latest_id and STATE["last_follower_id"] not in (None, latest_id):
-                    STATE["alert_queue"].append({
+                    push_alert("twitch", {
                         "kind": "follow",
                         "user": latest.get("user_name", "Someone"),
                         "message": "just followed!",
@@ -470,10 +488,10 @@ def youtube_poll_once():
                 if kind == "superChatEvent":
                     amount = snippet.get("superChatDetails", {}).get("amountDisplayString", "")
                     with STATE_LOCK:
-                        STATE["alert_queue"].append({"kind": "cheer", "user": author, "message": f"sent a Super Chat ({amount})!"})
+                        push_alert("youtube", {"kind": "cheer", "user": author, "message": f"sent a Super Chat ({amount})!"})
                 elif kind == "newSponsorEvent":
                     with STATE_LOCK:
-                        STATE["alert_queue"].append({"kind": "sub", "user": author, "message": "just became a member!"})
+                        push_alert("youtube", {"kind": "sub", "user": author, "message": "just became a member!"})
 
         with STATE_LOCK:
             STATE["youtube_status"] = "connected"
@@ -519,11 +537,11 @@ def chaturbate_poll_once():
                 tip = obj.get("tip", {})
                 user = obj.get("user", {}).get("username", "Someone")
                 with STATE_LOCK:
-                    STATE["alert_queue"].append({"kind": "tip", "user": user, "message": f"tipped {tip.get('tokens', 0)} tokens!"})
+                    push_alert("chaturbate", {"kind": "tip", "user": user, "message": f"tipped {tip.get('tokens', 0)} tokens!"})
             elif method == "follow":
                 user = obj.get("user", {}).get("username", "Someone")
                 with STATE_LOCK:
-                    STATE["alert_queue"].append({"kind": "follow", "user": user, "message": "just followed!"})
+                    push_alert("chaturbate", {"kind": "follow", "user": user, "message": "just followed!"})
     except Exception as e:  # noqa: BLE001 - this loop must never die
         with STATE_LOCK:
             STATE["chaturbate_status"] = "error"
@@ -799,10 +817,11 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/poll-data":
             with STATE_LOCK:
                 self._send_json(dict(STATE["live_data"]))
-        elif self.path == "/poll-alerts":
+        elif self.path.startswith("/poll-alerts/"):
+            overlay_id = self.path[len("/poll-alerts/"):].split("/")[0]
             with STATE_LOCK:
-                events = STATE["alert_queue"]
-                STATE["alert_queue"] = []
+                events = STATE["alert_queues"].get(overlay_id, [])
+                STATE["alert_queues"][overlay_id] = []
             self._send_json(events)
         elif self.path == "/status":
             with STATE_LOCK:
@@ -859,8 +878,11 @@ class Handler(BaseHTTPRequestHandler):
             save_credentials(creds)
             self._send_json({"ok": True})
         elif self.path == "/test-alert":
+            # Fired from the Twitch card specifically, so it only reaches
+            # overlays that actually declare "twitch" — same scoping rule
+            # as every real alert.
             with STATE_LOCK:
-                STATE["alert_queue"].append({"kind": "follow", "user": "TestViewer", "message": "just followed! (test)"})
+                push_alert("twitch", {"kind": "follow", "user": "TestViewer", "message": "just followed! (test)"})
             self._send_json({"ok": True})
         else:
             self._send_json({"error": "not found"}, status=404)

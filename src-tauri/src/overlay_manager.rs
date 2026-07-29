@@ -2897,10 +2897,30 @@ struct ExportManifest {
 /// own code has to change or be replaced.
 const PORTABLE_WS_SHIM_SCRIPT: &str = r#"
 (function() {
+  // Same literal script for every export, no per-export templating: the
+  // overlay id it needs (to keep alerts scoped to THIS overlay, not every
+  // overlay sharing the same helper) is read back out of the page's own
+  // URL at runtime — /custom-overlay/<id>/overlay.html — the same trick
+  // getOverlayToken() already uses. A Canvas template's own srcdoc iframe
+  // has no real URL of its own (about:srcdoc), so it delegates up to the
+  // top-level page exactly like getOverlayToken() delegates to
+  // window.parent.getOverlayToken().
+  window.getPortableOverlayId = window.getPortableOverlayId || function() {
+    if (window.parent && window.parent !== window) {
+      try { return window.parent.getPortableOverlayId(); } catch (e) {}
+    }
+    var m = window.location.pathname.match(/\/custom-overlay\/([^/]+)\//);
+    return m ? m[1] : "";
+  };
   window.WebSocket = function(url) {
     var self = this;
     var isAlerts = url.indexOf("/alerts-ws") !== -1;
-    var pollUrl = "/poll-" + (isAlerts ? "alerts" : "data");
+    // Live data (viewers/followers/etc.) stays shared across every overlay
+    // on this helper — harmless, since a bound field just ignores keys it
+    // doesn't reference. Alerts are momentary, visible popups, so they're
+    // scoped per-overlay: a YouTube Super Chat only ever reaches the
+    // overlay whose own manifest actually lists YouTube as a platform.
+    var pollUrl = isAlerts ? ("/poll-alerts/" + window.getPortableOverlayId()) : "/poll-data";
     var closed = false;
     var interval = isAlerts ? 1000 : 2000;
     this.close = function() { closed = true; };
@@ -4446,7 +4466,7 @@ mod tests {
     #[test]
     fn portable_ws_shim_redirects_data_and_alerts_urls_to_relative_polling_paths() {
         assert!(PORTABLE_WS_SHIM_SCRIPT.contains(r#"url.indexOf("/alerts-ws")"#));
-        assert!(PORTABLE_WS_SHIM_SCRIPT.contains(r#""/poll-" + (isAlerts ? "alerts" : "data")"#));
+        assert!(PORTABLE_WS_SHIM_SCRIPT.contains(r#"isAlerts ? ("/poll-alerts/" + window.getPortableOverlayId()) : "/poll-data""#));
     }
 
     #[test]
