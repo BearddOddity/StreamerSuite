@@ -4,8 +4,8 @@
 # separate install needed. Serves this folder's overlay.html (and any other
 # overlay folder that registers with it -- see "Shared helper" below), hosts
 # a local setup page to connect your own Twitch/Kick/YouTube/Chaturbate/
-# Streamer.bot, and polls/relays those platforms on your behalf so bound
-# fields/alerts stay live.
+# Streamer.bot/Joystick.tv, and polls/relays those platforms on your behalf
+# so bound fields/alerts stay live.
 #
 # Shared helper: if you've been given more than one StreamerSuite overlay,
 # you only ever need ONE of these running at a time. When a second (or
@@ -19,10 +19,10 @@
 #
 # Kick only exposes live viewer count/status through its public API -- no
 # follower/sub counts or a way to detect a fresh follow, so Kick alerts
-# aren't implemented (see the setup page for status). Joystick.tv isn't
-# implemented at all -- its realtime events need an OAuth PKCE login flow
-# on top of the same WebSocket protocol Streamer.bot uses, and there's no
-# real StreamerSuite reference to verify a hand-rolled client against.
+# aren't implemented (see the setup page for status). Joystick.tv needs its
+# own OAuth app (PKCE, no client secret) registered by the recipient, using
+# this helper's own port as the redirect URI -- see the Joystick.tv card's
+# own copy on the setup page.
 #
 # This is provided as-is by whoever gave you this overlay; troubleshooting
 # isn't guaranteed. See README.txt for setup steps.
@@ -59,9 +59,16 @@ $Global:ChaturbateStatus = "disconnected"
 $Global:ChaturbateError = ""
 $Global:StreamerbotStatus = "disconnected"
 $Global:StreamerbotError = ""
+$Global:JoystickStatus = "disconnected"
+$Global:JoystickError = ""
+# In-flight PKCE state for the OAuth login currently underway (if any) --
+# a single in-memory attempt at a time is enough for this local-only flow.
+$Global:JoystickOAuthState = $null
+$Global:JoystickOAuthVerifier = $null
 $Global:LastFollowerId = $null
 $Global:LastYoutubeCycle = $null
 $Global:LastChaturbateStamp = $null
+$Global:LastJoystickStamp = $null
 # Absolute paths of every overlay folder currently being served -- always
 # includes $Here (this folder), plus any other folder that registered with
 # this process.
@@ -85,6 +92,37 @@ function Save-Credentials($creds) {
     $existing = Load-Credentials
     foreach ($key in $creds.Keys) { $existing[$key] = $creds[$key] }
     ($existing | ConvertTo-Json) | Set-Content -Path $CredentialsPath -Encoding UTF8
+}
+
+# --- Joystick.tv: OAuth PKCE (RFC 7636) + ActionCable gateway ---
+# Every URL, header, and message shape below is copied from StreamerSuite's
+# own verified Joystick integration -- the PKCE authorize/token flow in
+# src-tauri/src/multichat.rs's oauth_login (a genuine public PKCE client, no
+# client_secret, checked against Joystick's own reference client at
+# github.com/joysticktv/jtv), and the ActionCable gateway connect/subscribe/
+# tip-parsing logic in src/apps/alerts-hub/useAlertsFeed.ts.
+function ConvertTo-Base64Url($Bytes) {
+    return [Convert]::ToBase64String($Bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+}
+
+function Get-JoystickCodeVerifier {
+    $bytes = New-Object byte[] 48
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    return ConvertTo-Base64Url $bytes
+}
+
+function Get-JoystickCodeChallenge($Verifier) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Verifier))
+        return ConvertTo-Base64Url $hash
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-JoystickRedirectUri($Port) {
+    return "http://127.0.0.1:$Port/joystick-oauth-callback"
 }
 
 function Persist-RegisteredDirs {
@@ -477,6 +515,106 @@ function Start-StreamerbotLoop {
     } -ArgumentList $CredentialsPath, (Join-Path $Here ".streamerbot-state.json") | Out-Null
 }
 
+function Start-JoystickLoop {
+    # ActionCable gateway relay -- Bearer JWT as a ?token= query param (not
+    # Basic auth, confirmed against Joystick's own reference client), same
+    # subscribe/tip-parsing logic as useAlertsFeed.ts's Joystick effect.
+    # wss:// TLS is handled natively by ClientWebSocket (unlike helper.py's
+    # hand-rolled client, which needed an explicit TLS wrap added for this).
+    Start-Job -ScriptBlock {
+        param($CredentialsPath, $StatePath)
+        Add-Type -AssemblyName System.Net.WebSockets -ErrorAction SilentlyContinue
+
+        function Receive-WsMessage($Socket) {
+            $buffer = New-Object byte[] 8192
+            $segment = New-Object System.ArraySegment[byte] (, $buffer)
+            $ms = New-Object System.IO.MemoryStream
+            do {
+                $result = $Socket.ReceiveAsync($segment, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
+                if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { return $null }
+                $ms.Write($buffer, 0, $result.Count)
+            } while (-not $result.EndOfMessage)
+            return [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
+        }
+
+        function Send-WsMessage($Socket, $Text) {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+            $segment = New-Object System.ArraySegment[byte] (, $bytes)
+            $Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).Wait()
+        }
+
+        $tipPattern = '^(.+?)\s+tipped\s+(\d+)\s+tokens?(?:\s+for\s+(.+))?$'
+
+        while ($true) {
+            $creds = @{}
+            if (Test-Path $CredentialsPath) {
+                try {
+                    $obj = Get-Content $CredentialsPath -Raw | ConvertFrom-Json
+                    $obj.PSObject.Properties | ForEach-Object { $creds[$_.Name] = $_.Value }
+                } catch { }
+            }
+            $accessToken = $creds["joystickAccessToken"]
+            if (-not $accessToken) {
+                $idleState = @{ joystickStatus = "disconnected"; joystickError = ""; alerts = @() }
+                ($idleState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+                Start-Sleep -Seconds 10
+                continue
+            }
+
+            $socket = New-Object System.Net.WebSockets.ClientWebSocket
+            try {
+                $socket.Options.AddSubProtocol("actioncable-v1-json")
+                $uri = New-Object System.Uri("wss://joystick.tv/cable?token=$([uri]::EscapeDataString($accessToken))")
+                $socket.ConnectAsync($uri, [System.Threading.CancellationToken]::None).Wait()
+
+                Send-WsMessage $socket (@{
+                    command    = "subscribe"
+                    identifier = (@{ channel = "GatewayChannel" } | ConvertTo-Json -Compress)
+                } | ConvertTo-Json -Compress)
+
+                $connectingState = @{ joystickStatus = "connecting"; joystickError = ""; alerts = @() }
+                ($connectingState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+
+                while ($true) {
+                    $raw = Receive-WsMessage $socket
+                    if ($null -eq $raw) { throw "Joystick gateway closed the connection" }
+                    try {
+                        $msg = $raw | ConvertFrom-Json
+                    } catch {
+                        continue
+                    }
+                    if ($msg.type -eq "confirm_subscription") {
+                        $okState = @{ joystickStatus = "connected"; joystickError = ""; alerts = @() }
+                        ($okState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+                        continue
+                    }
+                    if ($msg.type -eq "reject_subscription") { throw "Joystick rejected the gateway subscription" }
+                    $inner = $msg.message
+                    if ($inner -and $inner.event -eq "StreamEvent" -and $inner.type -eq "Tipped" -and $inner.text) {
+                        $text = [regex]::Replace($inner.text, "<[^>]*>", "").Trim()
+                        $m = [regex]::Match($text, $tipPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                        if ($m.Success) {
+                            $note = $m.Groups[3].Value
+                            $message = if ($note) { "tipped for `"$note`"" } else { "sent a tip!" }
+                            $tipState = @{
+                                joystickStatus = "connected"; joystickError = ""
+                                alerts         = @(@{ kind = "tip"; user = $m.Groups[1].Value; message = $message; amount = $m.Groups[2].Value })
+                            }
+                            ($tipState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+                        }
+                    }
+                }
+            } catch {
+                $errState = @{ joystickStatus = "error"; joystickError = $_.Exception.Message; alerts = @() }
+                ($errState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+            } finally {
+                try { $socket.Dispose() } catch { }
+            }
+            Start-Sleep -Seconds 10
+        }
+    } -ArgumentList $CredentialsPath, (Join-Path $Here ".joystick-state.json") | Out-Null
+}
+
 function Apply-PollState {
     $statePath = Join-Path $Here ".poll-state.json"
     if (Test-Path $statePath) {
@@ -533,6 +671,22 @@ function Apply-PollState {
             $Global:StreamerbotStatus = $s.streamerbotStatus
             $Global:StreamerbotError = $s.streamerbotError
             if ($s.latestChat) { $Global:LiveData["latest_chat"] = $s.latestChat }
+        } catch { }
+    }
+
+    $jtStatePath = Join-Path $Here ".joystick-state.json"
+    if (Test-Path $jtStatePath) {
+        try {
+            $s = Get-Content $jtStatePath -Raw | ConvertFrom-Json
+            $Global:JoystickStatus = $s.joystickStatus
+            $Global:JoystickError = $s.joystickError
+            $stamp = (Get-Item $jtStatePath).LastWriteTimeUtc.Ticks
+            if ($s.alerts -and $stamp -ne $Global:LastJoystickStamp) {
+                foreach ($a in $s.alerts) {
+                    Push-Alert "joystick" @{ kind = $a.kind; user = $a.user; message = $a.message; amount = $a.amount }
+                }
+                $Global:LastJoystickStamp = $stamp
+            }
         } catch { }
     }
 }
@@ -648,6 +802,26 @@ $Script:PlatformCards = @{
   </div>
 "@
     }
+    joystick = {
+        param($Creds)
+        $clientId = if ($Creds["joystickClientId"]) { $Creds["joystickClientId"] } else { "" }
+        $username = $Creds["joystickUsername"]
+        $connectedLine = if ($username) { "<p class=`"muted`">Connected as $username</p>" } else { "" }
+        $redirectUri = Get-JoystickRedirectUri $Port
+        return @"
+  <div class="card">
+    <h3>Joystick.tv <span id="joystick-status" class="status disconnected">checking...</span></h3>
+    <p class="muted">Register your own OAuth app at your Joystick.tv bot settings, using this exact
+      Redirect URI: <code>$redirectUri</code> -- then paste its Client ID below and click Connect.
+      Gives real tip alerts.</p>
+    <label>Client ID</label>
+    <input type="text" id="joystickClientId" value="$clientId">
+    <button onclick="saveCredentials()">Save</button>
+    <button class="secondary" onclick="window.location='/joystick-connect'">Connect via Joystick.tv</button>
+    $connectedLine
+  </div>
+"@
+    }
 }
 
 $Script:PlatformCredentialFields = @{
@@ -656,6 +830,7 @@ $Script:PlatformCredentialFields = @{
     youtube     = @('youtubeChannelId: document.getElementById("youtubeChannelId").value', 'youtubeApiKey: document.getElementById("youtubeApiKey").value')
     chaturbate  = @('chaturbateUsername: document.getElementById("chaturbateUsername").value', 'chaturbateToken: document.getElementById("chaturbateToken").value')
     streamerbot = @('streamerbotHost: document.getElementById("streamerbotHost").value', 'streamerbotPort: document.getElementById("streamerbotPort").value', 'streamerbotPassword: document.getElementById("streamerbotPassword").value')
+    joystick    = @('joystickClientId: document.getElementById("joystickClientId").value')
 }
 
 $Script:PlatformStatusIds = @{
@@ -664,6 +839,7 @@ $Script:PlatformStatusIds = @{
     youtube     = @("youtube-status", "youtubeStatus")
     chaturbate  = @("chaturbate-status", "chaturbateStatus")
     streamerbot = @("streamerbot-status", "streamerbotStatus")
+    joystick    = @("joystick-status", "joystickStatus")
 }
 
 function Get-NeededPlatforms {
@@ -678,7 +854,7 @@ function Get-SetupPageHtml {
     $creds = Load-Credentials
     $overlayListHtml = Get-OverlayListHtml
     $needed = Get-NeededPlatforms
-    $platformOrder = @("twitch", "kick", "youtube", "chaturbate", "streamerbot") | Where-Object { $needed.Contains($_) }
+    $platformOrder = @("twitch", "kick", "youtube", "chaturbate", "streamerbot", "joystick") | Where-Object { $needed.Contains($_) }
 
     if ($platformOrder.Count -eq 0) {
         $cardsHtml = '<div class="card"><p class="muted">This overlay doesn''t use any live platform data -- nothing to connect.</p></div>'
@@ -809,6 +985,7 @@ Persist-RegisteredDirs
 Start-PollLoop
 Start-ChaturbateLoop
 Start-StreamerbotLoop
+Start-JoystickLoop
 
 $Listener = New-Object System.Net.HttpListener
 $Listener.Prefixes.Add("http://127.0.0.1:$Port/")
@@ -846,11 +1023,89 @@ try {
                     youtubeStatus = $Global:YoutubeStatus; youtubeError = $Global:YoutubeError
                     chaturbateStatus = $Global:ChaturbateStatus; chaturbateError = $Global:ChaturbateError
                     streamerbotStatus = $Global:StreamerbotStatus; streamerbotError = $Global:StreamerbotError
+                    joystickStatus = $Global:JoystickStatus; joystickError = $Global:JoystickError
                 }
                 break
             }
             { $request.HttpMethod -eq "GET" -and ($request.Url.AbsolutePath -eq "/setup" -or $request.Url.AbsolutePath -eq "/") } {
                 Send-HtmlResponse $response (Get-SetupPageHtml)
+                break
+            }
+            { $request.HttpMethod -eq "GET" -and $request.Url.AbsolutePath -eq "/joystick-connect" } {
+                $creds = Load-Credentials
+                $clientId = $creds["joystickClientId"]
+                if (-not $clientId) {
+                    Send-HtmlResponse $response "<h1>Save a Joystick.tv Client ID first, then try Connect again.</h1>" 400
+                    break
+                }
+                $stateBytes = New-Object byte[] 18
+                [System.Security.Cryptography.RandomNumberGenerator]::Fill($stateBytes)
+                $Global:JoystickOAuthState = ConvertTo-Base64Url $stateBytes
+                $Global:JoystickOAuthVerifier = Get-JoystickCodeVerifier
+                $redirectUri = Get-JoystickRedirectUri $Port
+                $challenge = Get-JoystickCodeChallenge $Global:JoystickOAuthVerifier
+                $authorizeUrl = "https://joystick.tv/oauth/authorize?" +
+                    "response_type=code" +
+                    "&client_id=$([uri]::EscapeDataString($clientId))" +
+                    "&redirect_uri=$([uri]::EscapeDataString($redirectUri))" +
+                    "&scope=$([uri]::EscapeDataString('identity:read chat:read chat:write chat:moderate'))" +
+                    "&state=$($Global:JoystickOAuthState)" +
+                    "&code_challenge=$challenge" +
+                    "&code_challenge_method=S256"
+                $response.StatusCode = 302
+                $response.AddHeader("Location", $authorizeUrl)
+                $response.OutputStream.Close()
+                break
+            }
+            { $request.HttpMethod -eq "GET" -and $request.Url.AbsolutePath -eq "/joystick-oauth-callback" } {
+                $queryParams = @{}
+                $rawQuery = $request.Url.Query.TrimStart("?")
+                if ($rawQuery) {
+                    foreach ($pair in $rawQuery.Split("&")) {
+                        $kv = $pair.Split("=", 2)
+                        if ($kv.Length -eq 2) { $queryParams[$kv[0]] = [uri]::UnescapeDataString($kv[1]) }
+                    }
+                }
+                $code = $queryParams["code"]
+                $state = $queryParams["state"]
+                if (-not $code -or -not $state -or $state -ne $Global:JoystickOAuthState) {
+                    Send-HtmlResponse $response "<h1>Joystick login didn't complete (missing/mismatched state) -- try Connect again.</h1>" 400
+                    break
+                }
+                try {
+                    $creds = Load-Credentials
+                    $clientId = $creds["joystickClientId"]
+                    $redirectUri = Get-JoystickRedirectUri $Port
+                    $tokenBody = @{
+                        grant_type    = "authorization_code"
+                        code          = $code
+                        redirect_uri  = $redirectUri
+                        client_id     = $clientId
+                        code_verifier = $Global:JoystickOAuthVerifier
+                    }
+                    $tokenResp = Invoke-RestMethod -Uri "https://joystick.tv/api/oauth/token" -Method Post -Body $tokenBody -TimeoutSec 10
+                    if (-not $tokenResp.access_token) { throw "Joystick didn't return an access token -- check the Client ID" }
+                    $identityHeaders = @{ "Authorization" = "Bearer $($tokenResp.access_token)"; "Accept" = "application/json" }
+                    $username = "connected"
+                    try {
+                        $identity = Invoke-RestMethod -Uri "https://joystick.tv/api/v1/me/identity" -Headers $identityHeaders -Method Get -TimeoutSec 10
+                        foreach ($key in @("username", "slug", "display_name", "name")) {
+                            if ($identity.$key) { $username = $identity.$key; break }
+                        }
+                    } catch { }
+                    Save-Credentials @{
+                        joystickAccessToken  = $tokenResp.access_token
+                        joystickRefreshToken = $tokenResp.refresh_token
+                        joystickUsername     = $username
+                    }
+                    $Global:JoystickOAuthState = $null
+                    $Global:JoystickOAuthVerifier = $null
+                    $response.StatusCode = 302
+                    $response.AddHeader("Location", "/setup")
+                    $response.OutputStream.Close()
+                } catch {
+                    Send-HtmlResponse $response "<h1>Joystick login failed: $($_.Exception.Message)</h1>" 500
+                }
                 break
             }
             { $request.HttpMethod -eq "GET" -and $request.Url.AbsolutePath.StartsWith("/custom-overlay/") } {

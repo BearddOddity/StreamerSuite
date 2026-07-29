@@ -21,6 +21,7 @@ interface ExportOptions {
   includeYoutube: boolean;
   includeChaturbate: boolean;
   includeStreamerbot: boolean;
+  includeJoystick: boolean;
   customizeColor: boolean;
   customizeFont: boolean;
   customizeText: boolean;
@@ -53,6 +54,7 @@ export function ExportWizard({
     includeYoutube: false,
     includeChaturbate: false,
     includeStreamerbot: false,
+    includeJoystick: false,
     customizeColor: true,
     customizeFont: true,
     customizeText: true,
@@ -176,9 +178,10 @@ export function ExportWizard({
                 <input type="checkbox" checked={options.includeStreamerbot} onChange={(e) => set("includeStreamerbot", e.target.checked)} />
                 Streamer.bot (relays latest chat message from a Streamer.bot already running on the recipient's machine — including YouTube chat)
               </label>
-              <p className="text-[10px] text-white/25 pt-1">
-                Joystick.tv isn't supported yet — its live data needs an OAuth login flow this export can't do standalone.
-              </p>
+              <label className="flex items-center gap-2 text-[12px] text-white/70">
+                <input type="checkbox" checked={options.includeJoystick} onChange={(e) => set("includeJoystick", e.target.checked)} />
+                Joystick.tv (recipient registers their own OAuth app, connects via a login button on the setup page — real tip alerts)
+              </label>
             </div>
 
             <div className="mb-4 space-y-2">

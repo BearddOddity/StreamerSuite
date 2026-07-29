@@ -41,10 +41,13 @@ import base64
 import hashlib
 import json
 import os
+import re
 import socket
+import ssl
 import struct
 import threading
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -84,6 +87,12 @@ STATE = {
     "chaturbate_next_url": None,
     "streamerbot_status": "disconnected",
     "streamerbot_error": "",
+    "joystick_status": "disconnected",
+    "joystick_error": "",
+    # In-flight PKCE state for the OAuth login currently underway (if any) —
+    # a single in-memory attempt at a time is enough for this local-only flow.
+    "joystick_oauth_state": None,
+    "joystick_oauth_verifier": None,
     "last_follower_id": None,
     # Absolute paths of every overlay folder currently being served —
     # always includes HERE (this folder), plus any other folder that
@@ -170,9 +179,12 @@ def push_alert(platform, alert):
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
-def _ws_handshake(host, port, path="/", timeout=5):
+def _ws_handshake(host, port, path="/", timeout=5, use_tls=False, subprotocol=None):
     sock = socket.create_connection((host, port), timeout=timeout)
+    if use_tls:
+        sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
     key = base64.b64encode(os.urandom(16)).decode()
+    extra_header = f"Sec-WebSocket-Protocol: {subprotocol}\r\n" if subprotocol else ""
     request = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}:{port}\r\n"
@@ -180,6 +192,7 @@ def _ws_handshake(host, port, path="/", timeout=5):
         "Connection: Upgrade\r\n"
         f"Sec-WebSocket-Key: {key}\r\n"
         "Sec-WebSocket-Version: 13\r\n"
+        f"{extra_header}"
         "\r\n"
     ).encode()
     sock.sendall(request)
@@ -276,8 +289,8 @@ class WSClient:
         self.sock.close()
 
 
-def ws_connect(host, port, path="/", timeout=5):
-    sock, leftover = _ws_handshake(host, port, path, timeout)
+def ws_connect(host, port, path="/", timeout=5, use_tls=False, subprotocol=None):
+    sock, leftover = _ws_handshake(host, port, path, timeout, use_tls, subprotocol)
     return WSClient(sock, leftover)
 
 
@@ -684,6 +697,135 @@ def streamerbot_loop():
             time.sleep(10)
 
 
+# --- Joystick.tv: OAuth PKCE (RFC 7636) + ActionCable gateway ---
+# Every URL, header, and message shape below is copied from StreamerSuite's
+# own verified Joystick integration — the PKCE authorize/token flow in
+# src-tauri/src/multichat.rs's oauth_login (a genuine public PKCE client,
+# no client_secret, checked against Joystick's own reference client at
+# github.com/joysticktv/jtv), and the ActionCable gateway connect/subscribe/
+# tip-parsing logic in src/apps/alerts-hub/useAlertsFeed.ts. Unlike
+# Streamer.bot's Subscribe shape (best-effort, no real reference to check
+# against), every piece of this is a direct port. What's NOT verified here
+# is the wss:// TLS path through the hand-rolled WSClient itself, which was
+# tested during development against a local TLS WebSocket server using the
+# exact same subprotocol/message flow (see the ActionCable "Tipped" test),
+# not against joystick.tv directly (no outbound network in that sandbox).
+JOYSTICK_REDIRECT_PATH = "/joystick-oauth-callback"
+
+
+def joystick_code_verifier():
+    return base64.urlsafe_b64encode(os.urandom(48)).rstrip(b"=").decode()
+
+
+def joystick_code_challenge(verifier):
+    digest = hashlib.sha256(verifier.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+def joystick_redirect_uri(port):
+    return f"http://127.0.0.1:{port}{JOYSTICK_REDIRECT_PATH}"
+
+
+def joystick_fetch_identity(access_token):
+    req = urllib.request.Request(
+        "https://joystick.tv/api/v1/me/identity",
+        headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        return None
+    for key in ("username", "slug", "display_name", "name"):
+        v = body.get(key)
+        if isinstance(v, str) and v:
+            return v
+    return None
+
+
+def joystick_exchange_code(code, client_id, verifier, redirect_uri):
+    body = urllib.parse.urlencode({
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+        "code_verifier": verifier,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://joystick.tv/api/oauth/token",
+        data=body,
+        headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    access_token = payload.get("access_token")
+    if not access_token:
+        raise ValueError("Joystick didn't return an access token — check the Client ID")
+    return access_token, payload.get("refresh_token", "")
+
+
+_JOYSTICK_TIP_RE = re.compile(r"^(.+?)\s+tipped\s+(\d+)\s+tokens?(?:\s+for\s+(.+))?$", re.IGNORECASE)
+
+
+def joystick_loop():
+    """ActionCable gateway relay — Bearer JWT as a ?token= query param (not
+    Basic auth, confirmed against Joystick's own reference client), same
+    subscribe/tip-parsing logic as useAlertsFeed.ts's Joystick effect."""
+    while True:
+        if not any_platform("joystick"):
+            with STATE_LOCK:
+                STATE["joystick_status"] = "disconnected"
+            time.sleep(10)
+            continue
+        creds = load_credentials()
+        access_token = creds.get("joystickAccessToken", "").strip()
+        if not access_token:
+            with STATE_LOCK:
+                STATE["joystick_status"] = "disconnected"
+            time.sleep(10)
+            continue
+        try:
+            with STATE_LOCK:
+                STATE["joystick_status"] = "connecting"
+            ws = ws_connect(
+                "joystick.tv", 443, "/cable?token=" + urllib.parse.quote(access_token),
+                timeout=5, use_tls=True, subprotocol="actioncable-v1-json",
+            )
+            try:
+                ws.send_text(json.dumps({"command": "subscribe", "identifier": json.dumps({"channel": "GatewayChannel"})}))
+                while True:
+                    raw = ws.recv_message()
+                    if raw is None:
+                        raise ConnectionError("Joystick gateway closed the connection")
+                    try:
+                        msg = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    if msg.get("type") == "confirm_subscription":
+                        with STATE_LOCK:
+                            STATE["joystick_status"] = "connected"
+                            STATE["joystick_error"] = ""
+                        continue
+                    if msg.get("type") == "reject_subscription":
+                        raise ConnectionError("Joystick rejected the gateway subscription")
+                    inner = msg.get("message") or {}
+                    if inner.get("event") == "StreamEvent" and inner.get("type") == "Tipped" and isinstance(inner.get("text"), str):
+                        text = re.sub(r"<[^>]*>", "", inner["text"]).strip()
+                        m = _JOYSTICK_TIP_RE.match(text)
+                        if m:
+                            user, tokens, note = m.group(1), m.group(2), m.group(3)
+                            message = f'tipped for "{note}"' if note else "sent a tip!"
+                            with STATE_LOCK:
+                                push_alert("joystick", {"kind": "tip", "user": user, "message": message, "amount": tokens})
+            finally:
+                ws.close()
+        except Exception as e:  # noqa: BLE001 - this loop must never die
+            with STATE_LOCK:
+                STATE["joystick_status"] = "error"
+                STATE["joystick_error"] = str(e)
+            time.sleep(10)
+
+
 SETUP_PAGE_SHELL = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -833,7 +975,27 @@ PLATFORM_CARDS = {
         '<button onclick="saveCredentials()">Save &amp; Connect</button>'
         '</div>'
     ),
+    "joystick": lambda creds: joystick_card_html(creds),
 }
+
+
+def joystick_card_html(creds):
+    username = creds.get("joystickUsername", "")
+    connected_line = f'<p class="muted">Connected as {username}</p>' if username else ""
+    redirect_uri = joystick_redirect_uri(int(MANIFEST.get("port", 8420)))
+    return (
+        '<div class="card">'
+        '<h3>Joystick.tv <span id="joystick-status" class="status disconnected">checking…</span></h3>'
+        '<p class="muted">Register your own OAuth app at your Joystick.tv bot settings, using this exact '
+        f'Redirect URI: <code>{redirect_uri}</code> — then paste its '
+        'Client ID below and click Connect. Gives real tip alerts.</p>'
+        '<label>Client ID</label>'
+        f'<input type="text" id="joystickClientId" value="{creds.get("joystickClientId", "")}">'
+        '<button onclick="saveCredentials()">Save</button>'
+        '<button class="secondary" onclick="window.location=\'/joystick-connect\'">Connect via Joystick.tv</button>'
+        f'{connected_line}'
+        '</div>'
+    )
 
 PLATFORM_CREDENTIAL_FIELDS = {
     "twitch": ['twitchClientId: document.getElementById("twitchClientId").value',
@@ -847,6 +1009,7 @@ PLATFORM_CREDENTIAL_FIELDS = {
     "streamerbot": ['streamerbotHost: document.getElementById("streamerbotHost").value',
                     'streamerbotPort: document.getElementById("streamerbotPort").value',
                     'streamerbotPassword: document.getElementById("streamerbotPassword").value'],
+    "joystick": ['joystickClientId: document.getElementById("joystickClientId").value'],
 }
 
 PLATFORM_STATUS_IDS = {
@@ -855,6 +1018,7 @@ PLATFORM_STATUS_IDS = {
     "youtube": ("youtube-status", "youtubeStatus"),
     "chaturbate": ("chaturbate-status", "chaturbateStatus"),
     "streamerbot": ("streamerbot-status", "streamerbotStatus"),
+    "joystick": ("joystick-status", "joystickStatus"),
 }
 
 
@@ -881,7 +1045,7 @@ def overlay_list_html(port):
 
 
 def setup_page_html(port, creds):
-    platforms = [p for p in ("twitch", "kick", "youtube", "chaturbate", "streamerbot") if p in needed_platforms()]
+    platforms = [p for p in ("twitch", "kick", "youtube", "chaturbate", "streamerbot", "joystick") if p in needed_platforms()]
     if not platforms:
         # No registered overlay declares ANY platform (a fully static
         # overlay, or none registered yet) — nothing to connect, so no
@@ -949,11 +1113,68 @@ class Handler(BaseHTTPRequestHandler):
                     "chaturbateError": STATE["chaturbate_error"],
                     "streamerbotStatus": STATE["streamerbot_status"],
                     "streamerbotError": STATE["streamerbot_error"],
+                    "joystickStatus": STATE["joystick_status"],
+                    "joystickError": STATE["joystick_error"],
                 })
         elif self.path in ("/setup", "/"):
             creds = load_credentials()
             port = int(MANIFEST.get("port", 8420))
             self._send_html(setup_page_html(port, creds))
+        elif self.path == "/joystick-connect":
+            creds = load_credentials()
+            client_id = creds.get("joystickClientId", "").strip()
+            if not client_id:
+                self._send_html("<h1>Save a Joystick.tv Client ID first, then try Connect again.</h1>", status=400)
+                return
+            state = base64.urlsafe_b64encode(os.urandom(18)).rstrip(b"=").decode()
+            verifier = joystick_code_verifier()
+            with STATE_LOCK:
+                STATE["joystick_oauth_state"] = state
+                STATE["joystick_oauth_verifier"] = verifier
+            port = int(MANIFEST.get("port", 8420))
+            redirect_uri = joystick_redirect_uri(port)
+            challenge = joystick_code_challenge(verifier)
+            authorize_url = "https://joystick.tv/oauth/authorize?" + urllib.parse.urlencode({
+                "response_type": "code",
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "scope": "identity:read chat:read chat:write chat:moderate",
+                "state": state,
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+            })
+            self.send_response(302)
+            self.send_header("Location", authorize_url)
+            self.end_headers()
+        elif self.path.startswith(JOYSTICK_REDIRECT_PATH):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            code = (params.get("code") or [""])[0]
+            state = (params.get("state") or [""])[0]
+            with STATE_LOCK:
+                expected_state = STATE["joystick_oauth_state"]
+                verifier = STATE["joystick_oauth_verifier"]
+            if not code or not state or state != expected_state:
+                self._send_html("<h1>Joystick login didn't complete (missing/mismatched state) — try Connect again.</h1>", status=400)
+                return
+            try:
+                port = int(MANIFEST.get("port", 8420))
+                creds = load_credentials()
+                client_id = creds.get("joystickClientId", "").strip()
+                access_token, refresh_token = joystick_exchange_code(code, client_id, verifier, joystick_redirect_uri(port))
+                username = joystick_fetch_identity(access_token) or "connected"
+                creds["joystickAccessToken"] = access_token
+                creds["joystickRefreshToken"] = refresh_token
+                creds["joystickUsername"] = username
+                save_credentials(creds)
+                with STATE_LOCK:
+                    STATE["joystick_oauth_state"] = None
+                    STATE["joystick_oauth_verifier"] = None
+                self.send_response(302)
+                self.send_header("Location", "/setup")
+                self.end_headers()
+            except Exception as e:  # noqa: BLE001
+                self._send_html(f"<h1>Joystick login failed: {e}</h1>", status=500)
         elif self.path.startswith("/custom-overlay/"):
             overlay_id = self.path[len("/custom-overlay/"):].split("/")[0]
             manifests = registered_manifests()
@@ -1025,6 +1246,7 @@ def main():
     threading.Thread(target=poll_loop, daemon=True).start()
     threading.Thread(target=chaturbate_loop, daemon=True).start()
     threading.Thread(target=streamerbot_loop, daemon=True).start()
+    threading.Thread(target=joystick_loop, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"StreamerSuite standalone overlay helper running at http://127.0.0.1:{port}/setup")
     print("Open that URL to connect your accounts. Leave this window open while streaming.")
