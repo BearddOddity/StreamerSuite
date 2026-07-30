@@ -1067,6 +1067,7 @@ function twitchBadgeUrl(login, badgeKey) {
 // not just near-pure-black or near-pure-white.
 const BG_COLOR_TOLERANCE = 18; // per-channel distance allowed to still count as "the same background color"
 const BG_SATURATION_TOLERANCE = 14; // max spread between a corner's R/G/B channels to still count as "grayscale"
+const MAX_BOX_DEPTH_FRACTION = 0.28; // how far inward (as a fraction of the shorter side) a real letterbox margin is allowed to reach before it's treated as a leak into the subject
 function isBoxBackgroundColor(c) {
   return Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]) <= BG_SATURATION_TOLERANCE;
 }
@@ -1097,10 +1098,24 @@ function stripAvatarBoxBackground(img) {
       // Flood-fill from the border inward so we only clear the connected
       // background box, not similarly-colored pixels inside the artwork itself
       // (a shaped border/frame around the subject stops the fill at its edge).
+      //
+      // Safety net beyond the grayscale color gate above: a real letterboxed
+      // box is just a margin around the subject — it never reaches deep
+      // toward the image's center. A leak (the fill sneaking past the
+      // subject's anti-aliased edge into the artwork itself, e.g. through a
+      // shading gradient close enough to the background color) typically
+      // does reach deep, following the character's own silhouette. Track
+      // the deepest point any filled pixel reaches and, if it crosses
+      // MAX_BOX_DEPTH_FRACTION of the image's shorter side, treat the whole
+      // pass as a leak and abort — restoring the original image untouched
+      // rather than applying a partial, possibly-corrupted strip.
       const visited = new Uint8Array(w * h);
+      const filled = [];
       const stack = [];
       for (let x = 0; x < w; x++) { stack.push([x, 0]); stack.push([x, h - 1]); }
       for (let y = 0; y < h; y++) { stack.push([0, y]); stack.push([w - 1, y]); }
+      let leaked = false;
+      const maxDepth = Math.min(w, h) * MAX_BOX_DEPTH_FRACTION;
       while (stack.length) {
         const [x, y] = stack.pop();
         if (x < 0 || y < 0 || x >= w || y >= h) continue;
@@ -1108,10 +1123,13 @@ function stripAvatarBoxBackground(img) {
         if (visited[idx]) continue;
         visited[idx] = 1;
         if (!matches(at(x, y))) continue;
-        const i = idx * 4;
-        px[i + 3] = 0;
+        const depth = Math.min(x, y, w - 1 - x, h - 1 - y);
+        if (depth > maxDepth) { leaked = true; break; }
+        filled.push(idx);
         stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
       }
+      if (leaked) return; // looks like it ate into the subject — leave the original image untouched
+      for (const idx of filled) px[idx * 4 + 3] = 0;
       ctx.putImageData(data, 0, 0);
       img.src = canvas.toDataURL("image/png");
     } catch (_e) {
