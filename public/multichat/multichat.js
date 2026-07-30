@@ -1049,9 +1049,27 @@ function twitchBadgeUrl(login, badgeKey) {
 // Some avatar sources bake a solid-color box behind the actual picture
 // (default/placeholder art, or a shaped-border frame sitting on a flat
 // fill). Detect that on load and flood-fill it to transparent so only the
-// framed subject shows. The background can be ANY uniform color — not just
-// black/white — the border shape is what we key off, not the hue.
+// framed subject shows.
+//
+// Deliberately restricted to grayscale (black/white/any shade of gray
+// between) corners only (see isBoxBackgroundColor) — an earlier version
+// accepted ANY uniform corner color, which was too aggressive: Twitch's
+// own default "critter" avatars (colorful character art on a solid
+// colored background, e.g. a green plant creature, a blue globe, a red
+// flame) have uniform-colored corners too, and the flood-fill would leak
+// past the character's anti-aliased silhouette edge into the artwork
+// itself wherever the edge shading was close enough in color to the
+// background — visibly eating chunks out of the image. Real "box baked
+// into the art" cases (the ones this was actually written for) are
+// black/white/gray letterboxing — a saturation check (are R/G/B close to
+// each other, regardless of how light or dark) — rather than checking
+// against two fixed endpoints, so mid-gray letterboxing is caught too,
+// not just near-pure-black or near-pure-white.
 const BG_COLOR_TOLERANCE = 18; // per-channel distance allowed to still count as "the same background color"
+const BG_SATURATION_TOLERANCE = 14; // max spread between a corner's R/G/B channels to still count as "grayscale"
+function isBoxBackgroundColor(c) {
+  return Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]) <= BG_SATURATION_TOLERANCE;
+}
 function stripAvatarBoxBackground(img) {
   const run = () => {
     try {
@@ -1073,6 +1091,7 @@ function stripAvatarBoxBackground(img) {
         Math.abs(a[2] - b[2]) <= BG_COLOR_TOLERANCE;
       const corners = [at(0, 0), at(w - 1, 0), at(0, h - 1), at(w - 1, h - 1)];
       const bg = corners[0];
+      if (!isBoxBackgroundColor(bg)) return; // colorful corner — likely real avatar art, not a letterboxed box
       if (!corners.every((c) => closeTo(c, bg))) return; // corners disagree — no uniform box, leave untouched
       const matches = (c) => closeTo(c, bg);
       // Flood-fill from the border inward so we only clear the connected
