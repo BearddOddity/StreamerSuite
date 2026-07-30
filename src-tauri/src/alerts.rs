@@ -159,3 +159,46 @@ pub(crate) async fn twitch_stream_stats() -> Result<Value, String> {
         "subscriber_total": subscriber_total,
     }))
 }
+
+/// Per-alert-kind custom icon overrides (data: URI once uploaded, absent
+/// means "use the default emoji") — owned here, not in the big AppConfig,
+/// since these can be several MB of image data combined and have no
+/// business going through Config.json's export/import/validate path.
+/// Multi-Chat's chat-feed chips (raid/resub/gift/follow/tip/cheer) read
+/// the same file rather than keeping their own separate copy — Alerts &
+/// Events' five kinds (follow/sub/raid/cheer/tip) are coarser than
+/// Multi-Chat's six, so its "resub" and "gift" chips both use this file's
+/// "sub" icon.
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
+pub(crate) struct EventIcons {
+    #[serde(default)]
+    follow: Option<String>,
+    #[serde(default)]
+    sub: Option<String>,
+    #[serde(default)]
+    raid: Option<String>,
+    #[serde(default)]
+    cheer: Option<String>,
+    #[serde(default)]
+    tip: Option<String>,
+}
+
+fn event_icons_path() -> Result<std::path::PathBuf, String> {
+    Ok(crate::app_base_dir()?.join("EventIcons.json"))
+}
+
+#[tauri::command]
+pub(crate) fn alerts_get_event_icons() -> EventIcons {
+    event_icons_path()
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub(crate) fn alerts_set_event_icons(icons: EventIcons) -> Result<(), String> {
+    let path = event_icons_path()?;
+    let json = serde_json::to_string(&icons).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| format!("couldn't write event icons: {e}"))
+}

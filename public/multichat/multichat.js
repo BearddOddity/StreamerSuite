@@ -66,13 +66,21 @@ const DEFAULT_SETTINGS = {
   fontSize: 14, fontFamily: "", bgColor: "#050505", bgOpacity: 100, bgImage: "", bgBlur: 0,
   glassBlur: 18, glassOpacity: 10, messageScale: 100, overlayAvatarDelay: 1200, avatarRenderDelay: 600, alertSoundUrl: "", narrowBubbles: false,
   bottomPad: 140, hideAfter: "0", ignoreList: "",
-  // Per-event-type icon overrides — data: URI once uploaded, null/absent
-  // means "use the default emoji". Keys match renderEventChip's m.chip
-  // values, so a new chip type just needs an entry here + a default below.
-  eventIcons: {},
 };
+// Fallback emoji per chip type when no shared custom icon is set — see
+// sharedEventIcons below. Keys match renderEventChip's m.chip values, so a
+// new chip type just needs an entry here.
 const EVENT_ICON_DEFAULTS = { follow: "💜", resub: "🌟", gift: "🎁", cheer: "💎", tip: "🪙", raid: "⚔️" };
-const EVENT_ICON_LABELS = { follow: "Follow", resub: "Sub / Resub", gift: "Gift Sub", cheer: "Cheer", tip: "Tip", raid: "Raid" };
+// resub/gift chips both use Alerts & Events' single "sub" icon — that tool
+// doesn't distinguish resub from gift the way Multi-Chat's chips do.
+const EVENT_ICON_SHARED_KIND = { follow: "follow", resub: "sub", gift: "sub", cheer: "cheer", tip: "tip", raid: "raid" };
+// Loaded once at startup from Alerts & Events' own storage (alerts_get_event_icons)
+// — Multi-Chat only reads these, it never uploads/edits them itself; see
+// "Event Icons" in the settings drawer for where to actually change one.
+let sharedEventIcons = {};
+if (tauriInvoke) {
+  tauriInvoke("alerts_get_event_icons").then(icons => { sharedEventIcons = icons || {}; }).catch(() => {});
+}
 const THEME_PRESETS = {
   default:  { bgColor: "#050505", bgOpacity: 100, fontSize: 14, fontFamily: "" },
   midnight: { bgColor: "#0a0f1e", bgOpacity: 100, fontSize: 14, fontFamily: "" },
@@ -1285,9 +1293,10 @@ const feedMeta = new Map(); // container -> { lastKey }
 
 /* ── Chat feed inline chips ────────────────────────────────────────────── */
 // Renders an event-icon slot (follow/resub/gift/cheer/tip/raid) as either
-// the user's uploaded image (Settings -> Event Icons) or the default emoji.
+// the icon uploaded in Alerts & Events (Settings -> Event Icons there) or
+// the default emoji.
 function eventIconEl(type, fallbackEmoji) {
-  const custom = settings.eventIcons && settings.eventIcons[type];
+  const custom = sharedEventIcons[EVENT_ICON_SHARED_KIND[type] || type];
   const cls = "cf-" + type + "-ico";
   if (custom) {
     const img = el("img", cls);
@@ -2913,38 +2922,10 @@ function buildSettingsDrawer() {
     body.append(asRow);
 
     body.append(sectionHead("🖼️", "Event Icons"));
-    for (const type of Object.keys(EVENT_ICON_DEFAULTS)) {
-      const row = el("div", "cv-settings-row");
-      const lab = el("div");
-      lab.append(el("div", "cv-settings-label", EVENT_ICON_LABELS[type]));
-      lab.append(el("div", "cv-settings-sub", settings.eventIcons[type] ? "custom icon set" : "default emoji"));
-      row.append(lab);
-      const wrap = el("div", "cv-color-wrap");
-      const preview = settings.eventIcons[type]
-        ? (() => { const img = el("img"); img.src = settings.eventIcons[type]; img.alt = ""; img.style.cssText = "width:20px;height:20px;object-fit:contain;flex-shrink:0;"; return img; })()
-        : el("span", "", EVENT_ICON_DEFAULTS[type]);
-      const file = el("input");
-      file.type = "file"; file.accept = "image/*"; file.style.display = "none";
-      file.onchange = () => {
-        const f = file.files[0];
-        if (!f) return;
-        const reader = new FileReader();
-        reader.onload = () => { settings.eventIcons[type] = reader.result; saveSet(); buildSettingsDrawer(); };
-        reader.readAsDataURL(f);
-      };
-      const pick = el("button", "cv-btn", "Upload…");
-      pick.type = "button";
-      pick.onclick = () => file.click();
-      wrap.append(preview, pick, file);
-      if (settings.eventIcons[type]) {
-        const clear = el("button", "cv-btn", "Reset");
-        clear.type = "button";
-        clear.onclick = () => { delete settings.eventIcons[type]; saveSet(); buildSettingsDrawer(); };
-        wrap.append(clear);
-      }
-      row.append(wrap);
-      body.append(row);
-    }
+    const eiRow = el("div", "cv-settings-row");
+    eiRow.append(el("div", "cv-settings-label", "Managed in Alerts & Events"));
+    eiRow.append(el("div", "cv-settings-sub", "Open the Alerts & Events tool → Settings → Event Icons to upload/change these — used here automatically."));
+    body.append(eiRow);
   }
 
   body.append(sectionHead("🎨", "Appearance"));

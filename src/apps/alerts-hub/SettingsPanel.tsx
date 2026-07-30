@@ -1,8 +1,63 @@
+import { useRef } from "react";
 import { PlatformIcon } from "@/components/common/PlatformIcon";
-import type { AlertsSettings, TwitchAccount } from "./types";
+import type { AlertKind, AlertsSettings, TwitchAccount } from "./types";
 import { Button, Card, Chip, StatusDot } from "../../design-system/components/core";
 
 type ConnStatus = "disconnected" | "connecting" | "live" | "error";
+
+const EVENT_ICON_KINDS: { kind: AlertKind; label: string; defaultEmoji: string }[] = [
+  { kind: "follow", label: "Follow", defaultEmoji: "💜" },
+  { kind: "sub", label: "Sub / Resub / Gift Sub", defaultEmoji: "⭐" },
+  { kind: "raid", label: "Raid", defaultEmoji: "🚀" },
+  { kind: "cheer", label: "Cheer", defaultEmoji: "💎" },
+  { kind: "tip", label: "Tip", defaultEmoji: "💰" },
+];
+
+function EventIconRow({
+  kind,
+  label,
+  defaultEmoji,
+  current,
+  onSet,
+}: {
+  kind: AlertKind;
+  label: string;
+  defaultEmoji: string;
+  current: string | undefined;
+  onSet: (kind: AlertKind, dataUri: string | null) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex items-center gap-2 bg-white/[0.03] rounded-lg px-3 py-2">
+      <div className="w-7 h-7 flex items-center justify-center shrink-0">
+        {current ? <img src={current} alt="" className="w-6 h-6 object-contain" /> : <span className="text-lg">{defaultEmoji}</span>}
+      </div>
+      <span className="text-[12px] text-white/70 flex-1">{label}</span>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => onSet(kind, String(reader.result));
+          reader.readAsDataURL(file);
+          e.target.value = "";
+        }}
+      />
+      <Button variant="ghost" size="sm" onClick={() => inputRef.current?.click()}>
+        Upload
+      </Button>
+      {current && (
+        <Button variant="ghost" size="sm" onClick={() => onSet(kind, null)}>
+          Reset
+        </Button>
+      )}
+    </div>
+  );
+}
 
 /** Maps the feed's 4-state connection status onto StatusDot's 3 visual states —
  *  "error" reads as "warn" since the shared dot has no red variant. */
@@ -22,6 +77,8 @@ export function SettingsPanel({
   joystickStatus,
   chaturbateStatus,
   adultContentEnabled,
+  eventIcons,
+  onSetEventIcon,
   onClose,
 }: {
   settings: AlertsSettings;
@@ -34,6 +91,8 @@ export function SettingsPanel({
   joystickStatus: ConnStatus;
   chaturbateStatus: ConnStatus;
   adultContentEnabled: boolean;
+  eventIcons: Partial<Record<AlertKind, string>>;
+  onSetEventIcon: (kind: AlertKind, dataUri: string | null) => void;
   onClose: () => void;
 }) {
   return (
@@ -141,6 +200,19 @@ export function SettingsPanel({
             </div>
           </section>
         )}
+
+        <section className="mb-6">
+          <span className="text-[12px] font-semibold text-white/70 block mb-2">Event Icons</span>
+          <p className="text-[10px] text-white/30 mb-2">
+            Custom icons for each alert kind — used here and in Multi-Chat's chat-feed chips (its
+            Sub/Resub and Gift Sub chips both use the Sub icon below).
+          </p>
+          <div className="space-y-1.5">
+            {EVENT_ICON_KINDS.map(({ kind, label, defaultEmoji }) => (
+              <EventIconRow key={kind} kind={kind} label={label} defaultEmoji={defaultEmoji} current={eventIcons[kind]} onSet={onSetEventIcon} />
+            ))}
+          </div>
+        </section>
 
         <section>
           <button

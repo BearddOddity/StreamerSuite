@@ -2629,6 +2629,8 @@ pub fn run() {
             cohost::cohost_generate_reply,
             alerts::alerts_eventsub_subscribe,
             alerts::twitch_stream_stats,
+            alerts::alerts_get_event_icons,
+            alerts::alerts_set_event_icons,
             multichat::kick_channel_stats,
             stream_manager::stream_manager_get_twitch_info,
             stream_manager::stream_manager_update_twitch,

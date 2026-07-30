@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { PlatformIcon } from "@/components/common/PlatformIcon";
 import { useAlertsSettings } from "./useAlertsSettings";
 import { useAlertsFeed } from "./useAlertsFeed";
+import { useEventIcons } from "./useEventIcons";
 import { SettingsPanel } from "./SettingsPanel";
 import type { AlertEvent, AlertKind } from "./types";
 import "../../design-system/styles.css";
@@ -27,6 +28,15 @@ const TEST_EVENTS: Omit<AlertEvent, "id" | "timestamp">[] = [
 ];
 const ADULT_ALERT_PLATFORMS = ["joystick", "chaturbate"];
 
+/** The user's uploaded icon for this kind (Settings → Event Icons), or the
+ * built-in default emoji — same fallback rule Multi-Chat's chat-feed chips
+ * use, since they read this same icon set. */
+function KindIcon({ kind, eventIcons, className }: { kind: AlertKind; eventIcons: Partial<Record<AlertKind, string>>; className?: string }) {
+  const custom = eventIcons[kind];
+  if (custom) return <img src={custom} alt="" className={className ?? "w-5 h-5 object-contain inline-block"} />;
+  return <span className={className}>{KIND_STYLE[kind].icon}</span>;
+}
+
 /** Maps the feed's 4-state connection status onto StatusDot's 3 visual states —
  *  "error" reads as "warn" since the shared dot has no red variant. */
 function toDotStatus(status: "disconnected" | "connecting" | "live" | "error"): "on" | "off" | "warn" {
@@ -38,6 +48,7 @@ function toDotStatus(status: "disconnected" | "connecting" | "live" | "error"): 
 export default function AlertsHubApp() {
   const { settings, update, toggle } = useAlertsSettings();
   const { alerts, push, clear, twitchAccount, refreshTwitchAccount, twitchStatus, kickStatus, joystickStatus, chaturbateStatus } = useAlertsFeed(settings);
+  const { icons: eventIcons, setIcon: setEventIcon } = useEventIcons();
   const [showSettings, setShowSettings] = useState(false);
   // Off by default (General -> Adult Content & Platforms) — zero mention of
   // Joystick.tv anywhere in this tool until it's explicitly turned on there.
@@ -93,9 +104,9 @@ export default function AlertsHubApp() {
             <button
               key={i}
               onClick={() => push(e)}
-              className={`px-3 py-2 rounded-lg text-[11px] font-medium border transition-all hover:-translate-y-0.5 ${KIND_STYLE[e.kind].color}`}
+              className={`px-3 py-2 rounded-lg text-[11px] font-medium border transition-all hover:-translate-y-0.5 flex items-center gap-1.5 ${KIND_STYLE[e.kind].color}`}
             >
-              {KIND_STYLE[e.kind].icon} test {e.kind}
+              <KindIcon kind={e.kind} eventIcons={eventIcons} className="w-4 h-4 object-contain inline-block" /> test {e.kind}
             </button>
           ))}
           {alerts.length > 0 && (
@@ -115,7 +126,7 @@ export default function AlertsHubApp() {
               const style = KIND_STYLE[alert.kind];
               return (
                 <div key={alert.id} className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${style.color}`}>
-                  <span className="text-xl">{style.icon}</span>
+                  <KindIcon kind={alert.kind} eventIcons={eventIcons} className="w-6 h-6 object-contain inline-block text-xl" />
                   <PlatformIcon platform={alert.platform} size="sm" />
                   <div className="flex-1 min-w-0">
                     <span className="text-[12px] font-semibold text-white/80">{alert.user}</span>
@@ -141,6 +152,8 @@ export default function AlertsHubApp() {
           joystickStatus={joystickStatus}
           chaturbateStatus={chaturbateStatus}
           adultContentEnabled={adultContentEnabled}
+          eventIcons={eventIcons}
+          onSetEventIcon={setEventIcon}
           onClose={() => setShowSettings(false)}
         />
       )}
