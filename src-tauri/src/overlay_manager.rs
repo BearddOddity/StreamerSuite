@@ -984,6 +984,22 @@ const COUNTDOWN_SCRIPT: &str = r#"<script>
 })();
 </script>"#;
 
+/// Clock template only — ticks the viewer's local wall-clock time entirely
+/// client-side, same no-server-round-trip approach as COUNTDOWN_SCRIPT.
+const CLOCK_SCRIPT: &str = r#"<script>
+(function() {
+  var el = document.getElementById("sb-clock");
+  if (!el) return;
+  function pad(n) { return String(n).padStart(2, "0"); }
+  function tick() {
+    var now = new Date();
+    el.textContent = pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds());
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>"#;
+
 /// Shared polling/render logic for the StatusForge "Now Playing" family
 /// (Horizontal Left/Right, Vertical, Info Box — ported from the original
 /// widgets/overlay-runtime.js). One deliberate change from that file: token
@@ -1620,6 +1636,60 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
                 ),
             )
         }
+        // A celebratory achievement callout — title/subtitle bound to
+        // whatever fired it (e.g. "100 Followers!"), distinct from
+        // goal-bar's always-visible progress meter: this is meant to be
+        // shown once via alertTrigger (see the Canvas editor's per-element
+        // alert trigger), not left on-screen continuously.
+        "milestone-banner" => {
+            let corner_css = match params.position.as_str() {
+                "top-left" => "top: 40px; left: 40px;",
+                "top-right" => "top: 40px; right: 40px;",
+                "bottom-left" => "bottom: 40px; left: 40px;",
+                "bottom-right" => "bottom: 40px; right: 40px;",
+                _ => "top: 50%; left: 50%; transform: translate(-50%, -50%);",
+            };
+            (
+                format!("position: fixed; {corner_css}"),
+                format!(
+                    r#"<div id="card"><div class="burst">🎉</div><div class="text">{title_html}{subtitle_html}</div></div>"#
+                ),
+                format!(
+                    "#card {{ display: flex; align-items: center; gap: 14px; padding: 18px 28px; border-radius: {radius}; background: linear-gradient(135deg, {accent}33, rgba(5, 5, 5, {bg_opacity})); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid {accent}; box-shadow: 0 8px 40px {accent}55, inset 0 1px 0 rgba(255, 255, 255, 0.08); {card_animation} }}\n\
+                     .burst {{ font-size: 32px; line-height: 1; }}\n\
+                     .text {{ display: flex; flex-direction: column; gap: 2px; }}\n\
+                     .title {{ font-size: 28px; font-weight: 900; color: {text_color}; }}\n\
+                     .subtitle {{ font-size: 15px; font-weight: 600; color: {accent}; }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
+        // Self-ticking wall-clock (CLOCK_SCRIPT below) — title/subtitle
+        // still available as an optional static label above/below it (e.g.
+        // "Local Time"), same as every other template's bound fields, but
+        // neither is required for the clock itself to work.
+        "clock" => {
+            let corner_css = match params.position.as_str() {
+                "top-left" => "top: 30px; left: 30px;",
+                "top-right" => "top: 30px; right: 30px;",
+                "bottom-left" => "bottom: 30px; left: 30px;",
+                "bottom-right" => "bottom: 30px; right: 30px;",
+                _ => "top: 50%; left: 50%; transform: translate(-50%, -50%);",
+            };
+            (
+                format!("position: fixed; {corner_css}"),
+                format!(
+                    r#"<div id="card">{title_html}<div class="clock" id="sb-clock">--:--:--</div>{subtitle_html}</div>"#
+                ),
+                format!(
+                    "#card {{ display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 16px 26px; border-radius: {radius}; background: rgba(5, 5, 5, {bg_opacity}); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); {card_animation} }}\n\
+                     .title {{ font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: {text_color}; opacity: 0.7; }}\n\
+                     .clock {{ font-size: 40px; font-weight: 800; color: {accent}; font-variant-numeric: tabular-nums; }}\n\
+                     .subtitle {{ font-size: 13px; color: {text_color}; opacity: 0.6; }}\n\
+                     {keyframes}"
+                ),
+            )
+        }
         other => return Err(format!("unknown template: {other}")),
     };
 
@@ -1630,6 +1700,9 @@ fn render_template(params: &TemplateParams) -> Result<String, String> {
     };
     if params.template == "countdown" || (params.template == "brb-screen" && !params.countdown_target.trim().is_empty()) {
         script.push_str(COUNTDOWN_SCRIPT);
+    }
+    if params.template == "clock" {
+        script.push_str(CLOCK_SCRIPT);
     }
     if params.template == "now-playing" {
         let (has_cover, icon_size, icon_pos) = match params.position.as_str() {
@@ -3893,7 +3966,7 @@ mod tests {
     fn renders_all_templates_and_escapes_text() {
         for t in [
             "lower-third", "corner-badge", "ticker", "text-box", "goal-bar", "cam-frame",
-            "alert-banner", "countdown", "chat-box", "follower-ticker",
+            "alert-banner", "countdown", "chat-box", "follower-ticker", "milestone-banner", "clock",
         ] {
             let html = render_template(&params(t)).unwrap();
             assert!(html.contains("Hello &lt;World&gt;"), "template {t} should escape title text");
@@ -3986,6 +4059,16 @@ mod tests {
 
         let other = render_template(&params("lower-third")).unwrap();
         assert!(!other.contains("sb-countdown"), "countdown script shouldn't leak into other templates");
+    }
+
+    #[test]
+    fn clock_template_embeds_ticker_element_and_script_only_for_clock_template() {
+        let html = render_template(&params("clock")).unwrap();
+        assert!(html.contains(r#"id="sb-clock""#));
+        assert!(html.contains("getHours"), "clock template should embed the ticking script");
+
+        let other = render_template(&params("lower-third")).unwrap();
+        assert!(!other.contains("sb-clock"), "clock script shouldn't leak into other templates");
     }
 
     #[test]

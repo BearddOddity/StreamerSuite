@@ -93,6 +93,53 @@ function deleteFromElementLibrary(id: string) {
   }
 }
 
+/** A restyle preset — accent + text color applied across every element on
+ * the canvas at once (see applyPalette), same per-kind branching the
+ * multi-select batch-color actions use. Built-ins ship read-only;
+ * anything saved from the current canvas's own colors goes in the
+ * separate custom list below instead, mirroring the element library's
+ * own built-in-templates-vs-saved-items split. */
+interface ColorPalette {
+  name: string;
+  accent: string;
+  text: string;
+}
+const BUILTIN_PALETTES: ColorPalette[] = [
+  { name: "Twitch Purple", accent: "#9146ff", text: "#ffffff" },
+  { name: "Neon Cyan", accent: "#43e5e5", text: "#ffffff" },
+  { name: "Warm Sunset", accent: "#ff6b35", text: "#fff3e6" },
+  { name: "Forest", accent: "#2f9e44", text: "#eafbea" },
+  { name: "Candy Pink", accent: "#ff6ec7", text: "#ffffff" },
+  { name: "Mono Dark", accent: "#3a3a3a", text: "#f5f5f5" },
+];
+const CUSTOM_PALETTE_KEY = "bd-overlay-custom-palettes";
+
+function getCustomPalettes(): ColorPalette[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_PALETTE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomPalette(p: ColorPalette) {
+  try {
+    localStorage.setItem(CUSTOM_PALETTE_KEY, JSON.stringify([...getCustomPalettes(), p].slice(-20)));
+  } catch {
+    // localStorage unavailable — the save just won't persist
+  }
+}
+
+function deleteCustomPalette(name: string) {
+  try {
+    localStorage.setItem(CUSTOM_PALETTE_KEY, JSON.stringify(getCustomPalettes().filter((p) => p.name !== name)));
+  } catch {
+    // no-op
+  }
+}
+
 function NumberField({ label, value, onChange, min, max }: { label: string; value: number; onChange: (v: number) => void; min: number; max: number }) {
   return (
     <div>
@@ -322,6 +369,9 @@ export default function CanvasMaker({
   );
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [library, setLibrary] = useState<LibraryItem[]>(() => getElementLibrary());
+  const [customPalettes, setCustomPalettes] = useState<ColorPalette[]>(() => getCustomPalettes());
+  const [showPalettePanel, setShowPalettePanel] = useState(false);
+  const [newPaletteName, setNewPaletteName] = useState("");
   const [showLibrarySave, setShowLibrarySave] = useState(false);
   const [libraryItemName, setLibraryItemName] = useState("");
   const [preview, setPreview] = useState("");
@@ -1179,6 +1229,99 @@ export default function CanvasMaker({
     setElements((prev) => prev.map((e) => (patches.has(e.id) ? { ...e, ...patches.get(e.id) } : e)));
   };
 
+  /** Applies one color to every selected element regardless of kind — a
+   * template widget's accentColor (its dominant color) or a primitive's
+   * fill, whichever field that element actually has. Lets a multi-select
+   * get restyled in one action instead of opening each element's own
+   * inspector. */
+  const setBatchAccentColor = (hex: string) => {
+    if (effectiveSelection.size < 2) return;
+    recordBeforeChange(elements);
+    setElements((prev) =>
+      prev.map((e) => {
+        if (!effectiveSelection.has(e.id)) return e;
+        return elementKind(e) === "template"
+          ? { ...e, params: { ...e.params, accentColor: hex } }
+          : { ...e, primitive: { ...(e.primitive ?? DEFAULT_PRIMITIVE_PARAMS), fill: hex } };
+      })
+    );
+  };
+
+  /** Same idea as {@link setBatchAccentColor} for the text-color field
+   * every kind carries (template.params.textColor vs primitive.textColor —
+   * primitives ignore it unless they're a Text layer, same as editing one
+   * individually would). */
+  const setBatchTextColor = (hex: string) => {
+    if (effectiveSelection.size < 2) return;
+    recordBeforeChange(elements);
+    setElements((prev) =>
+      prev.map((e) => {
+        if (!effectiveSelection.has(e.id)) return e;
+        return elementKind(e) === "template"
+          ? { ...e, params: { ...e.params, textColor: hex } }
+          : { ...e, primitive: { ...(e.primitive ?? DEFAULT_PRIMITIVE_PARAMS), textColor: hex } };
+      })
+    );
+  };
+
+  /** 0-1, same scale both TemplateParams.bgOpacity and PrimitiveParams.opacity
+   * already use individually. */
+  const setBatchOpacity = (value: number) => {
+    if (effectiveSelection.size < 2) return;
+    recordBeforeChange(elements);
+    setElements((prev) =>
+      prev.map((e) => {
+        if (!effectiveSelection.has(e.id)) return e;
+        return elementKind(e) === "template"
+          ? { ...e, params: { ...e.params, bgOpacity: value } }
+          : { ...e, primitive: { ...(e.primitive ?? DEFAULT_PRIMITIVE_PARAMS), opacity: value } };
+      })
+    );
+  };
+
+  const setBatchRotation = (deg: number) => {
+    if (effectiveSelection.size < 2) return;
+    recordBeforeChange(elements);
+    setElements((prev) => prev.map((e) => (effectiveSelection.has(e.id) ? { ...e, rotation: deg } : e)));
+  };
+
+  const setLockAllSelected = (locked: boolean) => {
+    if (effectiveSelection.size < 2) return;
+    recordBeforeChange(elements);
+    setElements((prev) => prev.map((e) => (effectiveSelection.has(e.id) ? { ...e, locked } : e)));
+  };
+
+  /** Restyles every element on the canvas with one accent/text color pair
+   * — a quick "reskin the whole thing" action, distinct from the
+   * multi-select batch-color actions above which only touch the current
+   * selection. */
+  const applyPalette = (p: ColorPalette) => {
+    if (elements.length === 0) return;
+    recordBeforeChange(elements);
+    setElements((prev) =>
+      prev.map((e) =>
+        elementKind(e) === "template"
+          ? { ...e, params: { ...e.params, accentColor: p.accent, textColor: p.text } }
+          : { ...e, primitive: { ...(e.primitive ?? DEFAULT_PRIMITIVE_PARAMS), fill: p.accent, textColor: p.text } }
+      )
+    );
+    setShowPalettePanel(false);
+  };
+
+  const saveCurrentAsPalette = () => {
+    if (!selected || !newPaletteName.trim()) return;
+    const accent = elementKind(selected) === "template" ? selected.params.accentColor : selected.primitive?.fill ?? "#9146ff";
+    const text = elementKind(selected) === "template" ? selected.params.textColor : selected.primitive?.textColor ?? "#ffffff";
+    saveCustomPalette({ name: newPaletteName.trim(), accent, text });
+    setCustomPalettes(getCustomPalettes());
+    setNewPaletteName("");
+  };
+
+  const removeCustomPalette = (name: string) => {
+    deleteCustomPalette(name);
+    setCustomPalettes(getCustomPalettes());
+  };
+
   /** Copies the current selection to both the OS clipboard (as JSON tagged
    * with a recognizable marker, so paste can tell a real canvas-clip apart
    * from arbitrary copied text) and an in-memory fallback, since the
@@ -1582,6 +1725,67 @@ export default function CanvasMaker({
               </Button>
             )}
 
+            {showPalettePanel ? (
+              <div className="space-y-2 pt-2 border-t border-white/[0.06]">
+                <label className="text-[9px] text-white/30 uppercase tracking-wide block px-0.5">
+                  Restyle whole canvas — click a palette
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {BUILTIN_PALETTES.map((p) => (
+                    <Tooltip key={p.name} label={p.name}>
+                      <button
+                        onClick={() => applyPalette(p)}
+                        className="h-8 rounded-lg border border-white/[0.08] overflow-hidden flex"
+                      >
+                        <span className="flex-1" style={{ background: p.accent }} />
+                        <span className="flex-1" style={{ background: p.text }} />
+                      </button>
+                    </Tooltip>
+                  ))}
+                </div>
+                {customPalettes.length > 0 && (
+                  <div className="space-y-1">
+                    <label className="text-[9px] text-white/30 uppercase tracking-wide block px-0.5">My Palettes</label>
+                    {customPalettes.map((p) => (
+                      <div key={p.name} className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => applyPalette(p)}
+                          className="flex-1 flex items-center gap-2 px-2 py-1 rounded-lg bg-white/[0.02] border border-white/[0.06] hover:border-white/15 text-left"
+                        >
+                          <span className="w-4 h-4 rounded-full shrink-0" style={{ background: p.accent }} />
+                          <span className="text-[11px] text-white/60 truncate">{p.name}</span>
+                        </button>
+                        <button onClick={() => removeCustomPalette(p.name)} className="text-[10px] text-white/20 hover:text-red-400 px-1">
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {selected && (
+                  <div className="flex gap-1.5">
+                    <input
+                      value={newPaletteName}
+                      onChange={(e) => setNewPaletteName(e.target.value)}
+                      placeholder="Save selected element's colors as…"
+                      className="flex-1 min-w-0 input-glass text-[11px]"
+                      onKeyDown={(e) => e.key === "Enter" && saveCurrentAsPalette()}
+                    />
+                    <Button variant="ghost" size="sm" onClick={saveCurrentAsPalette} disabled={!newPaletteName.trim()}>
+                      Save
+                    </Button>
+                  </div>
+                )}
+                <button onClick={() => setShowPalettePanel(false)} className="w-full text-[10px] text-white/25 pt-1">
+                  Close
+                </button>
+              </div>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={() => setShowPalettePanel(true)} className="w-full" disabled={elements.length === 0}>
+                🎨 Palette
+              </Button>
+            )}
+
             {showAiPanel ? (
               <div className="space-y-1.5 pt-2 border-t border-white/[0.06]">
                 <textarea
@@ -1653,6 +1857,32 @@ export default function CanvasMaker({
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => void pasteClipboard()} className="flex-1">
                     📋 Paste
+                  </Button>
+                </div>
+
+                <label className="text-[10px] text-white/40 uppercase tracking-wide mb-1 block pt-2">
+                  Batch Edit — applies to all {effectiveSelection.size}
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <label className="flex items-center gap-1.5 text-[10px] text-white/50 bg-white/[0.03] rounded-lg px-2 py-1.5">
+                    <input type="color" onChange={(e) => setBatchAccentColor(e.target.value)} className="w-5 h-5 rounded border-0 bg-transparent" />
+                    Accent / Fill
+                  </label>
+                  <label className="flex items-center gap-1.5 text-[10px] text-white/50 bg-white/[0.03] rounded-lg px-2 py-1.5">
+                    <input type="color" onChange={(e) => setBatchTextColor(e.target.value)} className="w-5 h-5 rounded border-0 bg-transparent" />
+                    Text
+                  </label>
+                </div>
+                <RangeSlider label="Opacity" min={0} max={1} step={0.05} value={0.5} onChange={setBatchOpacity} />
+                <div className="flex gap-1.5 items-center">
+                  <NumberField label="Rotation °" value={0} min={-360} max={360} onChange={setBatchRotation} />
+                </div>
+                <div className="flex gap-1.5">
+                  <Button variant="ghost" size="sm" onClick={() => setLockAllSelected(true)} className="flex-1">
+                    🔒 Lock All
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setLockAllSelected(false)} className="flex-1">
+                    🔓 Unlock All
                   </Button>
                 </div>
               </div>

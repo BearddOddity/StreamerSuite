@@ -28,7 +28,9 @@ export type OverlayTemplateId =
   | "game-logo"
   | "brb-screen"
   | "chat-box"
-  | "follower-ticker";
+  | "follower-ticker"
+  | "milestone-banner"
+  | "clock";
 
 export interface TemplateDef {
   id: OverlayTemplateId;
@@ -191,6 +193,33 @@ export const TEMPLATES: TemplateDef[] = [
       { value: "bottom", label: "Bottom" },
     ],
     hasSpeed: true,
+  },
+  {
+    id: "milestone-banner",
+    label: "Milestone Banner",
+    icon: "🎉",
+    description:
+      "Celebratory achievement callout (bind Title to a live count, e.g. \"100 Followers!\") — meant to show once via Alert Trigger, not stay on-screen continuously",
+    positions: [
+      { value: "center", label: "Center" },
+      { value: "top-left", label: "Top Left" },
+      { value: "top-right", label: "Top Right" },
+      { value: "bottom-left", label: "Bottom Left" },
+      { value: "bottom-right", label: "Bottom Right" },
+    ],
+  },
+  {
+    id: "clock",
+    label: "Clock",
+    icon: "🕐",
+    description: "Self-updating local wall-clock time — no live source binding needed, Title/Subtitle are optional static labels",
+    positions: [
+      { value: "center", label: "Center" },
+      { value: "top-left", label: "Top Left" },
+      { value: "top-right", label: "Top Right" },
+      { value: "bottom-left", label: "Bottom Left" },
+      { value: "bottom-right", label: "Bottom Right" },
+    ],
   },
 ];
 
