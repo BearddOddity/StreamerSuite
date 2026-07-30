@@ -1176,7 +1176,17 @@ function avatarNode(m) {
     };
     img.src = src;
     img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
-    stripAvatarBoxBackground(img);
+    // Twitch never actually needs this: its own default "critter" avatars
+    // are excluded server-side already (see the user-default-pictures
+    // filter in multichat.rs, which swaps them for initials instead of
+    // ever showing the image), and every corruption case actually found
+    // in practice has been a real Twitch avatar whose organic silhouette
+    // defeated the pixel heuristics below despite several rounds of
+    // tightening them — deciding by platform (was this feature ever
+    // actually built/needed for this source?) beats trying to guess
+    // per-image from pixels alone. Left on for Kick/other sources, which
+    // is what this was actually written for.
+    if (m.platform !== "twitch") stripAvatarBoxBackground(img);
   };
   const swapToImg = (placeholder, src) => {
     const img = el("img", "cv-avatar");
