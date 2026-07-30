@@ -5,6 +5,13 @@
    Joystick.tv (ActionCable, requires bot basic key).
    ═══════════════════════════════════════════════════════════════════════ */
 
+// Declared up front since it's referenced as early as the event-icons
+// preload below — a later duplicate `const` here previously caused a
+// temporal-dead-zone crash ("Cannot access 'tauriInvoke' before
+// initialization") that halted the whole script before any chat/platform
+// UI ever rendered.
+const tauriInvoke = window.__TAURI__?.core?.invoke || null;
+
 // Colored via CSS (color: var(--p)) wherever these render inside a
 // [data-platform] ancestor — an inline style="color:var(...)" attribute on
 // an SVG parsed from an innerHTML string silently never applies in this
@@ -2048,7 +2055,6 @@ function connectTwitch() {
 }
 
 /* Kick — public Pusher websocket (chatrooms.{id}.v2) */
-const tauriInvoke = window.__TAURI__?.core?.invoke || null;
 
 // Desktop-window/docked mode only (window.__TAURI__ present) — this window
 // has its own localStorage, separate from the main StreamerSuite window
