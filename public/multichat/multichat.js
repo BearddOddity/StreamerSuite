@@ -125,7 +125,7 @@ const PRIME_GAMING_RE = /gaming\.amazon\.com\/\S*/i;
 // X's own non-profile top-level paths (twitter.com still redirects there).
 const X_RE = /(?:x\.com|twitter\.com)\/(\w{1,15})(?:[/?#]|$)/i;
 const X_RESERVED_PATHS = new Set(["home", "explore", "notifications", "messages", "i", "intent", "search", "settings", "compose", "login", "signup", "share", "hashtag"]);
-const YOUTUBE_CHANNEL_RE = /youtube\.com\/@([\w.-]+)/i;
+const YOUTUBE_CHANNEL_RE = /youtube\.com\/(?:@|c\/|channel\/|user\/)([\w.-]+)/i;
 const TIKTOK_RE = /tiktok\.com\/@([\w.-]+)/i;
 const KOFI_RE = /ko-fi\.com\/([\w.-]+)/i;
 const FOURTHWALL_RE = /fourthwall\.com/i;
@@ -1619,8 +1619,27 @@ function msgNode(m, small, isCont) {
         i++;
         continue;
       }
+      // The text-cursor emote parsers (Twitch tag ranges, Kick [emote:] tokens,
+      // BTTV/FFZ/7TV code splitting) all emit the whitespace between two
+      // typed emote codes as its own separate text part — "Kappa Kappa" is
+      // literally [emote, text(" "), emote], not two adjacent emote parts. A
+      // strict parts[i+1]-is-an-emote check therefore never matched real
+      // typed repeats (which are always space-separated), so this always
+      // rendered "Kappa Kappa Kappa" as three individual images in a row
+      // (wrapping onto their own lines once there were enough of them)
+      // instead of ever collapsing/enlarging. Skip a single whitespace-only
+      // text part between same-code emotes so real consecutive repeats do
+      // count as a run.
       let count = 1;
-      while (i + count < parts.length && parts[i + count].type === "emote" && parts[i + count].alt === p.alt) count++;
+      let j = i + 1;
+      while (j < parts.length) {
+        let k = j;
+        if (parts[k].type === "text" && /^\s+$/.test(parts[k].text)) k++;
+        if (k < parts.length && parts[k].type === "emote" && parts[k].alt === p.alt) {
+          count++;
+          j = k + 1;
+        } else break;
+      }
       const img = el("img", p.giant ? "cv-emote-img cv-emote-giant" : "cv-emote-img");
       img.src = p.url; img.loading = "lazy";
       if (count > 1) {
@@ -1633,7 +1652,7 @@ function msgNode(m, small, isCont) {
         img.alt = p.alt; img.title = p.alt;
         text.append(img);
       }
-      i += count;
+      i = j;
     }
   } else {
     appendLinkifiedText(text, m.text);
