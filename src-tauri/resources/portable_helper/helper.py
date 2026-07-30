@@ -18,21 +18,30 @@ lives at ~/.streamersuite_portable_helper.json. Alerts are scoped
 per-overlay (see push_alert) — an overlay only ever receives an alert from
 a platform its OWN manifest.json actually lists.
 
-Kick only exposes live viewer count/status through its public API — no
-follower/sub counts or a way to detect a fresh follow, so Kick alerts
-aren't implemented (see the setup page for status). Joystick.tv isn't
-implemented at all — its realtime events need an OAuth PKCE login flow on
-top of the same WebSocket protocol Streamer.bot uses, and there's no real
-StreamerSuite reference to verify a hand-rolled client against.
+Kick's polling connection (channel slug + token) only gives live viewer
+count/status — no follower/sub totals via that path. Kick DOES push real
+follow/sub/tip events via webhooks, but only to a public URL, which this
+loopback-only helper isn't — see the Kick card's "Real-time alerts"
+section for the tunnel-URL workaround, and push_alert's kick webhook
+route for why it's not signature-verified yet (docs.kick.com was
+unreachable while building this).
 
 Streamer.bot relays your latest chat message (any platform Streamer.bot
 itself is connected to, including YouTube — StreamerSuite has no direct
-YouTube chat API of its own either) into the overlay's "Latest Chat
-Message" binding, using the same WebSocket + salt/challenge auth protocol
-StreamerSuite's own Connections & Keys uses. Since Python's standard
-library has no WebSocket client, this file hand-implements the minimal
-RFC 6455 client/framing it needs (WSClient below) rather than depending on
-a third-party package the recipient would have to `pip install`.
+YouTube chat API of its own either) AND real alerts (both Streamer.bot's
+own built-in per-platform triggers and any "Custom" event a Streamer.bot
+Action broadcasts — those aren't platform-defined, they're whatever the
+streamer set up) into the overlay, using the same WebSocket + salt/
+challenge auth protocol StreamerSuite's own Connections & Keys uses. Since
+Python's standard library has no WebSocket client, this file
+hand-implements the minimal RFC 6455 client/framing it needs (WSClient
+below, with TLS added for Joystick's wss:// gateway) rather than depending
+on a third-party package the recipient would have to `pip install`.
+
+Joystick.tv's OAuth PKCE authorize/token flow and ActionCable gateway
+connect/subscribe/tip-parsing are direct ports of StreamerSuite's own
+verified Joystick integration (multichat.rs's oauth_login,
+useAlertsFeed.ts's Joystick effect) — real tip alerts.
 
 This is provided as-is by whoever gave you this overlay; troubleshooting
 isn't guaranteed. See README.txt for setup steps.
@@ -615,18 +624,66 @@ def streamerbot_sha256_b64(s):
     return base64.b64encode(hashlib.sha256(s.encode("utf-8")).digest()).decode()
 
 
+# Best-effort event-type -> (overlay alert kind, default message) for
+# Streamer.bot's built-in per-platform triggers — see streamerbot_loop's
+# own docstring for what "best-effort" means here.
+_STREAMERBOT_ALERT_KIND = {
+    "Follow": "follow", "Sub": "sub", "ReSub": "sub", "GiftSub": "sub",
+    "GiftedSubscriptions": "sub", "NewSponsor": "sub",
+    "Cheer": "cheer", "SuperChat": "cheer", "Raid": "raid",
+}
+_STREAMERBOT_ALERT_KIND_MESSAGE = {
+    "Follow": "just followed!", "Sub": "subscribed!", "ReSub": "resubscribed!",
+    "GiftSub": "gifted a sub!", "GiftedSubscriptions": "gifted subs!",
+    "NewSponsor": "just became a member!", "Cheer": "sent cheer bits!",
+    "SuperChat": "sent a Super Chat!", "Raid": "raided the channel!",
+}
+
+
+def streamerbot_extract_user(data):
+    """Streamer.bot's own event payloads vary by platform/event type
+    (no single confirmed field name), so this tries several plausible
+    ones defensively rather than assuming one — same defensive approach
+    StreamerSuite's own fetch_joystick_identity uses for the same reason
+    (an undocumented response shape)."""
+    user_obj = data.get("user")
+    if isinstance(user_obj, dict):
+        for key in ("display", "displayName", "name", "username"):
+            v = user_obj.get(key)
+            if isinstance(v, str) and v:
+                return v
+    for key in ("displayName", "userName", "user_name", "name"):
+        v = data.get(key)
+        if isinstance(v, str) and v:
+            return v
+    return None
+
+
 def streamerbot_loop():
-    """Relays chat into live_data["latest_chat"] from a Streamer.bot
-    instance already running on the RECIPIENT's own machine (not something
-    this helper starts) — the same connect + salt/challenge auth algorithm
-    as StreamerSuite's own src/lib/streamerbot.ts, verified against a real
+    """Relays chat into live_data["latest_chat"], and real alerts into
+    push_alert("streamerbot", ...), from a Streamer.bot instance already
+    running on the RECIPIENT's own machine (not something this helper
+    starts) — the same connect + salt/challenge auth algorithm as
+    StreamerSuite's own src/lib/streamerbot.ts, verified against a real
     RFC 6455 server during development (see WSClient above). The
     Subscribe request/event shape below is Streamer.bot's own public
     WebSocket API — StreamerSuite's own code only ever calls DoAction, so
-    this specific part (subscribing to receive ChatMessage/Message events,
-    not just send actions) is best-effort against Streamer.bot's public
-    docs, not verified against StreamerSuite's own code the way the
-    connect+auth handshake is."""
+    this specific part (subscribing to receive events, not just send
+    actions) is best-effort against Streamer.bot's public docs, not
+    verified against StreamerSuite's own code the way the connect+auth
+    handshake is.
+
+    Streamer.bot alerts aren't a fixed platform-defined list — they're
+    whatever the STREAMER set up in their own Streamer.bot instance. Two
+    kinds are handled: (1) Streamer.bot's own built-in per-platform
+    triggers (Follow/Sub/Cheer/Raid etc. — subscribed to below alongside
+    chat), which fire regardless of any custom setup, and (2) a "Custom"
+    global event — Streamer.bot's own general-purpose mechanism for a
+    user's Action to broadcast an arbitrary named event with an arbitrary
+    payload, which is the normal way a Streamer.bot user wires up
+    something this helper has no built-in knowledge of. Custom events are
+    parsed generically (whatever name/fields the user's own Action sends)
+    rather than assuming a fixed shape."""
     while True:
         if not any_platform("streamerbot"):
             with STATE_LOCK:
@@ -667,7 +724,12 @@ def streamerbot_loop():
 
                 ws.send_text(json.dumps({
                     "request": "Subscribe", "id": "streamersuite-portable",
-                    "events": {"General": ["Custom"], "Twitch": ["ChatMessage"], "YouTube": ["Message"], "Kick": ["ChatMessage"]},
+                    "events": {
+                        "General": ["Custom"],
+                        "Twitch": ["ChatMessage", "Follow", "Sub", "ReSub", "GiftSub", "Cheer", "Raid"],
+                        "YouTube": ["Message", "NewSponsor", "SuperChat"],
+                        "Kick": ["ChatMessage", "Follow", "Sub", "GiftedSubscriptions"],
+                    },
                 }))
 
                 with STATE_LOCK:
@@ -682,12 +744,35 @@ def streamerbot_loop():
                         event = json.loads(raw)
                     except json.JSONDecodeError:
                         continue
-                    message_obj = (event.get("data") or {}).get("message") or {}
-                    text = message_obj.get("message")
-                    user = (message_obj.get("user") or {}).get("display") or (message_obj.get("user") or {}).get("name")
-                    if text:
+                    src = (event.get("event") or {}).get("source")
+                    evt_type = (event.get("event") or {}).get("type")
+                    data = event.get("data") or {}
+
+                    if evt_type in ("ChatMessage", "Message"):
+                        message_obj = data.get("message") or {}
+                        text = message_obj.get("message")
+                        user = (message_obj.get("user") or {}).get("display") or (message_obj.get("user") or {}).get("name")
+                        if text:
+                            with STATE_LOCK:
+                                STATE["live_data"]["latest_chat"] = f"{user}: {text}" if user else text
+                        continue
+
+                    if src == "General" and evt_type == "Custom":
+                        # Whatever the streamer's own Action broadcasts —
+                        # no fixed shape to assume beyond "some named event".
+                        name = data.get("event") or "custom"
+                        user = streamerbot_extract_user(data)
+                        message = data.get("message") or f"{name} triggered"
                         with STATE_LOCK:
-                            STATE["live_data"]["latest_chat"] = f"{user}: {text}" if user else text
+                            push_alert("streamerbot", {"kind": name, "user": user or "Someone", "message": message})
+                        continue
+
+                    kind = _STREAMERBOT_ALERT_KIND.get(evt_type)
+                    if kind and src in ("Twitch", "Kick", "YouTube"):
+                        user = streamerbot_extract_user(data)
+                        message = _STREAMERBOT_ALERT_KIND_MESSAGE.get(evt_type, "sent an alert!")
+                        with STATE_LOCK:
+                            push_alert("streamerbot", {"kind": kind, "user": user or "Someone", "message": message})
             finally:
                 ws.close()
         except Exception as e:  # noqa: BLE001 - this loop must never die
@@ -922,19 +1007,7 @@ PLATFORM_CARDS = {
         '<button class="secondary" onclick="sendTestAlert()">Send Test Alert</button>'
         '</div>'
     ),
-    "kick": lambda creds: (
-        '<div class="card">'
-        '<h3>Kick <span id="kick-status" class="status disconnected">checking…</span></h3>'
-        '<p class="muted">Paste your own access token and channel slug (the name in your Kick URL). '
-        'Kick\'s API only exposes live viewer count/status this way — no follower/sub totals, '
-        'and no live "follow" alerts.</p>'
-        '<label>Channel Slug</label>'
-        f'<input type="text" id="kickSlug" value="{creds.get("kickSlug", "")}">'
-        '<label>Access Token</label>'
-        f'<input type="password" id="kickToken" value="{creds.get("kickToken", "")}">'
-        '<button onclick="saveCredentials()">Save &amp; Connect</button>'
-        '</div>'
-    ),
+    "kick": lambda creds: kick_card_html(creds),
     "youtube": lambda creds: (
         '<div class="card">'
         '<h3>YouTube <span id="youtube-status" class="status disconnected">checking…</span></h3>'
@@ -979,6 +1052,80 @@ PLATFORM_CARDS = {
 }
 
 
+def kick_webhook_path():
+    return "/kick-webhook"
+
+
+# Event type strings and general shape are best-effort — assembled from
+# public discussion of Kick's webhook events (channel.followed,
+# channel.subscription.new/renewal/gifts, kicks.gifted, chat.message.sent,
+# livestream.status.updated, moderation.banned), not verified against
+# docs.kick.com directly (unreachable — see the "NOT SIGNATURE-VERIFIED"
+# comment at the /kick-webhook route). The exact JSON field names for the
+# user who triggered the event aren't confirmed, so this tries several
+# plausible nested paths defensively rather than assuming one.
+_KICK_EVENT_KIND = {
+    "channel.followed": "follow",
+    "channel.subscription.new": "sub",
+    "channel.subscription.renewal": "sub",
+    "channel.subscription.gifts": "sub",
+    "kicks.gifted": "tip",
+}
+_KICK_EVENT_MESSAGE = {
+    "channel.followed": "just followed!",
+    "channel.subscription.new": "subscribed!",
+    "channel.subscription.renewal": "resubscribed!",
+    "channel.subscription.gifts": "gifted subs!",
+    "kicks.gifted": "sent Kicks!",
+}
+
+
+def kick_parse_webhook_event(event_type, payload):
+    kind = _KICK_EVENT_KIND.get(event_type)
+    if not kind:
+        return None
+    user = None
+    for path in (
+        ("follower", "username"), ("subscriber", "username"), ("gifter", "username"),
+        ("user", "username"), ("broadcaster", "username"),
+    ):
+        node = payload
+        for key in path:
+            node = node.get(key) if isinstance(node, dict) else None
+        if isinstance(node, str) and node:
+            user = node
+            break
+    return {"kind": kind, "user": user or "Someone", "message": _KICK_EVENT_MESSAGE.get(event_type, "sent an alert!")}
+
+
+def kick_card_html(creds):
+    webhook_url = creds.get("kickWebhookUrl", "")
+    return (
+        '<div class="card">'
+        '<h3>Kick <span id="kick-status" class="status disconnected">checking…</span></h3>'
+        '<p class="muted">Paste your own access token and channel slug (the name in your Kick URL). '
+        'Kick\'s API only exposes live viewer count/status this way — no follower/sub totals.</p>'
+        '<label>Channel Slug</label>'
+        f'<input type="text" id="kickSlug" value="{creds.get("kickSlug", "")}">'
+        '<label>Access Token</label>'
+        f'<input type="password" id="kickToken" value="{creds.get("kickToken", "")}">'
+        '<button onclick="saveCredentials()">Save &amp; Connect</button>'
+        '<hr style="border-color:#2a2a2a;margin:16px 0">'
+        '<p class="muted"><strong>Real-time alerts (optional, more setup)</strong> — Kick only pushes '
+        'follow/sub/tip events to a URL reachable from the internet, not to this helper directly '
+        '(which only ever listens on your own machine). Run a tunnel tool (e.g. ngrok, cloudflared) '
+        'pointing at this helper\'s port, paste the tunnel\'s public URL below, then register '
+        f'<code>&lt;your tunnel URL&gt;{kick_webhook_path()}</code> as the Webhook URL in your Kick '
+        'app\'s developer settings.</p>'
+        '<p class="muted" style="color:#facc15">⚠ This endpoint doesn\'t verify Kick\'s webhook '
+        'signature yet — treat your tunnel URL as something to keep private, not something to hand out.</p>'
+        '<label>Tunnel URL</label>'
+        f'<input type="text" id="kickWebhookUrl" placeholder="https://your-tunnel.example.com" value="{webhook_url}">'
+        '<button onclick="saveCredentials()">Save Tunnel URL</button>'
+        '</div>'
+    )
+
+
 def joystick_card_html(creds):
     username = creds.get("joystickUsername", "")
     connected_line = f'<p class="muted">Connected as {username}</p>' if username else ""
@@ -1001,7 +1148,8 @@ PLATFORM_CREDENTIAL_FIELDS = {
     "twitch": ['twitchClientId: document.getElementById("twitchClientId").value',
                'twitchToken: document.getElementById("twitchToken").value'],
     "kick": ['kickSlug: document.getElementById("kickSlug").value',
-             'kickToken: document.getElementById("kickToken").value'],
+             'kickToken: document.getElementById("kickToken").value',
+             'kickWebhookUrl: document.getElementById("kickWebhookUrl").value'],
     "youtube": ['youtubeChannelId: document.getElementById("youtubeChannelId").value',
                 'youtubeApiKey: document.getElementById("youtubeApiKey").value'],
     "chaturbate": ['chaturbateUsername: document.getElementById("chaturbateUsername").value',
@@ -1219,6 +1367,21 @@ class Handler(BaseHTTPRequestHandler):
             # as every real alert.
             with STATE_LOCK:
                 push_alert("twitch", {"kind": "follow", "user": "TestViewer", "message": "just followed! (test)"})
+            self._send_json({"ok": True})
+        elif self.path == kick_webhook_path():
+            # NOT SIGNATURE-VERIFIED. Kick signs webhook deliveries (per
+            # docs.kick.com/events/webhook-security), but that verification
+            # isn't implemented here yet — this was built without being able
+            # to reach docs.kick.com to confirm the exact header names/
+            # algorithm/public-key format, and guessing at crypto
+            # verification is worse than clearly not doing it. Anyone who
+            # learns the recipient's tunnel URL can currently POST a fake
+            # event here. Revisit once those docs are reachable.
+            event_type = self.headers.get("Kick-Event-Type") or payload.get("type") or payload.get("event")
+            alert = kick_parse_webhook_event(event_type, payload)
+            if alert:
+                with STATE_LOCK:
+                    push_alert("kick", alert)
             self._send_json({"ok": True})
         else:
             self._send_json({"error": "not found"}, status=404)

@@ -17,12 +17,17 @@
 # scoped per-overlay (see Push-Alert) -- an overlay only ever receives an
 # alert from a platform its OWN manifest.json actually lists.
 #
-# Kick only exposes live viewer count/status through its public API -- no
-# follower/sub counts or a way to detect a fresh follow, so Kick alerts
-# aren't implemented (see the setup page for status). Joystick.tv needs its
-# own OAuth app (PKCE, no client secret) registered by the recipient, using
-# this helper's own port as the redirect URI -- see the Joystick.tv card's
-# own copy on the setup page.
+# Kick's polling connection (channel slug + token) only gives live viewer
+# count/status -- no follower/sub totals via that path. Kick DOES push real
+# follow/sub/tip events via webhooks, but only to a public URL, which this
+# loopback-only helper isn't -- see the Kick card's "Real-time alerts"
+# section for the tunnel-URL workaround, and the /kick-webhook route for
+# why it's not signature-verified yet (docs.kick.com was unreachable while
+# building this). Joystick.tv needs its own OAuth app (PKCE, no client
+# secret) registered by the recipient, using this helper's own port as the
+# redirect URI -- see the Joystick.tv card's own copy on the setup page.
+# Streamer.bot relays both chat and real alerts (its own built-in triggers
+# plus any "Custom" event a Streamer.bot Action broadcasts).
 #
 # This is provided as-is by whoever gave you this overlay; troubleshooting
 # isn't guaranteed. See README.txt for setup steps.
@@ -69,6 +74,7 @@ $Global:LastFollowerId = $null
 $Global:LastYoutubeCycle = $null
 $Global:LastChaturbateStamp = $null
 $Global:LastJoystickStamp = $null
+$Global:LastStreamerbotStamp = $null
 # Absolute paths of every overlay folder currently being served -- always
 # includes $Here (this folder), plus any other folder that registered with
 # this process.
@@ -165,6 +171,44 @@ function Push-Alert($Platform, $Alert) {
             $Global:AlertQueues[$overlayId].Add($Alert) | Out-Null
         }
     }
+}
+
+# Event type strings and general shape are best-effort -- assembled from
+# public discussion of Kick's webhook events (channel.followed,
+# channel.subscription.new/renewal/gifts, kicks.gifted), not verified
+# against docs.kick.com directly (unreachable -- see the "NOT
+# SIGNATURE-VERIFIED" comment at the /kick-webhook route). The exact JSON
+# field names for the user who triggered the event aren't confirmed, so
+# this tries several plausible nested paths defensively rather than
+# assuming one.
+$Script:KickEventKind = @{
+    "channel.followed" = "follow"
+    "channel.subscription.new" = "sub"
+    "channel.subscription.renewal" = "sub"
+    "channel.subscription.gifts" = "sub"
+    "kicks.gifted" = "tip"
+}
+$Script:KickEventMessage = @{
+    "channel.followed" = "just followed!"
+    "channel.subscription.new" = "subscribed!"
+    "channel.subscription.renewal" = "resubscribed!"
+    "channel.subscription.gifts" = "gifted subs!"
+    "kicks.gifted" = "sent Kicks!"
+}
+
+function Get-KickWebhookAlert($EventType, $Body) {
+    if (-not $EventType -or -not $Script:KickEventKind.ContainsKey($EventType)) { return $null }
+    $user = $null
+    if ($Body) {
+        foreach ($field in @("follower", "subscriber", "gifter", "user", "broadcaster")) {
+            if ($Body.$field -and $Body.$field.username) {
+                $user = $Body.$field.username
+                break
+            }
+        }
+    }
+    if (-not $user) { $user = "Someone" }
+    return @{ kind = $Script:KickEventKind[$EventType]; user = $user; message = $Script:KickEventMessage[$EventType] }
 }
 
 function Test-AnyPlatform($Platform) {
@@ -476,36 +520,103 @@ function Start-StreamerbotLoop {
                 # matches streamerbot.ts's own behavior of proceeding
                 # unauthenticated in that case.
 
+                # Streamer.bot alerts aren't a fixed platform-defined list --
+                # they're whatever the STREAMER set up in their own Streamer.bot
+                # instance. Subscribes to both Streamer.bot's own built-in
+                # per-platform triggers (fire regardless of custom setup) and
+                # "Custom" -- Streamer.bot's general-purpose mechanism for a
+                # user's Action to broadcast an arbitrary named event, parsed
+                # generically below rather than assuming a fixed shape.
                 $subscribeBody = @{
                     request = "Subscribe"; id = "streamersuite-portable"
-                    events = @{ General = @("Custom"); Twitch = @("ChatMessage"); YouTube = @("Message"); Kick = @("ChatMessage") }
+                    events  = @{
+                        General = @("Custom")
+                        Twitch  = @("ChatMessage", "Follow", "Sub", "ReSub", "GiftSub", "Cheer", "Raid")
+                        YouTube = @("Message", "NewSponsor", "SuperChat")
+                        Kick    = @("ChatMessage", "Follow", "Sub", "GiftedSubscriptions")
+                    }
                 } | ConvertTo-Json -Compress -Depth 5
                 Send-WsMessage $socket $subscribeBody
 
                 $state.streamerbotStatus = "connected"
                 ($state | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
 
+                $alertKindByType = @{
+                    Follow = "follow"; Sub = "sub"; ReSub = "sub"; GiftSub = "sub"
+                    GiftedSubscriptions = "sub"; NewSponsor = "sub"
+                    Cheer = "cheer"; SuperChat = "cheer"; Raid = "raid"
+                }
+                $alertMessageByType = @{
+                    Follow = "just followed!"; Sub = "subscribed!"; ReSub = "resubscribed!"
+                    GiftSub = "gifted a sub!"; GiftedSubscriptions = "gifted subs!"
+                    NewSponsor = "just became a member!"; Cheer = "sent cheer bits!"
+                    SuperChat = "sent a Super Chat!"; Raid = "raided the channel!"
+                }
+
+                function Get-StreamerbotUser($Data) {
+                    if ($Data.user) {
+                        foreach ($key in @("display", "displayName", "name", "username")) {
+                            if ($Data.user.$key) { return $Data.user.$key }
+                        }
+                    }
+                    foreach ($key in @("displayName", "userName", "user_name", "name")) {
+                        if ($Data.$key) { return $Data.$key }
+                    }
+                    return $null
+                }
+
                 while ($true) {
                     $raw = Receive-WsMessage $socket
                     if ($null -eq $raw) { throw "Streamer.bot connection closed" }
                     try {
-                        $event = $raw | ConvertFrom-Json
+                        $evt = $raw | ConvertFrom-Json
                     } catch {
                         continue
                     }
-                    $messageObj = $event.data.message
-                    if ($messageObj -and $messageObj.message) {
-                        $user = $messageObj.user.display
-                        if (-not $user) { $user = $messageObj.user.name }
-                        $chatState = @{
-                            streamerbotStatus = "connected"; streamerbotError = ""
-                            latestChat = if ($user) { "$($user): $($messageObj.message)" } else { $messageObj.message }
+                    $src = $evt.event.source
+                    $evtType = $evt.event.type
+                    $data = $evt.data
+
+                    if ($evtType -eq "ChatMessage" -or $evtType -eq "Message") {
+                        $messageObj = $data.message
+                        if ($messageObj -and $messageObj.message) {
+                            $user = $messageObj.user.display
+                            if (-not $user) { $user = $messageObj.user.name }
+                            $chatState = @{
+                                streamerbotStatus = "connected"; streamerbotError = ""
+                                latestChat = if ($user) { "$($user): $($messageObj.message)" } else { $messageObj.message }
+                                alerts = @()
+                            }
+                            ($chatState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
                         }
-                        ($chatState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+                        continue
+                    }
+
+                    if ($src -eq "General" -and $evtType -eq "Custom") {
+                        $name = if ($data.event) { $data.event } else { "custom" }
+                        $user = Get-StreamerbotUser $data
+                        if (-not $user) { $user = "Someone" }
+                        $message = if ($data.message) { $data.message } else { "$name triggered" }
+                        $customState = @{
+                            streamerbotStatus = "connected"; streamerbotError = ""
+                            alerts = @(@{ kind = $name; user = $user; message = $message })
+                        }
+                        ($customState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
+                        continue
+                    }
+
+                    if ($alertKindByType.ContainsKey($evtType) -and @("Twitch", "Kick", "YouTube") -contains $src) {
+                        $user = Get-StreamerbotUser $data
+                        if (-not $user) { $user = "Someone" }
+                        $alertState = @{
+                            streamerbotStatus = "connected"; streamerbotError = ""
+                            alerts = @(@{ kind = $alertKindByType[$evtType]; user = $user; message = $alertMessageByType[$evtType] })
+                        }
+                        ($alertState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
                     }
                 }
             } catch {
-                $errState = @{ streamerbotStatus = "error"; streamerbotError = $_.Exception.Message; latestChat = $null }
+                $errState = @{ streamerbotStatus = "error"; streamerbotError = $_.Exception.Message; latestChat = $null; alerts = @() }
                 ($errState | ConvertTo-Json -Depth 5) | Set-Content -Path $StatePath -Encoding UTF8
             } finally {
                 try { $socket.Dispose() } catch { }
@@ -671,6 +782,13 @@ function Apply-PollState {
             $Global:StreamerbotStatus = $s.streamerbotStatus
             $Global:StreamerbotError = $s.streamerbotError
             if ($s.latestChat) { $Global:LiveData["latest_chat"] = $s.latestChat }
+            $sbStamp = (Get-Item $sbStatePath).LastWriteTimeUtc.Ticks
+            if ($s.alerts -and $sbStamp -ne $Global:LastStreamerbotStamp) {
+                foreach ($a in $s.alerts) {
+                    Push-Alert "streamerbot" @{ kind = $a.kind; user = $a.user; message = $a.message }
+                }
+                $Global:LastStreamerbotStamp = $sbStamp
+            }
         } catch { }
     }
 
@@ -732,17 +850,29 @@ $Script:PlatformCards = @{
         param($Creds)
         $slug = if ($Creds["kickSlug"]) { $Creds["kickSlug"] } else { "" }
         $token = if ($Creds["kickToken"]) { $Creds["kickToken"] } else { "" }
+        $webhookUrl = if ($Creds["kickWebhookUrl"]) { $Creds["kickWebhookUrl"] } else { "" }
         return @"
   <div class="card">
     <h3>Kick <span id="kick-status" class="status disconnected">checking...</span></h3>
     <p class="muted">Paste your own access token and channel slug (the name in your Kick URL).
-      Kick's API only exposes live viewer count/status this way -- no follower/sub totals,
-      and no live "follow" alerts.</p>
+      Kick's API only exposes live viewer count/status this way -- no follower/sub totals.</p>
     <label>Channel Slug</label>
     <input type="text" id="kickSlug" value="$slug">
     <label>Access Token</label>
     <input type="password" id="kickToken" value="$token">
     <button onclick="saveCredentials()">Save &amp; Connect</button>
+    <hr style="border-color:#2a2a2a;margin:16px 0">
+    <p class="muted"><strong>Real-time alerts (optional, more setup)</strong> -- Kick only pushes
+      follow/sub/tip events to a URL reachable from the internet, not to this helper directly
+      (which only ever listens on your own machine). Run a tunnel tool (e.g. ngrok, cloudflared)
+      pointing at this helper's port, paste the tunnel's public URL below, then register
+      <code>&lt;your tunnel URL&gt;/kick-webhook</code> as the Webhook URL in your Kick app's
+      developer settings.</p>
+    <p class="muted" style="color:#facc15">&#9888; This endpoint doesn't verify Kick's webhook
+      signature yet -- treat your tunnel URL as something to keep private, not something to hand out.</p>
+    <label>Tunnel URL</label>
+    <input type="text" id="kickWebhookUrl" placeholder="https://your-tunnel.example.com" value="$webhookUrl">
+    <button onclick="saveCredentials()">Save Tunnel URL</button>
   </div>
 "@
     }
@@ -826,7 +956,7 @@ $Script:PlatformCards = @{
 
 $Script:PlatformCredentialFields = @{
     twitch      = @('twitchClientId: document.getElementById("twitchClientId").value', 'twitchToken: document.getElementById("twitchToken").value')
-    kick        = @('kickSlug: document.getElementById("kickSlug").value', 'kickToken: document.getElementById("kickToken").value')
+    kick        = @('kickSlug: document.getElementById("kickSlug").value', 'kickToken: document.getElementById("kickToken").value', 'kickWebhookUrl: document.getElementById("kickWebhookUrl").value')
     youtube     = @('youtubeChannelId: document.getElementById("youtubeChannelId").value', 'youtubeApiKey: document.getElementById("youtubeApiKey").value')
     chaturbate  = @('chaturbateUsername: document.getElementById("chaturbateUsername").value', 'chaturbateToken: document.getElementById("chaturbateToken").value')
     streamerbot = @('streamerbotHost: document.getElementById("streamerbotHost").value', 'streamerbotPort: document.getElementById("streamerbotPort").value', 'streamerbotPassword: document.getElementById("streamerbotPassword").value')
@@ -1143,6 +1273,7 @@ try {
                 if ($body.twitchToken) { $creds["twitchToken"] = $body.twitchToken }
                 if ($body.kickSlug) { $creds["kickSlug"] = $body.kickSlug }
                 if ($body.kickToken) { $creds["kickToken"] = $body.kickToken }
+                if ($body.kickWebhookUrl) { $creds["kickWebhookUrl"] = $body.kickWebhookUrl }
                 if ($body.youtubeChannelId) { $creds["youtubeChannelId"] = $body.youtubeChannelId }
                 if ($body.youtubeApiKey) { $creds["youtubeApiKey"] = $body.youtubeApiKey }
                 if ($body.chaturbateUsername) { $creds["chaturbateUsername"] = $body.chaturbateUsername }
@@ -1159,6 +1290,27 @@ try {
                 # reaches overlays that actually declare "twitch" -- same
                 # scoping rule as every real alert.
                 Push-Alert "twitch" @{ kind = "follow"; user = "TestViewer"; message = "just followed! (test)" }
+                Send-JsonResponse $response @{ ok = $true }
+                break
+            }
+            { $request.HttpMethod -eq "POST" -and $request.Url.AbsolutePath -eq "/kick-webhook" } {
+                # NOT SIGNATURE-VERIFIED. Kick signs webhook deliveries (per
+                # docs.kick.com/events/webhook-security), but that
+                # verification isn't implemented here yet -- this was built
+                # without being able to reach docs.kick.com to confirm the
+                # exact header names/algorithm/public-key format, and
+                # guessing at crypto verification is worse than clearly not
+                # doing it. Anyone who learns the recipient's tunnel URL can
+                # currently POST a fake event here. Revisit once those docs
+                # are reachable.
+                $reader = New-Object System.IO.StreamReader($request.InputStream)
+                $bodyText = $reader.ReadToEnd()
+                $kickBody = try { $bodyText | ConvertFrom-Json } catch { $null }
+                $eventType = $request.Headers["Kick-Event-Type"]
+                if (-not $eventType -and $kickBody) { $eventType = $kickBody.type }
+                if (-not $eventType -and $kickBody) { $eventType = $kickBody.event }
+                $alert = Get-KickWebhookAlert $eventType $kickBody
+                if ($alert) { Push-Alert "kick" $alert }
                 Send-JsonResponse $response @{ ok = $true }
                 break
             }
