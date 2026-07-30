@@ -1051,26 +1051,29 @@ function twitchBadgeUrl(login, badgeKey) {
 // fill). Detect that on load and flood-fill it to transparent so only the
 // framed subject shows.
 //
-// Deliberately restricted to grayscale (black/white/any shade of gray
-// between) corners only (see isBoxBackgroundColor) — an earlier version
-// accepted ANY uniform corner color, which was too aggressive: Twitch's
-// own default "critter" avatars (colorful character art on a solid
-// colored background, e.g. a green plant creature, a blue globe, a red
-// flame) have uniform-colored corners too, and the flood-fill would leak
-// past the character's anti-aliased silhouette edge into the artwork
-// itself wherever the edge shading was close enough in color to the
-// background — visibly eating chunks out of the image. Real "box baked
-// into the art" cases (the ones this was actually written for) are
-// black/white/gray letterboxing — a saturation check (are R/G/B close to
-// each other, regardless of how light or dark) — rather than checking
-// against two fixed endpoints, so mid-gray letterboxing is caught too,
-// not just near-pure-black or near-pure-white.
+// What actually distinguishes a real "border with solid color bleeding
+// past it" from organic art that shouldn't be touched isn't the
+// background's hue or which platform it came from — it's whether the
+// transition FROM background TO subject is a sharp edge (a real drawn
+// border/outline: color jumps abruptly) or a gradual one (anti-aliased/
+// shaded artwork blending smoothly into the background). A gradual
+// transition is exactly what let earlier color-hue and platform-based
+// restrictions here keep failing: it doesn't fail all at once, it lets
+// the flood-fill leak through wherever a smooth blend happens to pass
+// close enough to the background color to still count as "the same
+// color". So this measures the transition directly: every pixel the
+// flood-fill hits that ISN'T background gets checked for how far its own
+// color actually is from the background — a real border's edge pixels
+// jump most of the way to the subject's own color in one step; a blended
+// edge's pixels sit much closer to the background, right at the fuzzy
+// tolerance boundary. If too large a share of the boundary is that
+// ambiguous/blended kind, the whole pass is treated as unreliable and
+// aborted — restoring the original image untouched — regardless of hue
+// or source platform.
 const BG_COLOR_TOLERANCE = 18; // per-channel distance allowed to still count as "the same background color"
-const BG_SATURATION_TOLERANCE = 14; // max spread between a corner's R/G/B channels to still count as "grayscale"
+const SHARP_BOUNDARY_DISTANCE = 45; // max-channel color distance from bg a non-matching boundary pixel needs to count as a real, sharp edge rather than a blended one
+const MAX_AMBIGUOUS_BOUNDARY_FRACTION = 0.15; // how much of the total boundary is allowed to be the blended/ambiguous kind before the whole pass is distrusted
 const MAX_BOX_DEPTH_FRACTION = 0.28; // how far inward (as a fraction of the shorter side) a real letterbox margin is allowed to reach before it's treated as a leak into the subject
-function isBoxBackgroundColor(c) {
-  return Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]) <= BG_SATURATION_TOLERANCE;
-}
 function stripAvatarBoxBackground(img) {
   const run = () => {
     try {
@@ -1092,29 +1095,31 @@ function stripAvatarBoxBackground(img) {
         Math.abs(a[2] - b[2]) <= BG_COLOR_TOLERANCE;
       const corners = [at(0, 0), at(w - 1, 0), at(0, h - 1), at(w - 1, h - 1)];
       const bg = corners[0];
-      if (!isBoxBackgroundColor(bg)) return; // colorful corner — likely real avatar art, not a letterboxed box
       if (!corners.every((c) => closeTo(c, bg))) return; // corners disagree — no uniform box, leave untouched
       const matches = (c) => closeTo(c, bg);
+      const boundaryDistance = (c) => Math.max(Math.abs(c[0] - bg[0]), Math.abs(c[1] - bg[1]), Math.abs(c[2] - bg[2]));
       // Flood-fill from the border inward so we only clear the connected
       // background box, not similarly-colored pixels inside the artwork itself
       // (a shaped border/frame around the subject stops the fill at its edge).
       //
-      // Safety net beyond the grayscale color gate above: a real letterboxed
-      // box is just a margin around the subject — it never reaches deep
-      // toward the image's center. A leak (the fill sneaking past the
-      // subject's anti-aliased edge into the artwork itself, e.g. through a
-      // shading gradient close enough to the background color) typically
-      // does reach deep, following the character's own silhouette. Track
-      // the deepest point any filled pixel reaches and, if it crosses
-      // MAX_BOX_DEPTH_FRACTION of the image's shorter side, treat the whole
-      // pass as a leak and abort — restoring the original image untouched
-      // rather than applying a partial, possibly-corrupted strip.
+      // Two independent checks on top of the flood-fill itself, both aimed
+      // at the same failure mode (a smooth/blended edge letting the fill
+      // leak into the subject) from different angles:
+      // - Boundary sharpness (see the comment above this function): every
+      //   non-matching pixel the fill actually touches gets scored as
+      //   sharp or ambiguous; too much ambiguous boundary aborts the pass.
+      // - Depth: a real letterboxed margin never reaches deep toward the
+      //   image's center the way a leak following the subject's own
+      //   silhouette typically does — MAX_BOX_DEPTH_FRACTION catches leaks
+      //   that happen to keep a sharp-enough edge the whole way in.
       const visited = new Uint8Array(w * h);
       const filled = [];
       const stack = [];
       for (let x = 0; x < w; x++) { stack.push([x, 0]); stack.push([x, h - 1]); }
       for (let y = 0; y < h; y++) { stack.push([0, y]); stack.push([w - 1, y]); }
       let leaked = false;
+      let sharpBoundary = 0;
+      let ambiguousBoundary = 0;
       const maxDepth = Math.min(w, h) * MAX_BOX_DEPTH_FRACTION;
       while (stack.length) {
         const [x, y] = stack.pop();
@@ -1122,13 +1127,20 @@ function stripAvatarBoxBackground(img) {
         const idx = y * w + x;
         if (visited[idx]) continue;
         visited[idx] = 1;
-        if (!matches(at(x, y))) continue;
+        const c = at(x, y);
+        if (!matches(c)) {
+          if (boundaryDistance(c) >= SHARP_BOUNDARY_DISTANCE) sharpBoundary++;
+          else ambiguousBoundary++;
+          continue;
+        }
         const depth = Math.min(x, y, w - 1 - x, h - 1 - y);
         if (depth > maxDepth) { leaked = true; break; }
         filled.push(idx);
         stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
       }
-      if (leaked) return; // looks like it ate into the subject — leave the original image untouched
+      if (leaked) return; // looks like it reached too deep into the subject — leave the original image untouched
+      const totalBoundary = sharpBoundary + ambiguousBoundary;
+      if (totalBoundary > 0 && ambiguousBoundary / totalBoundary > MAX_AMBIGUOUS_BOUNDARY_FRACTION) return; // edge looks blended/anti-aliased, not a real drawn border — leave untouched
       for (const idx of filled) px[idx * 4 + 3] = 0;
       ctx.putImageData(data, 0, 0);
       img.src = canvas.toDataURL("image/png");
@@ -1176,17 +1188,7 @@ function avatarNode(m) {
     };
     img.src = src;
     img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
-    // Twitch never actually needs this: its own default "critter" avatars
-    // are excluded server-side already (see the user-default-pictures
-    // filter in multichat.rs, which swaps them for initials instead of
-    // ever showing the image), and every corruption case actually found
-    // in practice has been a real Twitch avatar whose organic silhouette
-    // defeated the pixel heuristics below despite several rounds of
-    // tightening them — deciding by platform (was this feature ever
-    // actually built/needed for this source?) beats trying to guess
-    // per-image from pixels alone. Left on for Kick/other sources, which
-    // is what this was actually written for.
-    if (m.platform !== "twitch") stripAvatarBoxBackground(img);
+    stripAvatarBoxBackground(img);
   };
   const swapToImg = (placeholder, src) => {
     const img = el("img", "cv-avatar");
