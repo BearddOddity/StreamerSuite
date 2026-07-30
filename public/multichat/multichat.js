@@ -507,9 +507,23 @@ const spotifyOembedCache = new Map();  // spotify url -> oEmbed response | null
 const discordInviteCache = new Map();  // invite code -> invite response | null
 const twitchChannelPreviewCache = new Map(); // login(lower) -> preview | null
 
-function linkPreviewWrap(kind, tagText, url) {
+// tagIcon is either a trusted SVG string (starts with "<svg") or a plain
+// emoji character for the handful of platforms with no drawn brand mark in
+// this file yet (Bluesky/Steam/TikTok) — both render in the same small
+// icon slot so every platform's tag row looks the same regardless of
+// which kind of icon it has. Previously each tag was a single string with
+// an emoji glued onto the front (e.g. "𝕏 X", which rendered as a visibly
+// broken double-X for X/Twitter since 𝕏 is a rarely-supported Unicode
+// math symbol, not a normal emoji) — icon and label are now always two
+// separate, independently styled elements.
+function linkPreviewWrap(kind, tagIcon, tagLabel, url) {
   const wrap = el("div", `cv-linkpreview cv-linkpreview-${kind}`);
-  wrap.append(el("div", "cv-linkpreview-tag", tagText));
+  const tag = el("div", "cv-linkpreview-tag");
+  const tagIconEl = el("span", "cv-linkpreview-tag-icon");
+  if (typeof tagIcon === "string" && tagIcon.trim().startsWith("<svg")) tagIconEl.innerHTML = tagIcon; // trusted constant, never user-supplied
+  else tagIconEl.textContent = tagIcon;
+  tag.append(tagIconEl, el("span", "cv-linkpreview-tag-label", tagLabel));
+  wrap.append(tag);
   const body = el("a", "cv-linkpreview-body");
   body.href = url;
   body.dataset.openUrl = url;
@@ -538,7 +552,7 @@ function fillLinkPreview(body, data, buildContent, fallbackLabel, fallbackIconSv
 
 function linkPreviewYoutube(videoId, url) {
   const target = url || `https://youtu.be/${videoId}`;
-  const { wrap, body } = linkPreviewWrap("youtube", "▶ YouTube", target);
+  const { wrap, body } = linkPreviewWrap("youtube", YOUTUBE_SVG, "YouTube", target);
   const apply = data => fillLinkPreview(body, data, d => {
     const img = el("img", "cv-linkpreview-thumb");
     img.src = d.thumbnail_url; img.alt = d.title || "YouTube video"; img.loading = "lazy";
@@ -561,8 +575,8 @@ function linkPreviewYoutube(videoId, url) {
 // preview, nobody gets an autoplaying widget hijacking the feed.
 function linkPreviewSpotify(kind, id, url) {
   const target = url || `https://open.spotify.com/${kind}/${id}`;
-  const tagText = { track: "♫ Spotify Track", album: "♫ Spotify Album", playlist: "♫ Spotify Playlist", episode: "♫ Spotify Episode", show: "♫ Spotify Podcast" }[kind] || "♫ Spotify";
-  const { wrap, body } = linkPreviewWrap("spotify", tagText, target);
+  const tagText = { track: "Spotify Track", album: "Spotify Album", playlist: "Spotify Playlist", episode: "Spotify Episode", show: "Spotify Podcast" }[kind] || "Spotify";
+  const { wrap, body } = linkPreviewWrap("spotify", SPOTIFY_ICON_SVG, tagText, target);
   const apply = data => fillLinkPreview(body, data, d => {
     const img = el("img", "cv-linkpreview-thumb");
     img.src = d.thumbnail_url; img.alt = d.title || "Spotify"; img.loading = "lazy";
@@ -581,7 +595,7 @@ function linkPreviewSpotify(kind, id, url) {
 
 function linkPreviewDiscordInvite(code, url) {
   const target = url || `https://discord.gg/${code}`;
-  const { wrap, body } = linkPreviewWrap("discord", "🔗 Discord Invite", target);
+  const { wrap, body } = linkPreviewWrap("discord", DISCORD_ICON_SVG, "Discord Invite", target);
   const apply = data => fillLinkPreview(body, data, d => {
     const guild = d.guild || {};
     let icon;
@@ -616,7 +630,7 @@ function linkPreviewDiscordInvite(code, url) {
 function linkPreviewTwitchChannel(login, url) {
   if (!tauriInvoke || !oauthAccounts.twitch) return null;
   const target = url || `https://twitch.tv/${login}`;
-  const { wrap, body } = linkPreviewWrap("twitch", "🎥 Twitch", target);
+  const { wrap, body } = linkPreviewWrap("twitch", TWITCH_SVG, "Twitch", target);
   const apply = data => fillLinkPreview(body, data, d => {
     const img = el("img", "cv-linkpreview-thumb");
     img.src = d.thumbnail_url; img.alt = d.title || d.display_name; img.loading = "lazy";
@@ -645,7 +659,7 @@ function linkPreviewTwitchChannel(login, url) {
 // rather than fetching a third-party favicon for the link — no outside
 // request, no risk of grabbing the wrong site's icon.
 function linkPreviewStaticChip(kind, tag, title, sub, url, fallbackLetter, iconSvg) {
-  const { wrap, body } = linkPreviewWrap(kind, tag, url);
+  const { wrap, body } = linkPreviewWrap(kind, iconSvg || fallbackLetter, tag, url);
   body.innerHTML = "";
   const icon = el("div", "cv-linkpreview-thumb cv-linkpreview-thumb-round cv-linkpreview-fallback");
   if (iconSvg) icon.innerHTML = iconSvg; // trusted constant, never user-supplied
@@ -656,52 +670,52 @@ function linkPreviewStaticChip(kind, tag, title, sub, url, fallbackLetter, iconS
   return wrap;
 }
 function linkPreviewPrimeGaming(url) {
-  return linkPreviewStaticChip("prime", "🎮 Prime Gaming", "Prime Gaming", "Open link ↗", url, "P", PRIME_GAMING_SVG);
+  return linkPreviewStaticChip("prime", "Prime Gaming", "Prime Gaming", "Open link ↗", url, "P", PRIME_GAMING_SVG);
 }
 // X has had no public, unauthenticated profile-info API since 2023 — static
 // chip only, same reasoning as Prime Gaming above.
 function linkPreviewX(handle, url) {
-  return linkPreviewStaticChip("x", "𝕏 X", `@${handle}`, "Open profile ↗", url, "𝕏", X_ICON_SVG);
+  return linkPreviewStaticChip("x", "X", `@${handle}`, "Open profile ↗", url, "𝕏", X_ICON_SVG);
 }
 // YouTube's oEmbed only covers video/playlist URLs, not channel pages —
 // static chip for the same reason X is.
 function linkPreviewYoutubeChannel(handle, url) {
-  return linkPreviewStaticChip("youtube", "▶ YouTube", `@${handle}`, "Open channel ↗", url, "▶", YOUTUBE_SVG);
+  return linkPreviewStaticChip("youtube", "YouTube", `@${handle}`, "Open channel ↗", url, "▶", YOUTUBE_SVG);
 }
 // Ko-fi, Fourthwall, Streamlabs/StreamElements tip pages, Patreon, Throne,
 // and Instagram all have no public unauthenticated API to pull a real
 // preview from (confirmed for each before building this) — static chips.
 function linkPreviewKofi(handle, url) {
-  return linkPreviewStaticChip("kofi", "☕ Ko-fi", `@${handle}`, "Support on Ko-fi ↗", url, "K", KOFI_SVG);
+  return linkPreviewStaticChip("kofi", "Ko-fi", `@${handle}`, "Support on Ko-fi ↗", url, "K", KOFI_SVG);
 }
 function linkPreviewFourthwall(url) {
-  return linkPreviewStaticChip("fourthwall", "🛍️ Fourthwall", "Fourthwall Shop", "Open shop ↗", url, "4W", FOURTHWALL_SVG);
+  return linkPreviewStaticChip("fourthwall", "Fourthwall", "Fourthwall Shop", "Open shop ↗", url, "4W", FOURTHWALL_SVG);
 }
 function linkPreviewStreamlabsTip(handle, url) {
-  return linkPreviewStaticChip("streamlabs", "💜 Streamlabs", `Tip @${handle}`, "Open tip page ↗", url, "S", STREAMLABS_SVG);
+  return linkPreviewStaticChip("streamlabs", "Streamlabs", `Tip @${handle}`, "Open tip page ↗", url, "S", STREAMLABS_SVG);
 }
 function linkPreviewStreamElementsTip(handle, url) {
-  return linkPreviewStaticChip("streamelements", "💚 StreamElements", `Tip @${handle}`, "Open tip page ↗", url, "SE", STREAMELEMENTS_SVG);
+  return linkPreviewStaticChip("streamelements", "StreamElements", `Tip @${handle}`, "Open tip page ↗", url, "SE", STREAMELEMENTS_SVG);
 }
 function linkPreviewPatreon(handle, url) {
-  return linkPreviewStaticChip("patreon", "🧡 Patreon", `@${handle}`, "Support on Patreon ↗", url, "P", PATREON_SVG);
+  return linkPreviewStaticChip("patreon", "Patreon", `@${handle}`, "Support on Patreon ↗", url, "P", PATREON_SVG);
 }
 function linkPreviewThrone(handle, url) {
-  return linkPreviewStaticChip("throne", "👑 Throne", `@${handle}`, "Open wishlist ↗", url, "T", THRONE_SVG);
+  return linkPreviewStaticChip("throne", "Throne", `@${handle}`, "Open wishlist ↗", url, "T", THRONE_SVG);
 }
 function linkPreviewInstagram(handle, url) {
-  return linkPreviewStaticChip("instagram", "📷 Instagram", `@${handle}`, "Open profile ↗", url, "IG", INSTAGRAM_SVG);
+  return linkPreviewStaticChip("instagram", "Instagram", `@${handle}`, "Open profile ↗", url, "IG", INSTAGRAM_SVG);
 }
 // Linktree has no public unauthenticated API either — static chip.
 function linkPreviewLinktree(handle, url) {
-  return linkPreviewStaticChip("linktree", "🌳 Linktree", `@${handle}`, "Open links ↗", url, "LT", LINKTREE_SVG);
+  return linkPreviewStaticChip("linktree", "Linktree", `@${handle}`, "Open links ↗", url, "LT", LINKTREE_SVG);
 }
 
 // Bluesky's AT Protocol AppView is genuinely public/unauthenticated — real
 // avatar + display name, same fetch-then-fallback pattern as TikTok above.
 const bskyProfileCache = new Map(); // handle(lower) -> profile | null
 function linkPreviewBluesky(handle, url) {
-  const { wrap, body } = linkPreviewWrap("bluesky", "🦋 Bluesky", url);
+  const { wrap, body } = linkPreviewWrap("bluesky", "🦋", "Bluesky", url);
   const apply = data => fillLinkPreview(body, data, d => {
     let icon;
     if (d.avatar) {
@@ -727,7 +741,7 @@ function linkPreviewBluesky(handle, url) {
 // Steam's app-details endpoint is also genuinely public/unauthenticated.
 const steamAppCache = new Map(); // appid -> app data | null
 function linkPreviewSteam(appid, url) {
-  const { wrap, body } = linkPreviewWrap("steam", "🎮 Steam", url);
+  const { wrap, body } = linkPreviewWrap("steam", "🎮", "Steam", url);
   const apply = data => fillLinkPreview(body, data, d => {
     const img = el("img", "cv-linkpreview-thumb");
     img.src = d.header_image; img.alt = d.name; img.loading = "lazy";
@@ -755,7 +769,7 @@ function linkPreviewSteam(appid, url) {
 // loading-then-fallback pattern as the YouTube/Discord previews above.
 const tiktokOembedCache = new Map(); // handle(lower) -> oEmbed response | null
 function linkPreviewTikTok(handle, url) {
-  const { wrap, body } = linkPreviewWrap("tiktok", "🎵 TikTok", url);
+  const { wrap, body } = linkPreviewWrap("tiktok", "🎵", "TikTok", url);
   const apply = data => fillLinkPreview(body, data, d => {
     const img = el("img", "cv-linkpreview-thumb cv-linkpreview-thumb-round");
     img.src = d.thumbnail_url; img.alt = d.author_name || `@${handle}`; img.loading = "lazy";
