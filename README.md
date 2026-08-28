@@ -1,4 +1,4 @@
-# StreamerSuite
+# StreamerSuite (WORK IN PROGRESS)
 
 Every tool a streamer needs, in one launcher — chat, alerts, overlays, scene
 control, stats, and automatic category switching — running locally on your own
